@@ -137,7 +137,7 @@ void US_Task(void)
  * 参数:   无
  * 返回值: 无
  * 说明:   根据超声波距离判断车位是否有车
- *         距离 < 30cm 认为有车
+ *         距离 < 100cm 认为有车
  *         连续占用超过24小时认为疑似僵尸车
  ****************************************************************************/
 void ParkingStatus_Check(void)
@@ -175,6 +175,7 @@ void ParkingStatus_Check(void)
                     if (OccupiedTime > 10)               /* 演示用：10秒变僵尸车 */
                     {
                         ParkStatus = PARK_ZOMBIE;
+
                     }
                 }
                 break;
@@ -241,7 +242,7 @@ void OLED_Task(void)
         switch (ParkStatus)
         {
             case PARK_IDLE:
-                OLED_Printf(48, 6, "空闲");
+                OLED_Printf(48, 6, "空闲     ");
                 break;
             case PARK_OCCUPIED:
                 OLED_Printf(48, 6, "有车 %3ds", OccupiedTime);
@@ -250,7 +251,7 @@ void OLED_Task(void)
                 OLED_Printf(48, 6, "僵尸车   ", OccupiedTime);
                 break;
             default:
-                OLED_Printf(48, 6, "未知");
+                OLED_Printf(48, 6, "未知     ");
                 break;
         }
         
