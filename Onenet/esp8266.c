@@ -232,42 +232,31 @@ void ESP8266_SendData(unsigned char *data, unsigned short len)
 
 /****************************************************************************
  * 函数名: ESP8266_GetIPD
- * 功能:   获取平台返回的数据
- * 参数:   timeOut - 等待时间(单位:5ms)
- * 返回值: 平台返回的原始数据指针(跳过IPD头), NULL表示超时
+ * 功能:   获取平台返回的数据(非阻塞)
+ * 参数:   timeOut - 保留参数(未使用,兼容旧接口)
+ * 返回值: 平台返回的原始数据指针(跳过IPD头), NULL表示暂无数据
  * 说明:   ESP8266返回格式: "+IPD,x:yyy"
  *         x是数据长度, yyy是实际数据内容
+ *         非阻塞版本,每次调用立即返回,不再DelayXms等待
  ****************************************************************************/
 unsigned char *ESP8266_GetIPD(unsigned short timeOut)
 {
     char *ptrIPD = NULL;
 
-    do
+    if (ESP8266_WaitRecive() == REV_OK)
     {
-        if (ESP8266_WaitRecive() == REV_OK)
+        ESP8266_CopyToLineBuf();
+        ptrIPD = strstr((char *)esp8266_lineBuf, "IPD,");
+        if (ptrIPD != NULL)
         {
-            ESP8266_CopyToLineBuf();
-            ptrIPD = strstr((char *)esp8266_lineBuf, "IPD,");
-            if (ptrIPD == NULL)
+            ptrIPD = strchr(ptrIPD, ':');
+            if (ptrIPD != NULL)
             {
-                // 未找到IPD头,继续等待
-            }
-            else
-            {
-                ptrIPD = strchr(ptrIPD, ':');
-                if (ptrIPD != NULL)
-                {
-                    ptrIPD++;
-                    return (unsigned char *)(ptrIPD);
-                }
-                else
-                    return NULL;
+                ptrIPD++;
+                return (unsigned char *)(ptrIPD);
             }
         }
-
-        DelayXms(5);
-        timeOut--;
-    } while (timeOut > 0);
+    }
 
     return NULL;
 }

@@ -91,9 +91,8 @@ void BSP_Init(void)
  * 功能:   超声波传感器业务任务函数
  * 参数:   无
  * 返回值: 无
- * 说明:   包含非阻塞计时、移动平均滤波和距离上限处理
- *         超过400cm时设置为380cm
- *         内部每500ms自动更新一次数据
+ * 说明:   10次移动平均滤波,超过400cm时设置为380cm
+ *         内部每200ms自动更新一次数据
  *         直接修改全局变量Distance
  ****************************************************************************/
 void US_Task(void)
@@ -142,7 +141,7 @@ void US_Task(void)
  ****************************************************************************/
 void ParkingStatus_Check(void)
 {
-    #define PARK_CHECK_INTERVAL 200
+    #define PARK_CHECK_INTERVAL 300
     #define DIST_THRESHOLD_CM 100
     static uint32_t lastCheckTick = 0;
     
@@ -362,7 +361,7 @@ int main(void)
     /* OLED显示: 网络连接成功 */
     OLED_Clear();
     OLED_ShowCH(0, 0, (u8 *)"网络连接成功"); 
-    DelayXms(1000);
+    DelayXms(500);
     /* 清空OLED，准备进入主界面 */
     OLED_Clear();
 

@@ -60,8 +60,15 @@ _Bool OneNet_DevLink(void)
     {
         // 发送连接报文到ESP8266
         ESP8266_SendData(mqttPacket._data, mqttPacket._len);
-        // 等待接收平台响应(最大等待250×5ms)
-        dataPtr = ESP8266_GetIPD(250);
+        // 轮询等待平台CONNACK响应(超时1.25秒)
+        {
+            uint32_t connStartTick = Get_Tick();
+            do {
+                dataPtr = ESP8266_GetIPD(0);
+                if (dataPtr != NULL) break;
+                DelayXms(5);
+            } while (Get_Tick() - connStartTick < 1250);
+        }
 
         // 检查是否收到响应数据
         if (dataPtr != NULL)

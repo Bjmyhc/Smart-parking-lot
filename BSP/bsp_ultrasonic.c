@@ -25,6 +25,7 @@
 
 #include "bsp_ultrasonic.h"
 #include "bsp_delay.h"
+#include "bsp_usart.h"
 
 
 
@@ -123,6 +124,8 @@ uint16_t US_GetDistance(void)
     uint16_t GoBackTime = TIM_GetCapture2(TIM1) - TIM_GetCapture1(TIM1);
 
     float distance = 0.5f * 340.0f * GoBackTime * 1e-4f;
-
+	
+    Usart_Printf(USART_DEBUG, "Distance:%.3fcm", distance);
+	
     return (uint16_t)distance;
 }
