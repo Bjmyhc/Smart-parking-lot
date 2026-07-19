@@ -560,6 +560,11 @@
               <FileType>5</FileType>
               <FilePath>..\..\Main\stm32f10x_it.h</FilePath>
             </File>
+            <File>
+              <FileName>device_config.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>..\..\Main\device_config.h</FilePath>
+            </File>
           </Files>
         </Group>
         <Group>

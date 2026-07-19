@@ -29,20 +29,11 @@
 #include <stdio.h>
 #include "cJSON.h"
 
-/* 产品ID */
-#define PROID     "53BV12EYcY"
+/* LedEnable全局变量(定义在main.c中) */
+extern uint8_t LEDEnable;
 
-/* 设备鉴权Token */
-#define TOKEN     "version=2018-10-31&res=products%2F53BV12EYcY%2Fdevices%2Fpark1&et=1815919855&method=md5&sign=WSMSUPJ7K3%2B%2ByxiohKCfFQ%3D%3D"
-
-/* 设备名称 */
-#define DEVID     "park1"
-
-/* 属性设置响应主题 */
-const char PropertySetReplyTopic[] = "$sys/53BV12EYcY/park1/thing/property/set_reply";
-
-/* 属性上报主题 */
-const char PropertyPostTopic[] = "$sys/53BV12EYcY/park1/thing/property/post";
+/* 设备配置(PROID, DEVID, TOKEN, 通信主题) */
+#include "device_config.h"
 
 /****************************************************************************
  * 函数名: OneNet_DevLink
@@ -176,7 +167,7 @@ void OneNet_SendPropertyReply(const char *id, int code, const char *msg)
     Usart_Printf(USART_DEBUG, "Property Reply: %s\r\n", replyBuf);
 
     // 发布到属性设置响应主题
-    OneNet_Publish(PropertySetReplyTopic, replyBuf);
+    OneNet_Publish(TOPIC_PROPERTY_SET_REPLY, replyBuf);
 }
 
 /****************************************************************************
@@ -271,7 +262,13 @@ void OneNet_RevPro(unsigned char *cmd)
                     }
                     else
                     {
-                        // TODO: 在此添加属性设置的具体处理逻辑
+                        /* 处理LedEnable属性设置 */
+                        cJSON *ledEnableJson = cJSON_GetObjectItem(params_json, "LedEnable");
+                        if (ledEnableJson != NULL)
+                        {
+                            LEDEnable = ledEnableJson->valueint;
+                            Usart_Printf(USART_DEBUG, "LEDEnable set to: %d\r\n", LEDEnable);
+                        }
                     }
                 }
 

@@ -19,6 +19,16 @@
 
 #include "stm32f10x.h"
 
+/* 触发引脚(Trig) - PA0 */
+#define US_TRIG_CLK     RCC_APB2Periph_GPIOB
+#define US_TRIG_PORT    GPIOB
+#define US_TRIG_PIN     GPIO_Pin_15
+
+/* 回波引脚(Echo) - PA8 (TIM1_CH1输入捕获) */
+#define US_ECHO_CLK     RCC_APB2Periph_GPIOA
+#define US_ECHO_PORT    GPIOA
+#define US_ECHO_PIN     GPIO_Pin_8
+
 /****************************************************************************
  * 函数名: US_Init
  * 功能:   初始化超声波传感器

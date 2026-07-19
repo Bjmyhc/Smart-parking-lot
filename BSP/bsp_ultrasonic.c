@@ -47,13 +47,13 @@ void US_Init(void)
     TIM_BaseInitStruct.TIM_RepetitionCounter = 0;
     TIM_TimeBaseInit(TIM1, &TIM_BaseInitStruct);
 
-    RCC_APB2PeriphClockCmd(RCC_APB2Periph_GPIOA, ENABLE);
+    RCC_APB2PeriphClockCmd(US_ECHO_CLK, ENABLE);
 
     GPIO_InitTypeDef GPIO_InitStruct;
 
     GPIO_InitStruct.GPIO_Mode = GPIO_Mode_IN_FLOATING;
-    GPIO_InitStruct.GPIO_Pin = GPIO_Pin_8;
-    GPIO_Init(GPIOA, &GPIO_InitStruct);
+    GPIO_InitStruct.GPIO_Pin = US_ECHO_PIN;
+    GPIO_Init(US_ECHO_PORT, &GPIO_InitStruct);
 
     TIM_ICInitTypeDef IC_InitStruct;
     TIM_ICStructInit(&IC_InitStruct);
@@ -73,9 +73,9 @@ void US_Init(void)
     TIM_ICInit(TIM1, &IC_InitStruct);
 
     GPIO_InitStruct.GPIO_Mode = GPIO_Mode_Out_PP;
-    GPIO_InitStruct.GPIO_Pin = GPIO_Pin_0;
+    GPIO_InitStruct.GPIO_Pin = US_TRIG_PIN;
     GPIO_InitStruct.GPIO_Speed = GPIO_Speed_10MHz;
-    GPIO_Init(GPIOA, &GPIO_InitStruct);
+    GPIO_Init(US_TRIG_PORT, &GPIO_InitStruct);
 }
 
 /****************************************************************************
@@ -94,9 +94,9 @@ uint16_t US_GetDistance(void)
 
     TIM_Cmd(TIM1, ENABLE);
 
-    GPIO_SetBits(GPIOA, GPIO_Pin_0);
+    GPIO_SetBits(US_TRIG_PORT, US_TRIG_PIN);
     DelayXus(15);
-    GPIO_ResetBits(GPIOA, GPIO_Pin_0);
+    GPIO_ResetBits(US_TRIG_PORT, US_TRIG_PIN);
 
     uint32_t startTime = Get_Tick();
     while (TIM_GetFlagStatus(TIM1, TIM_FLAG_CC1) == RESET)

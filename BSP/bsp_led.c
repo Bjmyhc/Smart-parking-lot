@@ -15,6 +15,8 @@
 
 #include "bsp_led.h"
 
+static uint8_t ledState = 0;  /* LED状态: 0=熄灭, 1=点亮 */
+
 /****************************************************************************
  * 函数名: LED_Init
  * 功能:   初始化LED指示灯
@@ -47,6 +49,7 @@ void LED_Init(void)
 void LED_ON(void)
 {
     GPIO_ResetBits(LED_GPIO_PORT, LED_GPIO_PIN);
+    ledState = 1;
 }
 
 /****************************************************************************
@@ -59,4 +62,16 @@ void LED_ON(void)
 void LED_OFF(void)
 {
     GPIO_SetBits(LED_GPIO_PORT, LED_GPIO_PIN);
+    ledState = 0;
+}
+
+/****************************************************************************
+ * 函数名: LED_GetState
+ * 功能:   获取LED状态
+ * 参数:   无
+ * 返回值: 0=熄灭, 1=点亮
+ ****************************************************************************/
+uint8_t LED_GetState(void)
+{
+    return ledState;
 }

@@ -37,6 +37,7 @@
 
 #include "esp8266.h"
 #include "onenet.h"
+#include "device_config.h"
 
 /* 定时刷新间隔定义 */
 #define UPLOAD_INTERVAL          5000    /* 数据上传间隔(ms) */
@@ -45,10 +46,10 @@
 char PublishBuf[256];
 
 /* 属性上报主题 */
-const char PubTopic[] = "$sys/53BV12EYcY/park1/thing/property/post";
+const char PubTopic[] = TOPIC_PROPERTY_POST;
 
 /* 属性设置订阅主题数组 */
-const char *SubTopic[] = {"$sys/53BV12EYcY/park1/thing/property/set"};
+const char *SubTopic[] = {TOPIC_PROPERTY_SET};
 
 /* ESP8266接收到的数据指针 */
 unsigned char *pData = NULL;
@@ -65,6 +66,9 @@ uint32_t OccupiedTime = 0;
 
 /* 上次车位状态变化时间戳 */
 uint32_t LastStatusChangeTick = 0;
+
+/* LED使能标志: 0=云端禁用, 1=云端启用(本地自动控制) */
+uint8_t LEDEnable = 1;
 
 /****************************************************************************
  * 函数名: BSP_Init
@@ -139,11 +143,12 @@ void US_Task(void)
 void ParkingStatus_Check(void)
 {
     #define PARK_CHECK_INTERVAL 500
+    #define DIST_THRESHOLD_CM 100
     static uint32_t lastCheckTick = 0;
     
     if (Get_Tick() - lastCheckTick >= PARK_CHECK_INTERVAL)
     {
-        uint8_t carPresent = (Distance > 0 && Distance < 30) ? 1 : 0;
+        uint8_t carPresent = (Distance > 0 && Distance < DIST_THRESHOLD_CM) ? 1 : 0;
         
         switch (ParkStatus)
         {
@@ -186,6 +191,30 @@ void ParkingStatus_Check(void)
         }
         
         lastCheckTick = Get_Tick();
+    }
+}
+
+/****************************************************************************
+ * 函数名: LED_Task
+ * 功能:   LED控制任务函数
+ * 参数:   无
+ * 返回值: 无
+ * 说明:   云端使能(LEDEnable=1)时，本地根据状态自动控制LED
+ *         僵尸车→点亮, 其他→熄灭
+ *         云端禁用(LEDEnable=0)时，强制熄灭LED
+ ****************************************************************************/
+void LED_Task(void)
+{
+    if (LEDEnable)
+    {
+        if (ParkStatus == PARK_ZOMBIE)
+            LED_ON();
+        else
+            LED_OFF();
+    }
+    else
+    {
+        LED_OFF();
     }
 }
 
@@ -240,6 +269,8 @@ void OLED_Task(void)
  *   GeoMagnetic:   地磁传感器采样值
  *   Ultrasonic:    超声波距离值(cm)
  *   OccupiedTime:  连续占用时间(秒)
+ *   LED:           LED实际状态 (true=点亮, false=熄灭, 布尔类型)
+ *   LedEnable:     云端使能标志 (true=启用, false=禁用, 布尔类型)
  ****************************************************************************/
 void GenerateParkingData(void)
 {
@@ -248,12 +279,16 @@ void GenerateParkingData(void)
             "\"ParkStatus\":{\"value\":%d},"
             "\"GeoMagnetic\":{\"value\":%d},"
             "\"Ultrasonic\":{\"value\":%d},"
-            "\"OccupiedTime\":{\"value\":%d}}}",
+            "\"OccupiedTime\":{\"value\":%d},"
+             "\"LED\":{\"value\":%s},"
+             "\"LedEnable\":{\"value\":%s}}}",
             (unsigned int)Get_Tick(),
             ParkStatus,
             0,
             Distance,
-            OccupiedTime);
+            OccupiedTime,
+            LED_GetState() ? "true" : "false",
+            LEDEnable ? "true" : "false");
 }
 
 /****************************************************************************
@@ -311,6 +346,9 @@ int main(void)
 		
 		/* 检查车位状态 */
         ParkingStatus_Check();
+
+        /* LED控制(GPIO实际控制) */
+        LED_Task();
 
         /* 更新OLED显示 */
         OLED_Task();

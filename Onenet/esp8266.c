@@ -24,9 +24,10 @@
 #include "bsp_usart.h"
 #include <string.h>
 #include <stdio.h>
+#include "device_config.h"
 
-/* WiFi账号和密码 */
-#define ESP8266_WIFI_INFO     "AT+CWJAP=\"Guo\",\"13939695650.\"\r\n"
+/* WiFi账号和密码(引用device_config.h中的配置) */
+#define ESP8266_WIFI_INFO     "AT+CWJAP=\"" WIFI_SSID "\",\"" WIFI_PWD "\"\r\n"
 
 /* OneNET平台TCP连接信息 */
 #define ESP8266_ONENET_INFO   "AT+CIPSTART=\"TCP\",\"mqtts.heclouds.com\",1883\r\n"
