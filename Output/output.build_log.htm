@@ -30,11 +30,13 @@ Build target 'Led'
 compiling main.c...
 ..\..\BSP\bsp_ultrasonic.h(8): warning:  #9-D: nested comment is not allowed
    /* 纭欢閰嶇疆:
-..\..\Main\main.c: 1 warning, 0 errors
+..\..\Main\main.c(273): warning:  #177-D: variable "LastDisplayTick"  was declared but never referenced
+      uint32_t LastDisplayTick = 0;       /* 上次显示刷新时间戳 */
+..\..\Main\main.c: 2 warnings, 0 errors
 linking...
-Program Size: Code=32636 RO-data=892 RW-data=3188 ZI-data=5508  
+Program Size: Code=32696 RO-data=896 RW-data=3240 ZI-data=5528  
 FromELF: creating hex file...
-"..\..\Output\output.axf" - 0 Error(s), 1 Warning(s).
+"..\..\Output\output.axf" - 0 Error(s), 2 Warning(s).
 
 <h2>Software Packages used:</h2>
 

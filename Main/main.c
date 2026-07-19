@@ -39,9 +39,7 @@
 #include "onenet.h"
 
 /* 定时刷新间隔定义 */
-#define DISPLAY_REFRESH_INTERVAL 500    /* 显示刷新间隔(ms) */
 #define UPLOAD_INTERVAL          5000    /* 数据上传间隔(ms) */
-#define ULTRASONIC_UPDATE_INTERVAL 500  /* 超声波读取间隔(ms) */
 
 /* MQTT发布消息缓冲区 */
 char PublishBuf[256];
@@ -58,8 +56,9 @@ unsigned char *pData = NULL;
 /* 超声波距离值 */
 uint16_t Distance = 0;
 
-/* 车位状态: 0=空闲, 1=有车, 2=疑似僵尸车 */
-uint8_t ParkStatus = 0;
+/* 车位状态枚举 */
+enum { PARK_IDLE = 0, PARK_OCCUPIED = 1, PARK_ZOMBIE = 2 };
+uint8_t ParkStatus = PARK_IDLE;
 
 /* 连续占用时间(秒) */
 uint32_t OccupiedTime = 0;
@@ -84,15 +83,48 @@ void BSP_Init(void)
 }
 
 /****************************************************************************
- * 函数名: US_Update
- * 功能:   更新超声波传感器数据
+ * 函数名: US_Task
+ * 功能:   超声波传感器业务任务函数
  * 参数:   无
  * 返回值: 无
- * 说明:   每500ms调用一次，更新全局变量Distance
+ * 说明:   包含非阻塞计时、移动平均滤波和距离上限处理
+ *         超过400cm时设置为380cm
+ *         内部每500ms自动更新一次数据
+ *         直接修改全局变量Distance
  ****************************************************************************/
-void US_Update(void)
+void US_Task(void)
 {
-    Distance = US_GetDistance();
+    #define US_FILTER_SIZE 10
+    #define US_UPDATE_INTERVAL 100
+    
+    static uint16_t usBuffer[US_FILTER_SIZE] = {0};
+    static uint8_t usBufferIndex = 0;
+    static uint32_t lastUpdateTick = 0;
+    
+    if (Get_Tick() - lastUpdateTick >= US_UPDATE_INTERVAL)
+    {
+        uint16_t rawDistance = US_GetDistance();
+        
+        if (rawDistance > 400)
+        {
+            rawDistance = 380;
+        }
+        
+        usBuffer[usBufferIndex++] = rawDistance;
+        if (usBufferIndex >= US_FILTER_SIZE)
+        {
+            usBufferIndex = 0;
+        }
+        
+        uint32_t sum = 0;
+        for (uint8_t i = 0; i < US_FILTER_SIZE; i++)
+        {
+            sum += usBuffer[i];
+        }
+        
+        Distance = (uint16_t)(sum / US_FILTER_SIZE);
+        lastUpdateTick = Get_Tick();
+    }
 }
 
 /****************************************************************************
@@ -106,70 +138,93 @@ void US_Update(void)
  ****************************************************************************/
 void ParkingStatus_Check(void)
 {
-    uint8_t newStatus;
+    #define PARK_CHECK_INTERVAL 500
+    static uint32_t lastCheckTick = 0;
     
-    if (Distance > 0 && Distance < 30)
+    if (Get_Tick() - lastCheckTick >= PARK_CHECK_INTERVAL)
     {
-        newStatus = 1;
-    }
-    else
-    {
-        newStatus = 0;
-    }
-    
-    if (newStatus != ParkStatus)
-    {
-        ParkStatus = newStatus;
-        LastStatusChangeTick = Get_Tick();
-        OccupiedTime = 0;
-    }
-    else if (ParkStatus == 1)
-    {
-        OccupiedTime = (Get_Tick() - LastStatusChangeTick) / 1000;
-        if (OccupiedTime > 24 * 60 * 60)
+        uint8_t carPresent = (Distance > 0 && Distance < 30) ? 1 : 0;
+        
+        switch (ParkStatus)
         {
-            ParkStatus = 2;
+            case PARK_IDLE:
+                if (carPresent)
+                {
+                    ParkStatus = PARK_OCCUPIED;         /* 车来了 */
+                    LastStatusChangeTick = Get_Tick();
+                    OccupiedTime = 0;
+                }
+                break;
+                
+            case PARK_OCCUPIED:
+                if (!carPresent)
+                {
+                    ParkStatus = PARK_IDLE;             /* 车离开了 */
+                    LastStatusChangeTick = Get_Tick();
+                    OccupiedTime = 0;
+                }
+                else
+                {
+                    OccupiedTime = (Get_Tick() - LastStatusChangeTick) / 1000;
+                    //if (OccupiedTime > 24 * 60 * 60)
+                    if (OccupiedTime > 10)               /* 演示用：10秒变僵尸车 */
+                    {
+                        ParkStatus = PARK_ZOMBIE;
+                    }
+                }
+                break;
+                
+            case PARK_ZOMBIE:
+                if (!carPresent)
+                {
+                    ParkStatus = PARK_IDLE;             /* 车离开了 */
+                    LastStatusChangeTick = Get_Tick();
+                    OccupiedTime = 0;
+                }
+                break;
         }
+        
+        lastCheckTick = Get_Tick();
     }
 }
 
 /****************************************************************************
- * 函数名: OLED_ShowMain
- * 功能:   OLED主界面显示
+ * 函数名: OLED_Task
+ * 功能:   OLED显示任务函数
  * 参数:   无
  * 返回值: 无
- * 说明:   显示超声波距离和车位状态
+ * 说明:   包含非阻塞计时，每500ms刷新一次OLED显示
+ *         显示网络状态、超声波数据、距离值和车位状态
+ *         距离使用OLED_Printf格式化输出
  ****************************************************************************/
-void OLED_ShowMain(void)
+void OLED_Task(void)
 {
-    OLED_ShowCH(0, 0, (u8 *)"超声波数据");
+    #define OLED_UPDATE_INTERVAL 500
+    static uint32_t lastUpdateTick = 0;
     
-    OLED_ShowCH(0, 2, (u8 *)"距离: ");
-    OLED_ShowNum(48, 2, Distance, 3, 1);
-    OLED_ShowCH(72, 2, (u8 *)"cm");
-    
-    OLED_ShowCH(0, 4, (u8 *)"状态: ");
-    switch (ParkStatus)
+    if (Get_Tick() - lastUpdateTick >= OLED_UPDATE_INTERVAL)
     {
-        case 0:
-            OLED_ShowCH(48, 4, (u8 *)"空闲");
-            break;
-        case 1:
-            OLED_ShowCH(48, 4, (u8 *)"有车");
-            break;
-        case 2:
-            OLED_ShowCH(48, 4, (u8 *)"僵尸车");
-            break;
-        default:
-            OLED_ShowCH(48, 4, (u8 *)"未知");
-            break;
-    }
-    
-    if (ParkStatus != 0)
-    {
-        OLED_ShowCH(0, 6, (u8 *)"占用: ");
-        OLED_ShowNum(48, 6, OccupiedTime, 5, 1);
-        OLED_ShowCH(96, 6, (u8 *)"秒");
+        OLED_ShowCH(0, 0, (u8 *)"网络已连接");
+        //OLED_ShowCH(0, 2, (u8 *)"超声波数据");
+        OLED_Printf(0, 4, "距离: %.3d cm", Distance);
+        OLED_ShowCH(0, 6, (u8 *)"状态: ");
+        switch (ParkStatus)
+        {
+            case PARK_IDLE:
+                OLED_Printf(48, 6, "空闲");
+                break;
+            case PARK_OCCUPIED:
+                OLED_Printf(48, 6, "有车 %3ds", OccupiedTime);
+                break;
+            case PARK_ZOMBIE:
+                OLED_Printf(48, 6, "僵尸车   ", OccupiedTime);
+                break;
+            default:
+                OLED_Printf(48, 6, "未知");
+                break;
+        }
+        
+        lastUpdateTick = Get_Tick();
     }
 }
 
@@ -216,7 +271,6 @@ int main(void)
 {
     uint32_t LastUploadTick = 0;        /* 上次上报时间戳 */
     uint32_t LastDisplayTick = 0;       /* 上次显示刷新时间戳 */
-    uint32_t LastUltrasonicTick = 0;    /* 上次超声波读取时间戳 */
 
     /* 初始化所有板级外设 */
     BSP_Init();
@@ -240,36 +294,25 @@ int main(void)
 
     /* OLED显示: 网络连接成功 */
     OLED_Clear();
-    OLED_ShowCH(0, 0, (u8 *)"网络连接成功");
-    
+    OLED_ShowCH(0, 0, (u8 *)"网络连接成功"); 
     DelayXms(1000);
-    
     /* 清空OLED，准备进入主界面 */
     OLED_Clear();
 
     /* 订阅属性设置主题 */
     OneNet_Subscribe(SubTopic, 1);
-
+    
     /* 主循环 - 时间戳非阻塞架构 */
     while (1)
     {
-        /* 每500ms更新超声波传感器数据 */
-        if (Get_Tick() - LastUltrasonicTick >= ULTRASONIC_UPDATE_INTERVAL)
-        {
-            Distance = US_GetDistance();
-            LastUltrasonicTick = Get_Tick();
-        }
+        /* 更新超声波传感器数据(含滤波) */
+        US_Task();
+		
+		/* 检查车位状态 */
+        ParkingStatus_Check();
 
-        /* 每500ms刷新OLED显示 */
-        if (Get_Tick() - LastDisplayTick >= DISPLAY_REFRESH_INTERVAL)
-        {
-            //OLED_Clear();
-            OLED_ShowCH(0, 0, (u8 *)"网络已连接");
-            OLED_ShowCH(0, 2, (u8 *)"超声波数据");
-            OLED_Printf(0, 4, "距离: %.3d cm", Distance);
-            //OLED_Refresh();
-            LastDisplayTick = Get_Tick();
-        }
+        /* 更新OLED显示 */
+        OLED_Task();
 
         /* 每5秒上传一次数据到平台 */
         if (Get_Tick() - LastUploadTick >= UPLOAD_INTERVAL)
