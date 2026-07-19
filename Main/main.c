@@ -142,7 +142,7 @@ void US_Task(void)
  ****************************************************************************/
 void ParkingStatus_Check(void)
 {
-    #define PARK_CHECK_INTERVAL 500
+    #define PARK_CHECK_INTERVAL 200
     #define DIST_THRESHOLD_CM 100
     static uint32_t lastCheckTick = 0;
     
@@ -293,6 +293,39 @@ void GenerateParkingData(void)
 }
 
 /****************************************************************************
+ * 函数名: Wifi_Task
+ * 功能:   WiFi通信业务任务函数
+ * 参数:   无
+ * 返回值: 无
+ * 说明:   每5000ms上报一次数据到OneNET平台
+ *         每次主循环检查ESP8266是否收到下行数据并处理
+ ****************************************************************************/
+void Wifi_Task(void)
+{
+    static uint32_t lastUploadTick = 0;
+
+    /* 每5秒上传一次数据到平台 */
+    if (Get_Tick() - lastUploadTick >= UPLOAD_INTERVAL)
+    {
+        GenerateParkingData();
+        OneNet_Publish(PubTopic, PublishBuf);
+        ESP8266_Clear();
+        lastUploadTick = Get_Tick();
+        Usart_Printf(USART_DEBUG, "Data uploaded!\n");
+    }
+
+    /* 检查ESP8266是否收到数据(超时20ms) */
+    pData = ESP8266_GetIPD(20);
+
+    /* 处理平台下发的指令 */
+    if (pData != NULL)
+    {
+        OneNet_RevPro(pData);
+        ESP8266_Clear();
+    }
+}
+
+/****************************************************************************
  * 函数名: main
  * 功能:   主程序入口
  * 参数:   无
@@ -300,21 +333,18 @@ void GenerateParkingData(void)
  * 
  * 主循环流程(时间戳非阻塞架构):
  *   1. 超声波数据更新 (500ms)
- *   2. 车位状态检测 + OLED显示刷新 (500ms)
- *   3. 数据上报OneNET (5000ms)
- *   4. 接收并处理平台下发指令 (每轮)
+ *   2. 车位状态检测 (主循环)
+ *   3. LED控制 (主循环)
+ *   4. OLED显示刷新 (500ms)
+ *   5. WiFi通信: 数据上报 + 下行指令处理 (主循环)
  ****************************************************************************/
 int main(void)
 {
-    uint32_t LastUploadTick = 0;        /* 上次上报时间戳 */
-    uint32_t LastDisplayTick = 0;       /* 上次显示刷新时间戳 */
-
     /* 初始化所有板级外设 */
     BSP_Init();
 
     /* OLED显示: 网络连接中 */
     OLED_ShowCH(0, 0, (u8 *)"网络连接中");
-    
 
     /* 初始化ESP8266 WiFi模块 */
     Usart_Printf(USART_DEBUG, "ESP8266 Init...\n");
@@ -354,24 +384,7 @@ int main(void)
         /* 更新OLED显示 */
         OLED_Task();
 
-        /* 每5秒上传一次数据到平台 */
-        if (Get_Tick() - LastUploadTick >= UPLOAD_INTERVAL)
-        {
-            GenerateParkingData();
-            OneNet_Publish(PubTopic, PublishBuf);
-            ESP8266_Clear();
-            LastUploadTick = Get_Tick();
-            Usart_Printf(USART_DEBUG, "Data uploaded!\n");
-        }
-
-        /* 检查ESP8266是否收到数据(超时20ms) */
-        pData = ESP8266_GetIPD(20);
-
-        /* 处理平台下发的指令 */
-        if (pData != NULL)
-        {
-            OneNet_RevPro(pData);
-            ESP8266_Clear();
-        }
+        /* WiFi通信(数据上报 + 下行指令处理) */
+        Wifi_Task();
     }
 }
