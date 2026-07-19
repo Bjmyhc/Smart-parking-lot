@@ -175,6 +175,7 @@ void ParkingStatus_Check(void)
                 break;
                 
             case PARK_ZOMBIE:
+                OccupiedTime = (Get_Tick() - LastStatusChangeTick) / 1000;
                 if (!carPresent)
                 {
                     ParkStatus = PARK_IDLE;             /* ³µÀë¿ªÁË */
