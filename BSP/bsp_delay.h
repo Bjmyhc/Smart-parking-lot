@@ -50,12 +50,12 @@ void SysTick_Init(void);
 uint32_t Get_Tick(void);
 
 /****************************************************************************
- * 函数名: DelayUs
+ * 函数名: DelayXus
  * 功能:   微秒级延时
  * 参数:   time - 延时时间(微秒)
  * 返回值: 无
  ****************************************************************************/
-void DelayUs(uint32_t time);
+void DelayXus(uint32_t time);
 
 /****************************************************************************
  * 函数名: DelayXms
@@ -66,3 +66,4 @@ void DelayUs(uint32_t time);
 void DelayXms(uint32_t time);
 
 #endif
+

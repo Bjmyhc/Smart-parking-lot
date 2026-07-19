@@ -96,8 +96,25 @@ uint16_t US_GetDistance(void)
     DelayXus(15);
     GPIO_ResetBits(GPIOA, GPIO_Pin_0);
 
-    while (TIM_GetFlagStatus(TIM1, TIM_FLAG_CC1) == RESET);
-    while (TIM_GetFlagStatus(TIM1, TIM_FLAG_CC2) == RESET);
+    uint32_t startTime = Get_Tick();
+    while (TIM_GetFlagStatus(TIM1, TIM_FLAG_CC1) == RESET)
+    {
+        if (Get_Tick() - startTime >= 200)
+        {
+            TIM_Cmd(TIM1, DISABLE);
+            return 0;
+        }
+    }
+
+    startTime = Get_Tick();
+    while (TIM_GetFlagStatus(TIM1, TIM_FLAG_CC2) == RESET)
+    {
+        if (Get_Tick() - startTime >= 200)
+        {
+            TIM_Cmd(TIM1, DISABLE);
+            return 0;
+        }
+    }
 
     TIM_Cmd(TIM1, DISABLE);
 

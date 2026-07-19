@@ -571,9 +571,19 @@
               <FilePath>..\..\BSP\bsp_timer.c</FilePath>
             </File>
             <File>
+              <FileName>bsp_timer.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>..\..\BSP\bsp_timer.h</FilePath>
+            </File>
+            <File>
               <FileName>bsp_usart.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\..\BSP\bsp_usart.c</FilePath>
+            </File>
+            <File>
+              <FileName>bsp_usart.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>..\..\BSP\bsp_usart.h</FilePath>
             </File>
             <File>
               <FileName>bsp_led.c</FileName>
@@ -581,9 +591,64 @@
               <FilePath>..\..\BSP\bsp_led.c</FilePath>
             </File>
             <File>
+              <FileName>bsp_led.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>..\..\BSP\bsp_led.h</FilePath>
+            </File>
+            <File>
               <FileName>bsp_delay.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\..\BSP\bsp_delay.c</FilePath>
+            </File>
+            <File>
+              <FileName>bsp_delay.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>..\..\BSP\bsp_delay.h</FilePath>
+            </File>
+            <File>
+              <FileName>bsp_adc.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\BSP\bsp_adc.c</FilePath>
+            </File>
+            <File>
+              <FileName>bsp_adc.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>..\..\BSP\bsp_adc.h</FilePath>
+            </File>
+            <File>
+              <FileName>bsp_qmc5883.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\BSP\bsp_qmc5883.c</FilePath>
+            </File>
+            <File>
+              <FileName>bsp_qmc5883.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>..\..\BSP\bsp_qmc5883.h</FilePath>
+            </File>
+            <File>
+              <FileName>bsp_ultrasonic.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\BSP\bsp_ultrasonic.c</FilePath>
+            </File>
+            <File>
+              <FileName>bsp_ultrasonic.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>..\..\BSP\bsp_ultrasonic.h</FilePath>
+            </File>
+            <File>
+              <FileName>bsp_oled.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\BSP\bsp_oled.c</FilePath>
+            </File>
+            <File>
+              <FileName>bsp_oled.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>..\..\BSP\bsp_oled.h</FilePath>
+            </File>
+            <File>
+              <FileName>bsp_oledfont.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>..\..\BSP\bsp_oledfont.h</FilePath>
             </File>
           </Files>
         </Group>

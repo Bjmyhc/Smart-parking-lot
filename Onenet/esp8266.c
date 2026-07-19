@@ -26,7 +26,7 @@
 #include <stdio.h>
 
 /* WiFi账号和密码 */
-#define ESP8266_WIFI_INFO     "AT+CWJAP=\"Aira\",\"Zdgdzl934395.\"\r\n"
+#define ESP8266_WIFI_INFO     "AT+CWJAP=\"Guo\",\"13939695650.\"\r\n"
 
 /* OneNET平台TCP连接信息 */
 #define ESP8266_ONENET_INFO   "AT+CIPSTART=\"TCP\",\"mqtts.heclouds.com\",1883\r\n"
@@ -135,13 +135,14 @@ static int16_t ESP8266_ReadByte(void)
  ****************************************************************************/
 _Bool ESP8266_WaitRecive(void)
 {
-    static uint32_t checkTick = 0;
+    uint32_t checkTick = Get_Tick();
 
     if (ESP8266_GetDataLen() == 0)
         return REV_WAIT;
 
-    if (Get_Tick() - lastRxTick >= RX_TIMEOUT_MS)
+    if (checkTick - lastRxTick >= RX_TIMEOUT_MS)
     {
+        lastRxTick = checkTick;
         return REV_OK;
     }
 
