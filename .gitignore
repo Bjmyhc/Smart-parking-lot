@@ -42,3 +42,4 @@ MDK-ARM/**/RTE/
 .DS_Store
 Thumbs.db
 .vscode/
+.trae/
