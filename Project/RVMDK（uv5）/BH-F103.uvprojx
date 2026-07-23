@@ -621,16 +621,6 @@
               <FilePath>..\..\BSP\bsp_adc.h</FilePath>
             </File>
             <File>
-              <FileName>bsp_qmc5883.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\BSP\bsp_qmc5883.c</FilePath>
-            </File>
-            <File>
-              <FileName>bsp_qmc5883.h</FileName>
-              <FileType>5</FileType>
-              <FilePath>..\..\BSP\bsp_qmc5883.h</FilePath>
-            </File>
-            <File>
               <FileName>bsp_ultrasonic.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\..\BSP\bsp_ultrasonic.c</FilePath>
@@ -654,6 +644,16 @@
               <FileName>bsp_oledfont.h</FileName>
               <FileType>5</FileType>
               <FilePath>..\..\BSP\bsp_oledfont.h</FilePath>
+            </File>
+            <File>
+              <FileName>bsp_qmc5883p.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\BSP\bsp_qmc5883p.c</FilePath>
+            </File>
+            <File>
+              <FileName>bsp_qmc5883p.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>..\..\BSP\bsp_qmc5883p.h</FilePath>
             </File>
           </Files>
         </Group>

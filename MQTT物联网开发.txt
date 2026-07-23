@@ -1,12 +1,12 @@
-²úÆ·ID:53BV12EYcY
-Éè±¸ID:park1
-Éè±¸ÃÜÔ¿£ºOUhockNvTHQ3djU4VE1paGV4T2paM1NPaFZqYkZmamI=
+äº§å“ID:53BV12EYcY
+è®¾å¤‡ID:park1
+è®¾å¤‡å¯†é’¥ï¼šOUhockNvTHQ3djU4VE1paGV4T2paM1NPaFZqYkZmamI=
 Token:version=2018-10-31&res=products%2F53BV12EYcY%2Fdevices%2Fpark1&et=1815919855&method=md5&sign=WSMSUPJ7K3%2B%2ByxiohKCfFQ%3D%3D
 
 =====
-Éè±¸ÊôĞÔÉÏ±¨ÇëÇó£º$sys/53BV12EYcY/park1/thing/property/post
+è®¾å¤‡å±æ€§ä¸ŠæŠ¥è¯·æ±‚ï¼š$sys/53BV12EYcY/park1/thing/property/post
 
-ÉÏ´«ÇëÇó¸ñÊ½£º
+ä¸Šä¼ è¯·æ±‚æ ¼å¼ï¼š
 {
 "id":"1",
 "params":
@@ -18,107 +18,107 @@ Token:version=2018-10-31&res=products%2F53BV12EYcY%2Fdevices%2Fpark1&et=18159198
 }
 }
 =====
-ÎïÄ£ĞÍÍ¨ĞÅÖ÷Ìâ
-Ö±Á¬/Íø¹ØÉè±¸
-1. ÊôĞÔ
+ç‰©æ¨¡å‹é€šä¿¡ä¸»é¢˜
+ç›´è¿/ç½‘å…³è®¾å¤‡
+1. å±æ€§
 
-¹¦ÄÜ	Ö÷Ìâ	²Ù×÷È¨ÏŞ
-Éè±¸ÊôĞÔÉÏ±¨ÇëÇó		$sys/{pid}/{device-name}/thing/property/post				·¢²¼
-Éè±¸ÊôĞÔÉÏ±¨ÏìÓ¦		$sys/{pid}/{device-name}/thing/property/post/reply			¶©ÔÄ
-Éè±¸ÊôĞÔÉèÖÃÇëÇó		$sys/{pid}/{device-name}/thing/property/set					¶©ÔÄ
-Éè±¸ÊôĞÔÉèÖÃÏìÓ¦		$sys/{pid}/{device-name}/thing/property/set_reply			·¢²¼
-Éè±¸»ñÈ¡ÊôĞÔÆÚÍûÖµÇëÇó	$sys/{pid}/{device-name}/thing/property/desired/get			·¢²¼
-Éè±¸»ñÈ¡ÊôĞÔÆÚÍûÖµÏìÓ¦	$sys/{pid}/{device-name}/thing/property/desired/get/reply		¶©ÔÄ
-Éè±¸Çå³ıÊôĞÔÆÚÍûÖµÇëÇó	$sys/{pid}/{device-name}/thing/property/desired/delete		·¢²¼
-Éè±¸Çå³ıÊôĞÔÆÚÍûÖµÏìÓ¦	$sys/{pid}/{device-name}/thing/property/desired/delete/reply	¶©ÔÄ
-Éè±¸ÊôĞÔ»ñÈ¡ÇëÇó		$sys/{pid}/{device-name}/thing/property/get					¶©ÔÄ
-Éè±¸ÊôĞÔ»ñÈ¡ÏìÓ¦		$sys/{pid}/{device-name}/thing/property/get_reply			·¢²¼
-2. ÊÂ¼ş
+åŠŸèƒ½	ä¸»é¢˜	æ“ä½œæƒé™
+è®¾å¤‡å±æ€§ä¸ŠæŠ¥è¯·æ±‚		$sys/{pid}/{device-name}/thing/property/post				å‘å¸ƒ
+è®¾å¤‡å±æ€§ä¸ŠæŠ¥å“åº”		$sys/{pid}/{device-name}/thing/property/post/reply			è®¢é˜…
+è®¾å¤‡å±æ€§è®¾ç½®è¯·æ±‚		$sys/{pid}/{device-name}/thing/property/set					è®¢é˜…
+è®¾å¤‡å±æ€§è®¾ç½®å“åº”		$sys/{pid}/{device-name}/thing/property/set_reply			å‘å¸ƒ
+è®¾å¤‡è·å–å±æ€§æœŸæœ›å€¼è¯·æ±‚	$sys/{pid}/{device-name}/thing/property/desired/get			å‘å¸ƒ
+è®¾å¤‡è·å–å±æ€§æœŸæœ›å€¼å“åº”	$sys/{pid}/{device-name}/thing/property/desired/get/reply		è®¢é˜…
+è®¾å¤‡æ¸…é™¤å±æ€§æœŸæœ›å€¼è¯·æ±‚	$sys/{pid}/{device-name}/thing/property/desired/delete		å‘å¸ƒ
+è®¾å¤‡æ¸…é™¤å±æ€§æœŸæœ›å€¼å“åº”	$sys/{pid}/{device-name}/thing/property/desired/delete/reply	è®¢é˜…
+è®¾å¤‡å±æ€§è·å–è¯·æ±‚		$sys/{pid}/{device-name}/thing/property/get					è®¢é˜…
+è®¾å¤‡å±æ€§è·å–å“åº”		$sys/{pid}/{device-name}/thing/property/get_reply			å‘å¸ƒ
+2. äº‹ä»¶
 
-¹¦ÄÜ	Ö÷Ìâ	²Ù×÷È¨ÏŞ
-Éè±¸ÊÂ¼şÉÏ±¨ÇëÇó		$sys/{pid}/{device-name}/thing/event/post					·¢²¼
-Éè±¸ÊÂ¼şÉÏ±¨ÏìÓ¦		$sys/{pid}/{device-name}/thing/event/post/reply				¶©ÔÄ
-3. ·şÎñ
+åŠŸèƒ½	ä¸»é¢˜	æ“ä½œæƒé™
+è®¾å¤‡äº‹ä»¶ä¸ŠæŠ¥è¯·æ±‚		$sys/{pid}/{device-name}/thing/event/post					å‘å¸ƒ
+è®¾å¤‡äº‹ä»¶ä¸ŠæŠ¥å“åº”		$sys/{pid}/{device-name}/thing/event/post/reply				è®¢é˜…
+3. æœåŠ¡
 
-¹¦ÄÜ	Ö÷Ìâ	²Ù×÷È¨ÏŞ
-Éè±¸·şÎñµ÷ÓÃÇëÇó		$sys/{pid}/{device-name}/thing/service/{identifier}/invoke		¶©ÔÄ
-Éè±¸·şÎñµ÷ÓÃÏìÓ¦		$sys/{pid}/{device-name}/thing/service/{identifier}/invoke_reply	·¢²¼
-4. ½Å±¾Í¸´«Ä£Ê½
+åŠŸèƒ½	ä¸»é¢˜	æ“ä½œæƒé™
+è®¾å¤‡æœåŠ¡è°ƒç”¨è¯·æ±‚		$sys/{pid}/{device-name}/thing/service/{identifier}/invoke		è®¢é˜…
+è®¾å¤‡æœåŠ¡è°ƒç”¨å“åº”		$sys/{pid}/{device-name}/thing/service/{identifier}/invoke_reply	å‘å¸ƒ
+4. è„šæœ¬é€ä¼ æ¨¡å¼
 
-¹¦ÄÜ	Ö÷Ìâ	²Ù×÷È¨ÏŞ
-½Å±¾½âÎöÊı¾İÉÏĞĞÇëÇó	$sys/{pid}/{device-name}/custome/up						·¢²¼
-½Å±¾½âÎöÊı¾İÉÏĞĞÏìÓ¦	$sys/{pid}/{device-name}/custome/up_reply					¶©ÔÄ
-½Å±¾½âÎöÊı¾İÏÂĞĞÇëÇó	$sys/{pid}/{device-name}/custome/down/{id}				¶©ÔÄ
-½Å±¾½âÎöÊı¾İÏÂĞĞÏìÓ¦	$sys/{pid}/{devicename}/custome/down_reply/{id}			·¢²¼
-Íø¹ØÓë×ÓÉè±¸Í¨ĞÅÖ÷Ìâ
-1. ÉÏÏÂÏß
+åŠŸèƒ½	ä¸»é¢˜	æ“ä½œæƒé™
+è„šæœ¬è§£ææ•°æ®ä¸Šè¡Œè¯·æ±‚	$sys/{pid}/{device-name}/custome/up						å‘å¸ƒ
+è„šæœ¬è§£ææ•°æ®ä¸Šè¡Œå“åº”	$sys/{pid}/{device-name}/custome/up_reply					è®¢é˜…
+è„šæœ¬è§£ææ•°æ®ä¸‹è¡Œè¯·æ±‚	$sys/{pid}/{device-name}/custome/down/{id}				è®¢é˜…
+è„šæœ¬è§£ææ•°æ®ä¸‹è¡Œå“åº”	$sys/{pid}/{devicename}/custome/down_reply/{id}			å‘å¸ƒ
+ç½‘å…³ä¸å­è®¾å¤‡é€šä¿¡ä¸»é¢˜
+1. ä¸Šä¸‹çº¿
 
-¹¦ÄÜ	Ö÷Ìâ	²Ù×÷È¨ÏŞ
-×ÓÉè±¸ÉÏÏßÇëÇó			$sys/{pid}/{device-name}/thing/sub/login					·¢²¼
-×ÓÉè±¸ÉÏÏßÏìÓ¦			$sys/{pid}/{device-name}/thing/sub/login/reply				¶©ÔÄ
-×ÓÉè±¸ÏÂÏßÇëÇó			$sys/{pid}/{device-name}/thing/sub/logout					·¢²¼
-×ÓÉè±¸ÏÂÏßÏìÓ¦			$sys/{pid}/{device-name}/thing/sub/logout/reply				¶©ÔÄ
-2. ÊôĞÔºÍÊÂ¼ş
+åŠŸèƒ½	ä¸»é¢˜	æ“ä½œæƒé™
+å­è®¾å¤‡ä¸Šçº¿è¯·æ±‚			$sys/{pid}/{device-name}/thing/sub/login					å‘å¸ƒ
+å­è®¾å¤‡ä¸Šçº¿å“åº”			$sys/{pid}/{device-name}/thing/sub/login/reply				è®¢é˜…
+å­è®¾å¤‡ä¸‹çº¿è¯·æ±‚			$sys/{pid}/{device-name}/thing/sub/logout					å‘å¸ƒ
+å­è®¾å¤‡ä¸‹çº¿å“åº”			$sys/{pid}/{device-name}/thing/sub/logout/reply				è®¢é˜…
+2. å±æ€§å’Œäº‹ä»¶
 
-¹¦ÄÜ	Ö÷Ìâ	²Ù×÷È¨ÏŞ
-ÅúÁ¿ÉÏ±¨ÊôĞÔºÍÊÂ¼şÇëÇó£¨Íø¹ØÉÏ±¨»ò´úÀí×ÓÉè±¸ÉÏ±¨£©	$sys/{pid}/{device-name}/thing/pack/post	·¢²¼
-ÅúÁ¿ÉÏ±¨ÊôĞÔºÍÊÂ¼şÏìÓ¦£¨Íø¹ØÉÏ±¨»ò´úÀí×ÓÉè±¸ÉÏ±¨£©	$sys/{pid}/{device-name}/thing/pack/post/reply	¶©ÔÄ
-×ÓÉè±¸ÊôĞÔ»ñÈ¡ÇëÇó	$sys/{pid}/{device-name}/thing/sub/property/get	¶©ÔÄ
-×ÓÉè±¸ÊôĞÔ»ñÈ¡ÏìÓ¦	$sys/{pid}/{device-name}/thing/sub/property/get_reply	·¢²¼
-×ÓÉè±¸ÊôĞÔÉèÖÃÇëÇó	$sys/{pid}/{device-name}/thing/sub/property/set	¶©ÔÄ
-×ÓÉè±¸ÊôĞÔÉèÖÃÏìÓ¦	$sys/{pid}/{device-name}/thing/sub/property/set_reply	·¢²¼
-ÀúÊ·ÊôĞÔºÍÊÂ¼şÉÏ±¨ÇëÇó£¨Íø¹ØÉÏ±¨»ò´úÀí×ÓÉè±¸ÉÏ±¨£©	$sys/{pid}/{device-name}/thing/history/post	·¢²¼
-ÀúÊ·ÊôĞÔºÍÊÂ¼şÉÏ±¨ÏìÓ¦£¨Íø¹ØÉÏ±¨»ò´úÀí×ÓÉè±¸ÉÏ±¨£©	$sys/{pid}/{device-name}/thing/history/post/reply	¶©ÔÄ
-3. ·şÎñ
+åŠŸèƒ½	ä¸»é¢˜	æ“ä½œæƒé™
+æ‰¹é‡ä¸ŠæŠ¥å±æ€§å’Œäº‹ä»¶è¯·æ±‚ï¼ˆç½‘å…³ä¸ŠæŠ¥æˆ–ä»£ç†å­è®¾å¤‡ä¸ŠæŠ¥ï¼‰	$sys/{pid}/{device-name}/thing/pack/post	å‘å¸ƒ
+æ‰¹é‡ä¸ŠæŠ¥å±æ€§å’Œäº‹ä»¶å“åº”ï¼ˆç½‘å…³ä¸ŠæŠ¥æˆ–ä»£ç†å­è®¾å¤‡ä¸ŠæŠ¥ï¼‰	$sys/{pid}/{device-name}/thing/pack/post/reply	è®¢é˜…
+å­è®¾å¤‡å±æ€§è·å–è¯·æ±‚	$sys/{pid}/{device-name}/thing/sub/property/get	è®¢é˜…
+å­è®¾å¤‡å±æ€§è·å–å“åº”	$sys/{pid}/{device-name}/thing/sub/property/get_reply	å‘å¸ƒ
+å­è®¾å¤‡å±æ€§è®¾ç½®è¯·æ±‚	$sys/{pid}/{device-name}/thing/sub/property/set	è®¢é˜…
+å­è®¾å¤‡å±æ€§è®¾ç½®å“åº”	$sys/{pid}/{device-name}/thing/sub/property/set_reply	å‘å¸ƒ
+å†å²å±æ€§å’Œäº‹ä»¶ä¸ŠæŠ¥è¯·æ±‚ï¼ˆç½‘å…³ä¸ŠæŠ¥æˆ–ä»£ç†å­è®¾å¤‡ä¸ŠæŠ¥ï¼‰	$sys/{pid}/{device-name}/thing/history/post	å‘å¸ƒ
+å†å²å±æ€§å’Œäº‹ä»¶ä¸ŠæŠ¥å“åº”ï¼ˆç½‘å…³ä¸ŠæŠ¥æˆ–ä»£ç†å­è®¾å¤‡ä¸ŠæŠ¥ï¼‰	$sys/{pid}/{device-name}/thing/history/post/reply	è®¢é˜…
+3. æœåŠ¡
 
-¹¦ÄÜ	Ö÷Ìâ	²Ù×÷È¨ÏŞ
-×ÓÉè±¸·şÎñµ÷ÓÃÇëÇó	$sys/{pid}/{device-name}/thing/sub/service/invoke	¶©ÔÄ
-×ÓÉè±¸·şÎñµ÷ÓÃÏìÓ¦	$sys/{pid}/{device-name}/thing/sub/service/invoke_reply	·¢²¼
-4. ÍØÆË¹ØÏµ
+åŠŸèƒ½	ä¸»é¢˜	æ“ä½œæƒé™
+å­è®¾å¤‡æœåŠ¡è°ƒç”¨è¯·æ±‚	$sys/{pid}/{device-name}/thing/sub/service/invoke	è®¢é˜…
+å­è®¾å¤‡æœåŠ¡è°ƒç”¨å“åº”	$sys/{pid}/{device-name}/thing/sub/service/invoke_reply	å‘å¸ƒ
+4. æ‹“æ‰‘å…³ç³»
 
-¹¦ÄÜ	Ö÷Ìâ	²Ù×÷È¨ÏŞ
-Ìí¼Ó×ÓÉè±¸ÇëÇó	$sys/{pid}/{device-name}/thing/sub/topo/add	·¢²¼
-Ìí¼Ó×ÓÉè±¸ÏìÓ¦	$sys/{pid}/{device-name}/thing/sub/topo/add/reply	¶©ÔÄ
-É¾³ı×ÓÉè±¸ÇëÇó	$sys/{pid}/{device-name}/thing/sub/topo/delete	·¢²¼
-É¾³ı×ÓÉè±¸ÏìÓ¦	$sys/{pid}/{device-name}/thing/sub/topo/delete/reply	¶©ÔÄ
-»ñÈ¡ÍØÆË¹ØÏµÇëÇó	$sys/{pid}/{device-name}/thing/sub/topo/get	·¢²¼
-»ñÈ¡ÍØÆË¹ØÏµÏìÓ¦	$sys/{pid}/{device-name}/thing/sub/topo/get/reply	¶©ÔÄ
-Íø¹ØÍ¬²½½á¹ûÏìÓ¦	$sys/{pid}/{device-name}/thing/sub/topo/get/result	·¢²¼
-Í¨ÖªÍø¹ØÍØÆË¹ØÏµ±ä»¯ÇëÇó	$sys/{pid}/{device-name}/thing/sub/topo/change	¶©ÔÄ
-Í¨ÖªÍø¹ØÍØÆË¹ØÏµ±ä»¯ÏìÓ¦	$sys/{pid}/{device-name}/thing/sub/topo/change_reply	·¢²¼
-OTAÔ¶³ÌÉı¼¶Í¨ĞÅÖ÷Ìâ
-¹¦ÄÜ	Ö÷Ìâ	²Ù×÷È¨ÏŞ
-ÏµÍ³OTAÉı¼¶Í¨Öª	$sys/{pid}/{device-name}/ota/inform	¶©ÔÄ
-Éè±¸»Ø¸´ÏµÍ³OTAÉı¼¶Í¨Öª	$sys/{pid}/{device-name}/ota/inform_reply	·¢²¼
-Êı¾İÁ÷¡¢Í¬²½ÃüÁî¼°Éè±¸¾µÏñÍ¨ĞÅÖ÷Ìâ
-1. Éè±¸Êı¾İÉÏ´«
+åŠŸèƒ½	ä¸»é¢˜	æ“ä½œæƒé™
+æ·»åŠ å­è®¾å¤‡è¯·æ±‚	$sys/{pid}/{device-name}/thing/sub/topo/add	å‘å¸ƒ
+æ·»åŠ å­è®¾å¤‡å“åº”	$sys/{pid}/{device-name}/thing/sub/topo/add/reply	è®¢é˜…
+åˆ é™¤å­è®¾å¤‡è¯·æ±‚	$sys/{pid}/{device-name}/thing/sub/topo/delete	å‘å¸ƒ
+åˆ é™¤å­è®¾å¤‡å“åº”	$sys/{pid}/{device-name}/thing/sub/topo/delete/reply	è®¢é˜…
+è·å–æ‹“æ‰‘å…³ç³»è¯·æ±‚	$sys/{pid}/{device-name}/thing/sub/topo/get	å‘å¸ƒ
+è·å–æ‹“æ‰‘å…³ç³»å“åº”	$sys/{pid}/{device-name}/thing/sub/topo/get/reply	è®¢é˜…
+ç½‘å…³åŒæ­¥ç»“æœå“åº”	$sys/{pid}/{device-name}/thing/sub/topo/get/result	å‘å¸ƒ
+é€šçŸ¥ç½‘å…³æ‹“æ‰‘å…³ç³»å˜åŒ–è¯·æ±‚	$sys/{pid}/{device-name}/thing/sub/topo/change	è®¢é˜…
+é€šçŸ¥ç½‘å…³æ‹“æ‰‘å…³ç³»å˜åŒ–å“åº”	$sys/{pid}/{device-name}/thing/sub/topo/change_reply	å‘å¸ƒ
+OTAè¿œç¨‹å‡çº§é€šä¿¡ä¸»é¢˜
+åŠŸèƒ½	ä¸»é¢˜	æ“ä½œæƒé™
+ç³»ç»ŸOTAå‡çº§é€šçŸ¥	$sys/{pid}/{device-name}/ota/inform	è®¢é˜…
+è®¾å¤‡å›å¤ç³»ç»ŸOTAå‡çº§é€šçŸ¥	$sys/{pid}/{device-name}/ota/inform_reply	å‘å¸ƒ
+æ•°æ®æµã€åŒæ­¥å‘½ä»¤åŠè®¾å¤‡é•œåƒé€šä¿¡ä¸»é¢˜
+1. è®¾å¤‡æ•°æ®ä¸Šä¼ 
 
-¹¦ÄÜ	Ö÷Ìâ	²Ù×÷È¨ÏŞ
-Éè±¸ÉÏ´«Êı¾İµãÇëÇó	$sys/{pid}/{device-name}/dp/post/json	·¢²¼
-Éè±¸ÉÏ´«Êı¾İµã³É¹¦ÏìÓ¦	$sys/{pid}/{device-name}/dp/post/json/accepted	¶©ÔÄ
-Éè±¸ÉÏ´«Êı¾İµãÊ§°ÜÏìÓ¦	$sys/{pid}/{device-name}/dp/post/json/rejected	¶©ÔÄ
-2. Éè±¸ÃüÁîÏÂ·¢
+åŠŸèƒ½	ä¸»é¢˜	æ“ä½œæƒé™
+è®¾å¤‡ä¸Šä¼ æ•°æ®ç‚¹è¯·æ±‚	$sys/{pid}/{device-name}/dp/post/json	å‘å¸ƒ
+è®¾å¤‡ä¸Šä¼ æ•°æ®ç‚¹æˆåŠŸå“åº”	$sys/{pid}/{device-name}/dp/post/json/accepted	è®¢é˜…
+è®¾å¤‡ä¸Šä¼ æ•°æ®ç‚¹å¤±è´¥å“åº”	$sys/{pid}/{device-name}/dp/post/json/rejected	è®¢é˜…
+2. è®¾å¤‡å‘½ä»¤ä¸‹å‘
 
-¹¦ÄÜ	Ö÷Ìâ	²Ù×÷È¨ÏŞ
-Éè±¸Í¬²½ÃüÁîÇëÇó	$sys/{pid}/{device-name}/cmd/request/+	¶©ÔÄ
-Éè±¸Í¬²½ÃüÁîÏìÓ¦	$sys/{pid}/{device-name}/cmd/response/{cmdId}	·¢²¼
-Éè±¸Í¬²½ÃüÁîÏìÓ¦³É¹¦	$sys/{pid}/{device-name}/cmd/response/+/accepted	¶©ÔÄ
-Éè±¸Í¬²½ÃüÁîÏìÓ¦Ê§°Ü	$sys/{pid}/{device-name}/cmd/response/+/rejected	¶©ÔÄ
-tips£ºÈç¹ûÒª¶©ÔÄÈ«²¿ÃüÁîÏÂ·¢Ö÷Ìâ£¬¿ÉÒÔÊ¹ÓÃ£º$sys/{pid}/{device-name}/cmd/#
+åŠŸèƒ½	ä¸»é¢˜	æ“ä½œæƒé™
+è®¾å¤‡åŒæ­¥å‘½ä»¤è¯·æ±‚	$sys/{pid}/{device-name}/cmd/request/+	è®¢é˜…
+è®¾å¤‡åŒæ­¥å‘½ä»¤å“åº”	$sys/{pid}/{device-name}/cmd/response/{cmdId}	å‘å¸ƒ
+è®¾å¤‡åŒæ­¥å‘½ä»¤å“åº”æˆåŠŸ	$sys/{pid}/{device-name}/cmd/response/+/accepted	è®¢é˜…
+è®¾å¤‡åŒæ­¥å‘½ä»¤å“åº”å¤±è´¥	$sys/{pid}/{device-name}/cmd/response/+/rejected	è®¢é˜…
+tipsï¼šå¦‚æœè¦è®¢é˜…å…¨éƒ¨å‘½ä»¤ä¸‹å‘ä¸»é¢˜ï¼Œå¯ä»¥ä½¿ç”¨ï¼š$sys/{pid}/{device-name}/cmd/#
 
-3. Éè±¸¾µÏñ
+3. è®¾å¤‡é•œåƒ
 
-¹¦ÄÜ	Ö÷Ìâ	²Ù×÷È¨ÏŞ
-Éè±¸¸üĞÂ¾µÏñÇëÇó	$sys/{pid}/{device-name}/image/update	·¢²¼
-Éè±¸¸üĞÂ¾µÏñ³É¹¦ÏìÓ¦	$sys/{pid}/{device-name}/image/update/accepted	¶©ÔÄ
-Éè±¸¸üĞÂ¾µÏñÊ§°ÜÏìÓ¦	$sys/{pid}/{device-name}/image/update/rejected	¶©ÔÄ
-Éè±¸»ñÈ¡¾µÏñÇëÇó	$sys/{pid}/{device-name}/image/get	¶©ÔÄ
-Éè±¸»ñÈ¡¾µÏñ³É¹¦ÏìÓ¦	$sys/{pid}/{device-name}/image/get/accepted	¶©ÔÄ
-Éè±¸»ñÈ¡¾µÏñÊ§°ÜÏìÓ¦	$sys/{pid}/{device-name}/image/get/rejected	¶©ÔÄ
-Éè±¸¾µÏñdeltaÍÆËÍÇëÇó	$sys/{pid}/{device-name}/image/update/delta	¶©ÔÄ
-»ú¿¨°ó¶¨Í¨ĞÅÖ÷Ìâ
-1. Éè±¸»ú¿¨°ó¶¨
+åŠŸèƒ½	ä¸»é¢˜	æ“ä½œæƒé™
+è®¾å¤‡æ›´æ–°é•œåƒè¯·æ±‚	$sys/{pid}/{device-name}/image/update	å‘å¸ƒ
+è®¾å¤‡æ›´æ–°é•œåƒæˆåŠŸå“åº”	$sys/{pid}/{device-name}/image/update/accepted	è®¢é˜…
+è®¾å¤‡æ›´æ–°é•œåƒå¤±è´¥å“åº”	$sys/{pid}/{device-name}/image/update/rejected	è®¢é˜…
+è®¾å¤‡è·å–é•œåƒè¯·æ±‚	$sys/{pid}/{device-name}/image/get	è®¢é˜…
+è®¾å¤‡è·å–é•œåƒæˆåŠŸå“åº”	$sys/{pid}/{device-name}/image/get/accepted	è®¢é˜…
+è®¾å¤‡è·å–é•œåƒå¤±è´¥å“åº”	$sys/{pid}/{device-name}/image/get/rejected	è®¢é˜…
+è®¾å¤‡é•œåƒdeltaæ¨é€è¯·æ±‚	$sys/{pid}/{device-name}/image/update/delta	è®¢é˜…
+æœºå¡ç»‘å®šé€šä¿¡ä¸»é¢˜
+1. è®¾å¤‡æœºå¡ç»‘å®š
 
-¹¦ÄÜ	Ö÷Ìâ	²Ù×÷È¨ÏŞ
-Éè±¸»ú¿¨°ó¶¨ÇëÇó	$sys/{pid}/{device-name}/cmp/property/post	·¢²¼
-Éè±¸»ú¿¨°ó¶¨ÏìÓ¦	$sys/{pid}/{device-name}/cmp/property/post/reply	¶©ÔÄ
+åŠŸèƒ½	ä¸»é¢˜	æ“ä½œæƒé™
+è®¾å¤‡æœºå¡ç»‘å®šè¯·æ±‚	$sys/{pid}/{device-name}/cmp/property/post	å‘å¸ƒ
+è®¾å¤‡æœºå¡ç»‘å®šå“åº”	$sys/{pid}/{device-name}/cmp/property/post/reply	è®¢é˜…

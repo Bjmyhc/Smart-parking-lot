@@ -125,7 +125,7 @@ uint16_t US_GetDistance(void)
 
     float distance = 0.5f * 340.0f * GoBackTime * 1e-4f;
 	
-    Usart_Printf(USART_DEBUG, "Distance:%.3fcm", distance);
+    //Usart_Printf(USART_DEBUG, "bsp_ultrasonic.c=>Distance:%.3fcm\n", distance);
 	
     return (uint16_t)distance;
 }

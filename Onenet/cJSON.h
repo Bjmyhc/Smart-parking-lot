@@ -28,153 +28,153 @@ extern "C"
 {
 #endif
 
-/* cJSON Êı¾İÀàĞÍÃ¶¾Ù */
-#define cJSON_False 0			/**< ²¼¶ûÖµ false */
-#define cJSON_True 1			/**< ²¼¶ûÖµ true */
-#define cJSON_NULL 2			/**< ¿ÕÖµ null */
-#define cJSON_Number 3			/**< ÊıÖµÀàĞÍ */
-#define cJSON_String 4			/**< ×Ö·û´®ÀàĞÍ */
-#define cJSON_Array 5			/**< Êı×éÀàĞÍ */
-#define cJSON_Object 6			/**< ¶ÔÏóÀàĞÍ */
+/* cJSON æ•°æ®ç±»å‹æšä¸¾ */
+#define cJSON_False 0			/**< å¸ƒå°”å€¼ false */
+#define cJSON_True 1			/**< å¸ƒå°”å€¼ true */
+#define cJSON_NULL 2			/**< ç©ºå€¼ null */
+#define cJSON_Number 3			/**< æ•°å€¼ç±»å‹ */
+#define cJSON_String 4			/**< å­—ç¬¦ä¸²ç±»å‹ */
+#define cJSON_Array 5			/**< æ•°ç»„ç±»å‹ */
+#define cJSON_Object 6			/**< å¯¹è±¡ç±»å‹ */
 	
-#define cJSON_IsReference 256	/**< ÒıÓÃ±ê¼Ç£¬±íÊ¾¸Ã½ÚµãÊÇ¶ÔÆäËû½ÚµãµÄÒıÓÃ */
-#define cJSON_StringIsConst 512	/**< ×Ö·û´®³£Á¿±ê¼Ç£¬±íÊ¾×Ö·û´®Ö¸Õë²»ĞèÒªÊÍ·Å */
+#define cJSON_IsReference 256	/**< å¼•ç”¨æ ‡è®°ï¼Œè¡¨ç¤ºè¯¥èŠ‚ç‚¹æ˜¯å¯¹å…¶ä»–èŠ‚ç‚¹çš„å¼•ç”¨ */
+#define cJSON_StringIsConst 512	/**< å­—ç¬¦ä¸²å¸¸é‡æ ‡è®°ï¼Œè¡¨ç¤ºå­—ç¬¦ä¸²æŒ‡é’ˆä¸éœ€è¦é‡Šæ”¾ */
 
 /**
- * @brief cJSON ½Úµã½á¹¹Ìå
- * @note  Õû¸ö JSON Ê÷Í¨¹ı¸Ã½á¹¹ÌåÁ´½Ó¶ø³É
+ * @brief cJSON èŠ‚ç‚¹ç»“æ„ä½“
+ * @note  æ•´ä¸ª JSON æ ‘é€šè¿‡è¯¥ç»“æ„ä½“é“¾æ¥è€Œæˆ
  */
 typedef struct cJSON {
-	struct cJSON *next, *prev;	/**< ºóÇı/Ç°ÇıÖ¸Õë£¬ÓÃÓÚ±éÀúÊı×é»ò¶ÔÏóÁ´±í */
-	struct cJSON *child;		/**< ×Ó½ÚµãÖ¸Õë£¬Ö¸ÏòÊı×é»ò¶ÔÏóµÄÊ×¸ö×ÓÔªËØ */
+	struct cJSON *next, *prev;	/**< åé©±/å‰é©±æŒ‡é’ˆï¼Œç”¨äºéå†æ•°ç»„æˆ–å¯¹è±¡é“¾è¡¨ */
+	struct cJSON *child;		/**< å­èŠ‚ç‚¹æŒ‡é’ˆï¼ŒæŒ‡å‘æ•°ç»„æˆ–å¯¹è±¡çš„é¦–ä¸ªå­å…ƒç´  */
 
-	int type;					/**< Êı¾İÀàĞÍ£¬È¡ÖµÎªÉÏÊö cJSON_XXX Ã¶¾Ù */
+	int type;					/**< æ•°æ®ç±»å‹ï¼Œå–å€¼ä¸ºä¸Šè¿° cJSON_XXX æšä¸¾ */
 
-	char *valuestring;			/**< ×Ö·û´®Öµ£¬µ± type==cJSON_String Ê±ÓĞĞ§ */
-	int valueint;				/**< ÕûĞÍÖµ£¬µ± type==cJSON_Number Ê±ÓĞĞ§ */
-	double valuedouble;			/**< Ë«¾«¶È¸¡µãÖµ£¬µ± type==cJSON_Number Ê±ÓĞĞ§ */
+	char *valuestring;			/**< å­—ç¬¦ä¸²å€¼ï¼Œå½“ type==cJSON_String æ—¶æœ‰æ•ˆ */
+	int valueint;				/**< æ•´å‹å€¼ï¼Œå½“ type==cJSON_Number æ—¶æœ‰æ•ˆ */
+	double valuedouble;			/**< åŒç²¾åº¦æµ®ç‚¹å€¼ï¼Œå½“ type==cJSON_Number æ—¶æœ‰æ•ˆ */
 
-	char *string;				/**< ¼üÃû£¬µ±¸Ã½ÚµãÊôÓÚÄ³¸ö¶ÔÏóµÄ×ÓÏîÊ±±£´æ¼üÃû */
+	char *string;				/**< é”®åï¼Œå½“è¯¥èŠ‚ç‚¹å±äºæŸä¸ªå¯¹è±¡çš„å­é¡¹æ—¶ä¿å­˜é”®å */
 } cJSON;
 
 /**
- * @brief ÄÚ´æ¹ÜÀí¹³×Ó½á¹¹Ìå
- * @note  ÓÃÓÚ×Ô¶¨Òå cJSON µÄÄÚ´æ·ÖÅäºÍÊÍ·Åº¯Êı
+ * @brief å†…å­˜ç®¡ç†é’©å­ç»“æ„ä½“
+ * @note  ç”¨äºè‡ªå®šä¹‰ cJSON çš„å†…å­˜åˆ†é…å’Œé‡Šæ”¾å‡½æ•°
  */
 typedef struct cJSON_Hooks {
-      void *(*malloc_fn)(size_t sz);	/**< ×Ô¶¨ÒåÄÚ´æ·ÖÅäº¯Êı */
-      void (*free_fn)(void *ptr);		/**< ×Ô¶¨ÒåÄÚ´æÊÍ·Åº¯Êı */
+      void *(*malloc_fn)(size_t sz);	/**< è‡ªå®šä¹‰å†…å­˜åˆ†é…å‡½æ•° */
+      void (*free_fn)(void *ptr);		/**< è‡ªå®šä¹‰å†…å­˜é‡Šæ”¾å‡½æ•° */
 } cJSON_Hooks;
 
 /**
- * @brief ³õÊ¼»¯ÄÚ´æ¹ÜÀí¹³×Ó
- * @param hooks ¹³×Ó½á¹¹ÌåÖ¸Õë£¬´« NULL Ôò»Ö¸´Ä¬ÈÏ malloc/free
+ * @brief åˆå§‹åŒ–å†…å­˜ç®¡ç†é’©å­
+ * @param hooks é’©å­ç»“æ„ä½“æŒ‡é’ˆï¼Œä¼  NULL åˆ™æ¢å¤é»˜è®¤ malloc/free
  */
 extern void cJSON_InitHooks(cJSON_Hooks* hooks);
 
 
 /**
- * @brief ½âÎö JSON ×Ö·û´®£¬Éú³É cJSON ¶ÔÏóÊ÷
- * @param value JSON ¸ñÊ½×Ö·û´®
- * @return ½âÎö³É¹¦ºó·µ»Ø cJSON ¸ù½ÚµãÖ¸Õë£¬Ê§°Ü·µ»Ø NULL
- * @note  Ê¹ÓÃÍê±ÏºóĞèµ÷ÓÃ cJSON_Delete ÊÍ·ÅÄÚ´æ
+ * @brief è§£æ JSON å­—ç¬¦ä¸²ï¼Œç”Ÿæˆ cJSON å¯¹è±¡æ ‘
+ * @param value JSON æ ¼å¼å­—ç¬¦ä¸²
+ * @return è§£ææˆåŠŸåè¿”å› cJSON æ ¹èŠ‚ç‚¹æŒ‡é’ˆï¼Œå¤±è´¥è¿”å› NULL
+ * @note  ä½¿ç”¨å®Œæ¯•åéœ€è°ƒç”¨ cJSON_Delete é‡Šæ”¾å†…å­˜
  */
 extern cJSON *cJSON_Parse(const char *value);
 
 /**
- * @brief ½« cJSON ¶ÔÏó¸ñÊ½»¯Îª´øËõ½øµÄ JSON ×Ö·û´®
- * @param item cJSON ¶ÔÏóÖ¸Õë
- * @return ¸ñÊ½»¯ºóµÄ×Ö·û´®£¬Ê¹ÓÃÍê±ÏºóĞèµ÷ÓÃ free ÊÍ·Å
+ * @brief å°† cJSON å¯¹è±¡æ ¼å¼åŒ–ä¸ºå¸¦ç¼©è¿›çš„ JSON å­—ç¬¦ä¸²
+ * @param item cJSON å¯¹è±¡æŒ‡é’ˆ
+ * @return æ ¼å¼åŒ–åçš„å­—ç¬¦ä¸²ï¼Œä½¿ç”¨å®Œæ¯•åéœ€è°ƒç”¨ free é‡Šæ”¾
  */
 extern char  *cJSON_Print(cJSON *item);
 
 /**
- * @brief ½« cJSON ¶ÔÏó¸ñÊ½»¯ÎªÎŞËõ½øµÄ JSON ×Ö·û´®£¨½ô´Õ¸ñÊ½£©
- * @param item cJSON ¶ÔÏóÖ¸Õë
- * @return ¸ñÊ½»¯ºóµÄ×Ö·û´®£¬Ê¹ÓÃÍê±ÏºóĞèµ÷ÓÃ free ÊÍ·Å
+ * @brief å°† cJSON å¯¹è±¡æ ¼å¼åŒ–ä¸ºæ— ç¼©è¿›çš„ JSON å­—ç¬¦ä¸²ï¼ˆç´§å‡‘æ ¼å¼ï¼‰
+ * @param item cJSON å¯¹è±¡æŒ‡é’ˆ
+ * @return æ ¼å¼åŒ–åçš„å­—ç¬¦ä¸²ï¼Œä½¿ç”¨å®Œæ¯•åéœ€è°ƒç”¨ free é‡Šæ”¾
  */
 extern char  *cJSON_PrintUnformatted(cJSON *item);
 
 /**
- * @brief Ê¹ÓÃ»º³åÇø²ßÂÔ½« cJSON ¶ÔÏó¸ñÊ½»¯Îª×Ö·û´®
- * @param item       cJSON ¶ÔÏóÖ¸Õë
- * @param prebuffer  Ô¤·ÖÅäµÄ»º³åÇø´óĞ¡Ô¤¹À
- * @param fmt        ÊÇ·ñ¸ñÊ½»¯£º0=½ô´Õ¸ñÊ½£¬1=´øËõ½ø¸ñÊ½
- * @return ¸ñÊ½»¯ºóµÄ×Ö·û´®£¬Ê¹ÓÃÍê±ÏºóĞèµ÷ÓÃ free ÊÍ·Å
+ * @brief ä½¿ç”¨ç¼“å†²åŒºç­–ç•¥å°† cJSON å¯¹è±¡æ ¼å¼åŒ–ä¸ºå­—ç¬¦ä¸²
+ * @param item       cJSON å¯¹è±¡æŒ‡é’ˆ
+ * @param prebuffer  é¢„åˆ†é…çš„ç¼“å†²åŒºå¤§å°é¢„ä¼°
+ * @param fmt        æ˜¯å¦æ ¼å¼åŒ–ï¼š0=ç´§å‡‘æ ¼å¼ï¼Œ1=å¸¦ç¼©è¿›æ ¼å¼
+ * @return æ ¼å¼åŒ–åçš„å­—ç¬¦ä¸²ï¼Œä½¿ç”¨å®Œæ¯•åéœ€è°ƒç”¨ free é‡Šæ”¾
  */
 extern char *cJSON_PrintBuffered(cJSON *item, int prebuffer, int fmt);
 
 /**
- * @brief É¾³ı cJSON ¶ÔÏó¼°ÆäËùÓĞ×Ó½Úµã
- * @param c ÒªÉ¾³ıµÄ cJSON ¶ÔÏóÖ¸Õë
+ * @brief åˆ é™¤ cJSON å¯¹è±¡åŠå…¶æ‰€æœ‰å­èŠ‚ç‚¹
+ * @param c è¦åˆ é™¤çš„ cJSON å¯¹è±¡æŒ‡é’ˆ
  */
 extern void cJSON_Delete(cJSON *c);
 
 /**
- * @brief »ñÈ¡Êı×é£¨»ò¶ÔÏó£©µÄ×ÓÔªËØ¸öÊı
- * @param array cJSON Êı×é/¶ÔÏóÖ¸Õë
- * @return ÔªËØ¸öÊı
+ * @brief è·å–æ•°ç»„ï¼ˆæˆ–å¯¹è±¡ï¼‰çš„å­å…ƒç´ ä¸ªæ•°
+ * @param array cJSON æ•°ç»„/å¯¹è±¡æŒ‡é’ˆ
+ * @return å…ƒç´ ä¸ªæ•°
  */
 extern int cJSON_GetArraySize(cJSON *array);
 
 /**
- * @brief »ñÈ¡Êı×éÖĞÖ¸¶¨Ë÷ÒıµÄÔªËØ
- * @param array cJSON Êı×éÖ¸Õë
- * @param item  Ë÷ÒıºÅ£¨´Ó 0 ¿ªÊ¼£©
- * @return ³É¹¦·µ»ØÔªËØÖ¸Õë£¬Ê§°Ü·µ»Ø NULL
+ * @brief è·å–æ•°ç»„ä¸­æŒ‡å®šç´¢å¼•çš„å…ƒç´ 
+ * @param array cJSON æ•°ç»„æŒ‡é’ˆ
+ * @param item  ç´¢å¼•å·ï¼ˆä» 0 å¼€å§‹ï¼‰
+ * @return æˆåŠŸè¿”å›å…ƒç´ æŒ‡é’ˆï¼Œå¤±è´¥è¿”å› NULL
  */
 extern cJSON *cJSON_GetArrayItem(cJSON *array, int item);
 
 /**
- * @brief ´Ó¶ÔÏóÖĞ¸ù¾İ¼üÃû»ñÈ¡ÔªËØ£¨²»Çø·Ö´óĞ¡Ğ´£©
- * @param object cJSON ¶ÔÏóÖ¸Õë
- * @param string ¼üÃû
- * @return ³É¹¦·µ»ØÔªËØÖ¸Õë£¬Ê§°Ü·µ»Ø NULL
+ * @brief ä»å¯¹è±¡ä¸­æ ¹æ®é”®åè·å–å…ƒç´ ï¼ˆä¸åŒºåˆ†å¤§å°å†™ï¼‰
+ * @param object cJSON å¯¹è±¡æŒ‡é’ˆ
+ * @param string é”®å
+ * @return æˆåŠŸè¿”å›å…ƒç´ æŒ‡é’ˆï¼Œå¤±è´¥è¿”å› NULL
  */
 extern cJSON *cJSON_GetObjectItem(cJSON *object, const char *string);
 
 /**
- * @brief »ñÈ¡½âÎö´íÎóÎ»ÖÃÖ¸Õë
- * @return Ö¸Ïò½âÎö³ö´íÎ»ÖÃµÄ×Ö·ûÖ¸Õë
- * @note  µ± cJSON_Parse ·µ»Ø NULL Ê±ÓĞĞ§£¬¿ÉÓÃÓÚµ÷ÊÔ
+ * @brief è·å–è§£æé”™è¯¯ä½ç½®æŒ‡é’ˆ
+ * @return æŒ‡å‘è§£æå‡ºé”™ä½ç½®çš„å­—ç¬¦æŒ‡é’ˆ
+ * @note  å½“ cJSON_Parse è¿”å› NULL æ—¶æœ‰æ•ˆï¼Œå¯ç”¨äºè°ƒè¯•
  */
 extern const char *cJSON_GetErrorPtr(void);
 	
 /**
- * @brief ´´½¨ cJSON »ù±¾ÀàĞÍ½Úµã
+ * @brief åˆ›å»º cJSON åŸºæœ¬ç±»å‹èŠ‚ç‚¹
  * @{
  */
-extern cJSON *cJSON_CreateNull(void);						/**< ´´½¨ null ½Úµã */
-extern cJSON *cJSON_CreateTrue(void);						/**< ´´½¨ true ½Úµã */
-extern cJSON *cJSON_CreateFalse(void);						/**< ´´½¨ false ½Úµã */
-extern cJSON *cJSON_CreateBool(int b);						/**< ´´½¨²¼¶û½Úµã£¬b·Ç0=true */
-extern cJSON *cJSON_CreateNumber(double num);				/**< ´´½¨ÊıÖµ½Úµã */
-extern cJSON *cJSON_CreateString(const char *string);		/**< ´´½¨×Ö·û´®½Úµã */
-extern cJSON *cJSON_CreateArray(void);						/**< ´´½¨¿ÕÊı×é½Úµã */
-extern cJSON *cJSON_CreateObject(void);						/**< ´´½¨¿Õ¶ÔÏó½Úµã */
+extern cJSON *cJSON_CreateNull(void);						/**< åˆ›å»º null èŠ‚ç‚¹ */
+extern cJSON *cJSON_CreateTrue(void);						/**< åˆ›å»º true èŠ‚ç‚¹ */
+extern cJSON *cJSON_CreateFalse(void);						/**< åˆ›å»º false èŠ‚ç‚¹ */
+extern cJSON *cJSON_CreateBool(int b);						/**< åˆ›å»ºå¸ƒå°”èŠ‚ç‚¹ï¼Œbé0=true */
+extern cJSON *cJSON_CreateNumber(double num);				/**< åˆ›å»ºæ•°å€¼èŠ‚ç‚¹ */
+extern cJSON *cJSON_CreateString(const char *string);		/**< åˆ›å»ºå­—ç¬¦ä¸²èŠ‚ç‚¹ */
+extern cJSON *cJSON_CreateArray(void);						/**< åˆ›å»ºç©ºæ•°ç»„èŠ‚ç‚¹ */
+extern cJSON *cJSON_CreateObject(void);						/**< åˆ›å»ºç©ºå¯¹è±¡èŠ‚ç‚¹ */
 /** @} */
 
 /**
- * @brief ÅúÁ¿´´½¨Êı×éÀàĞÍ½Úµã
+ * @brief æ‰¹é‡åˆ›å»ºæ•°ç»„ç±»å‹èŠ‚ç‚¹
  * @{
  */
-extern cJSON *cJSON_CreateIntArray(const int *numbers, int count);			/**< ´ÓÕûĞÍÊı×é´´½¨ */
-extern cJSON *cJSON_CreateFloatArray(const float *numbers, int count);		/**< ´Ó¸¡µãÊı×é´´½¨ */
-extern cJSON *cJSON_CreateDoubleArray(const double *numbers, int count);	/**< ´ÓË«¾«¶ÈÊı×é´´½¨ */
-extern cJSON *cJSON_CreateStringArray(const char **strings, int count);		/**< ´Ó×Ö·û´®Êı×é´´½¨ */
+extern cJSON *cJSON_CreateIntArray(const int *numbers, int count);			/**< ä»æ•´å‹æ•°ç»„åˆ›å»º */
+extern cJSON *cJSON_CreateFloatArray(const float *numbers, int count);		/**< ä»æµ®ç‚¹æ•°ç»„åˆ›å»º */
+extern cJSON *cJSON_CreateDoubleArray(const double *numbers, int count);	/**< ä»åŒç²¾åº¦æ•°ç»„åˆ›å»º */
+extern cJSON *cJSON_CreateStringArray(const char **strings, int count);		/**< ä»å­—ç¬¦ä¸²æ•°ç»„åˆ›å»º */
 /** @} */
 
 /**
- * @brief ÏòÊı×é/¶ÔÏóÖĞÌí¼ÓÔªËØ
+ * @brief å‘æ•°ç»„/å¯¹è±¡ä¸­æ·»åŠ å…ƒç´ 
  * @{
  */
-extern void cJSON_AddItemToArray(cJSON *array, cJSON *item);				/**< ÏòÊı×é×·¼ÓÔªËØ */
-extern void cJSON_AddItemToObject(cJSON *object, const char *string, cJSON *item);	/**< Ïò¶ÔÏóÌí¼Ó¼üÖµ¶Ô */
-extern void cJSON_AddItemToObjectCS(cJSON *object, const char *string, cJSON *item);	/**< Ïò¶ÔÏóÌí¼Ó¼üÖµ¶Ô£¨×Ö·û´®Îª³£Á¿£¬²»¸´ÖÆ£© */
+extern void cJSON_AddItemToArray(cJSON *array, cJSON *item);				/**< å‘æ•°ç»„è¿½åŠ å…ƒç´  */
+extern void cJSON_AddItemToObject(cJSON *object, const char *string, cJSON *item);	/**< å‘å¯¹è±¡æ·»åŠ é”®å€¼å¯¹ */
+extern void cJSON_AddItemToObjectCS(cJSON *object, const char *string, cJSON *item);	/**< å‘å¯¹è±¡æ·»åŠ é”®å€¼å¯¹ï¼ˆå­—ç¬¦ä¸²ä¸ºå¸¸é‡ï¼Œä¸å¤åˆ¶ï¼‰ */
 /** @} */
 
 /**
- * @brief ÏòÊı×é/¶ÔÏóÖĞÌí¼ÓÒıÓÃ£¨²»¸´ÖÆÔ­½Úµã£¬½öÒıÓÃ£©
+ * @brief å‘æ•°ç»„/å¯¹è±¡ä¸­æ·»åŠ å¼•ç”¨ï¼ˆä¸å¤åˆ¶åŸèŠ‚ç‚¹ï¼Œä»…å¼•ç”¨ï¼‰
  * @{
  */
 extern void cJSON_AddItemReferenceToArray(cJSON *array, cJSON *item);
@@ -182,50 +182,50 @@ extern void cJSON_AddItemReferenceToObject(cJSON *object, const char *string, cJ
 /** @} */
 
 /**
- * @brief ´ÓÊı×é/¶ÔÏóÖĞ·ÖÀë/É¾³ıÔªËØ
+ * @brief ä»æ•°ç»„/å¯¹è±¡ä¸­åˆ†ç¦»/åˆ é™¤å…ƒç´ 
  * @{
  */
-extern cJSON *cJSON_DetachItemFromArray(cJSON *array, int which);		/**< ´ÓÊı×é·ÖÀëÔªËØ£¨²»ÊÍ·Å£© */
-extern void   cJSON_DeleteItemFromArray(cJSON *array, int which);		/**< ´ÓÊı×éÉ¾³ıÔªËØ£¨ÊÍ·Å£© */
-extern cJSON *cJSON_DetachItemFromObject(cJSON *object, const char *string);	/**< ´Ó¶ÔÏó·ÖÀëÔªËØ */
-extern void   cJSON_DeleteItemFromObject(cJSON *object, const char *string);	/**< ´Ó¶ÔÏóÉ¾³ıÔªËØ */
+extern cJSON *cJSON_DetachItemFromArray(cJSON *array, int which);		/**< ä»æ•°ç»„åˆ†ç¦»å…ƒç´ ï¼ˆä¸é‡Šæ”¾ï¼‰ */
+extern void   cJSON_DeleteItemFromArray(cJSON *array, int which);		/**< ä»æ•°ç»„åˆ é™¤å…ƒç´ ï¼ˆé‡Šæ”¾ï¼‰ */
+extern cJSON *cJSON_DetachItemFromObject(cJSON *object, const char *string);	/**< ä»å¯¹è±¡åˆ†ç¦»å…ƒç´  */
+extern void   cJSON_DeleteItemFromObject(cJSON *object, const char *string);	/**< ä»å¯¹è±¡åˆ é™¤å…ƒç´  */
 /** @} */
 	
 /**
- * @brief ¸üĞÂ/Ìæ»»Êı×é/¶ÔÏóÖĞµÄÔªËØ
+ * @brief æ›´æ–°/æ›¿æ¢æ•°ç»„/å¯¹è±¡ä¸­çš„å…ƒç´ 
  * @{
  */
-extern void cJSON_InsertItemInArray(cJSON *array, int which, cJSON *newitem);	/**< ÔÚÖ¸¶¨Î»ÖÃ²åÈëÔªËØ£¬ºóĞøÔªËØÓÒÒÆ */
-extern void cJSON_ReplaceItemInArray(cJSON *array, int which, cJSON *newitem);	/**< Ìæ»»Ö¸¶¨Î»ÖÃÔªËØ */
-extern void cJSON_ReplaceItemInObject(cJSON *object, const char *string, cJSON *newitem);	/**< Ìæ»»¶ÔÏóÖĞÖ¸¶¨¼üµÄÖµ */
+extern void cJSON_InsertItemInArray(cJSON *array, int which, cJSON *newitem);	/**< åœ¨æŒ‡å®šä½ç½®æ’å…¥å…ƒç´ ï¼Œåç»­å…ƒç´ å³ç§» */
+extern void cJSON_ReplaceItemInArray(cJSON *array, int which, cJSON *newitem);	/**< æ›¿æ¢æŒ‡å®šä½ç½®å…ƒç´  */
+extern void cJSON_ReplaceItemInObject(cJSON *object, const char *string, cJSON *newitem);	/**< æ›¿æ¢å¯¹è±¡ä¸­æŒ‡å®šé”®çš„å€¼ */
 /** @} */
 
 /**
- * @brief Éî¶È¸´ÖÆ cJSON ½Úµã
- * @param item   Òª¸´ÖÆµÄ½Úµã
- * @param recurse ÊÇ·ñµİ¹é¸´ÖÆ×Ó½Úµã£¨·Ç0=µİ¹é£©
- * @return ¸´ÖÆºóµÄĞÂ½ÚµãÖ¸Õë
- * @note  ĞÂ½ÚµãĞèÒªÊÖ¶¯µ÷ÓÃ cJSON_Delete ÊÍ·Å
+ * @brief æ·±åº¦å¤åˆ¶ cJSON èŠ‚ç‚¹
+ * @param item   è¦å¤åˆ¶çš„èŠ‚ç‚¹
+ * @param recurse æ˜¯å¦é€’å½’å¤åˆ¶å­èŠ‚ç‚¹ï¼ˆé0=é€’å½’ï¼‰
+ * @return å¤åˆ¶åçš„æ–°èŠ‚ç‚¹æŒ‡é’ˆ
+ * @note  æ–°èŠ‚ç‚¹éœ€è¦æ‰‹åŠ¨è°ƒç”¨ cJSON_Delete é‡Šæ”¾
  */
 extern cJSON *cJSON_Duplicate(cJSON *item, int recurse);
 
 /**
- * @brief ´øÑ¡Ïî½âÎö JSON ×Ö·û´®
- * @param value                   JSON ×Ö·û´®
- * @param return_parse_end        ¿ÉÑ¡£¬·µ»Ø½âÎö½áÊøÎ»ÖÃ
- * @param require_null_terminated ÊÇ·ñÒªÇó JSON ×Ö·û´®±ØĞëÒÔ null ½áÎ²
- * @return ½âÎö³É¹¦·µ»Ø cJSON ¸ù½Úµã£¬Ê§°Ü·µ»Ø NULL
+ * @brief å¸¦é€‰é¡¹è§£æ JSON å­—ç¬¦ä¸²
+ * @param value                   JSON å­—ç¬¦ä¸²
+ * @param return_parse_end        å¯é€‰ï¼Œè¿”å›è§£æç»“æŸä½ç½®
+ * @param require_null_terminated æ˜¯å¦è¦æ±‚ JSON å­—ç¬¦ä¸²å¿…é¡»ä»¥ null ç»“å°¾
+ * @return è§£ææˆåŠŸè¿”å› cJSON æ ¹èŠ‚ç‚¹ï¼Œå¤±è´¥è¿”å› NULL
  */
 extern cJSON *cJSON_ParseWithOpts(const char *value, const char **return_parse_end, int require_null_terminated);
 
 /**
- * @brief È¥³ı JSON ×Ö·û´®ÖĞµÄ¿Õ°××Ö·û£¨¿Õ¸ñ¡¢ÖÆ±í¡¢»»ĞĞ¡¢×¢ÊÍ£©
- * @param json ´«Èë¿ÉĞŞ¸ÄµÄ JSON ×Ö·û´®£¨Ô­µØÑ¹Ëõ£©
+ * @brief å»é™¤ JSON å­—ç¬¦ä¸²ä¸­çš„ç©ºç™½å­—ç¬¦ï¼ˆç©ºæ ¼ã€åˆ¶è¡¨ã€æ¢è¡Œã€æ³¨é‡Šï¼‰
+ * @param json ä¼ å…¥å¯ä¿®æ”¹çš„ JSON å­—ç¬¦ä¸²ï¼ˆåŸåœ°å‹ç¼©ï¼‰
  */
 extern void cJSON_Minify(char *json);
 
 /**
- * @brief ¿ì½İºê£ºÏò¶ÔÏóÖĞÌí¼Ó¸÷ÖÖÀàĞÍµÄÖµ
+ * @brief å¿«æ·å®ï¼šå‘å¯¹è±¡ä¸­æ·»åŠ å„ç§ç±»å‹çš„å€¼
  * @{
  */
 #define cJSON_AddNullToObject(object,name)		cJSON_AddItemToObject(object, name, cJSON_CreateNull())
@@ -237,7 +237,7 @@ extern void cJSON_Minify(char *json);
 /** @} */
 
 /**
- * @brief ÉèÖÃ½ÚµãµÄÕûĞÍ/ÊıÖµ£¨Í¬Ê±¸üĞÂ valueint ºÍ valuedouble£©
+ * @brief è®¾ç½®èŠ‚ç‚¹çš„æ•´å‹/æ•°å€¼ï¼ˆåŒæ—¶æ›´æ–° valueint å’Œ valuedoubleï¼‰
  * @{
  */
 #define cJSON_SetIntValue(object,val)			((object)?(object)->valueint=(object)->valuedouble=(val):(val))

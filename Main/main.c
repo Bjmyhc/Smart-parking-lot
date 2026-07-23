@@ -34,6 +34,7 @@
 #include "bsp_usart.h"
 #include "bsp_ultrasonic.h"
 #include "bsp_oled.h"
+#include "bsp_qmc5883p.h"
 
 #include "esp8266.h"
 #include "onenet.h"
@@ -70,6 +71,12 @@ uint32_t LastStatusChangeTick = 0;
 /* LED使能标志: 0=云端禁用, 1=云端启用(本地自动控制) */
 uint8_t LEDEnable = 1;
 
+/* QMC5883P 磁力计设备 */
+QMC5883P_Device_t qmc5883p;
+
+/* 地磁检测车辆存在标志 (0=无车, 1=有车) */
+uint8_t MagCarPresent = 0;
+
 /****************************************************************************
  * 函数名: BSP_Init
  * 功能:   初始化所有板级外设
@@ -83,7 +90,8 @@ void BSP_Init(void)
     SysTick_Init();       /* 系统滴答定时器初始化 */
     Usart_Init();         /* 串口初始化(USART1调试, USART2连接ESP8266) */
     OLED_Init();          /* OLED显示屏初始化 */
-    Usart_Printf(USART_DEBUG, "USART Init OK!\n");
+    QMC5883P_Init(&qmc5883p, QMC5883P_MODE_CONTINUOUS, QMC5883P_ODR_100HZ, QMC5883P_RNG_8G);
+    Usart_Printf(USART_DEBUG, "All Bsp Init OK!\n");
 }
 
 /****************************************************************************
@@ -91,41 +99,44 @@ void BSP_Init(void)
  * 功能:   超声波传感器业务任务函数
  * 参数:   无
  * 返回值: 无
- * 说明:   10次移动平均滤波,超过400cm时设置为380cm
- *         内部每200ms自动更新一次数据
- *         直接修改全局变量Distance
+ * 说明:   无效值剔除 + 一阶低通滤波 (EMA)
+ *         alpha = 1/4, 用移位实现全整数运算, 无需浮点
+ *         超时/过近/过远的异常值直接丢弃, 保持上次有效值
+ *         直接修改全局变量 Distance
  ****************************************************************************/
 void US_Task(void)
 {
-    #define US_FILTER_SIZE 10
-    #define US_UPDATE_INTERVAL 100
-    
-    static uint16_t usBuffer[US_FILTER_SIZE] = {0};
-    static uint8_t usBufferIndex = 0;
+    #define US_UPDATE_INTERVAL 200
+    #define US_SHIFT            2       /* EMA 系数 alpha = 1/2^US_SHIFT = 0.25 */
+    #define US_MIN_VALID         2      /* 最小有效距离(cm) */
+    #define US_MAX_VALID       400      /* 最大有效距离(cm) */
+
     static uint32_t lastUpdateTick = 0;
-    
+    static uint16_t smoothDist = 0;
+    static uint8_t firstRun = 1;
+
     if (Get_Tick() - lastUpdateTick >= US_UPDATE_INTERVAL)
     {
-        uint16_t rawDistance = US_GetDistance();
-        
-        if (rawDistance > 400)
+        uint16_t raw = US_GetDistance();
+
+        /* 无效值剔除: 超时(=0), 过近, 过远 -> 保持上次有效值 */
+        if (raw < US_MIN_VALID || raw > US_MAX_VALID)
+            raw = smoothDist;
+
+        /* 首次运行直接取原始值 */
+        if (firstRun)
         {
-            rawDistance = 380;
+            smoothDist = raw;
+            firstRun = 0;
         }
-        
-        usBuffer[usBufferIndex++] = rawDistance;
-        if (usBufferIndex >= US_FILTER_SIZE)
+        else
         {
-            usBufferIndex = 0;
+            /* EMA: output = (output * (2^N - 1) + input) >> N
+             *      = output * 0.75 + input * 0.25   (N=2) */
+            smoothDist = (uint16_t)(((uint32_t)smoothDist * ((1 << US_SHIFT) - 1) + raw) >> US_SHIFT);
         }
-        
-        uint32_t sum = 0;
-        for (uint8_t i = 0; i < US_FILTER_SIZE; i++)
-        {
-            sum += usBuffer[i];
-        }
-        
-        Distance = (uint16_t)(sum / US_FILTER_SIZE);
+
+        Distance = smoothDist;
         lastUpdateTick = Get_Tick();
     }
 }
@@ -147,7 +158,7 @@ void ParkingStatus_Check(void)
     
     if (Get_Tick() - lastCheckTick >= PARK_CHECK_INTERVAL)
     {
-        uint8_t carPresent = (Distance > 0 && Distance < DIST_THRESHOLD_CM) ? 1 : 0;
+        uint8_t carPresent = (Distance > 0 && Distance < DIST_THRESHOLD_CM) && MagCarPresent;
         
         switch (ParkStatus)
         {
@@ -284,7 +295,7 @@ void GenerateParkingData(void)
              "\"LedEnable\":{\"value\":%s}}}",
             (unsigned int)Get_Tick(),
             ParkStatus,
-            0,
+            MagCarPresent,
             Distance,
             OccupiedTime,
             LED_GetState() ? "true" : "false",
@@ -325,6 +336,102 @@ void Wifi_Task(void)
 }
 
 /****************************************************************************
+ * 函数名: QMC_Task
+ * 功能:   QMC5883P 地磁车辆检测任务
+ * 参数:   无
+ * 返回值: 无
+ * 说明:   每200ms采集一次三轴磁场数据，通过与基线值比较判断是否有车
+ *         主判据: (magSq - baseMagSq) / baseMagSq > 0.25 (总场强增加超过25%)
+ *         辅助判据: |Z - baseZ| > 1.2 Gauss (Z轴突变, 防方向不变但场强不变)
+ *         连续采样3次均满足条件才确认有车，防止瞬时抖动误判
+ *         车位空闲时每10s更新一次基线，缓慢跟踪环境漂移，避免紧跟车辆信号
+ ****************************************************************************/
+void QMC_Task(void)
+{
+    #define QMC_UPDATE_INTERVAL     200
+    #define MAG_DEBOUNCE_CNT         3
+    #define MAG_CHANGE_RATIO       0.25f
+    #define MAG_Z_DELTA_THRESH      1.2f
+    #define MAG_BASE_UPDATE_MS    10000   /* 空闲时基线更新间隔(10s), 防瞬时跟随 */
+
+    static uint32_t lastUpdateTick = 0;
+    static uint32_t lastBaseUpdateTick = 0;
+    static float baseMagSq = 0.0f;
+    static float baseZ = 0.0f;
+    static uint8_t baseSet = 0;
+    static uint8_t debounceCnt = 0;
+    float ratio = 0.0f;
+    float deltaZ = 0.0f;
+
+    if (Get_Tick() - lastUpdateTick >= QMC_UPDATE_INTERVAL)
+    {
+        if (QMC5883P_Update(&qmc5883p) == QMC5883P_OK)
+        {
+            float x = QMC5883P_GetX(&qmc5883p);
+            float y = QMC5883P_GetY(&qmc5883p);
+            float z = QMC5883P_GetZ(&qmc5883p);
+            float magSq = x * x + y * y + z * z;
+
+            /* 首次运行: 初始化基线值 */
+            if (!baseSet)
+            {
+                baseMagSq = magSq;
+                baseZ = z;
+                baseSet = 1;
+            }
+
+            /* 基线管理: 空闲时每10s跟踪环境漂移, 忙时冻结 */
+            if (ParkStatus == PARK_IDLE)
+            {
+                if (Get_Tick() - lastBaseUpdateTick >= MAG_BASE_UPDATE_MS)
+                {
+                    baseMagSq = magSq;
+                    baseZ = z;
+                    lastBaseUpdateTick = Get_Tick();
+                }
+            }
+
+            /* --- 检测逻辑: 每个周期都执行, 不受 ParkStatus 限制 --- */
+            if (baseMagSq > 0.001f)
+                ratio = (magSq - baseMagSq) / baseMagSq;
+
+            deltaZ = (z > baseZ) ? (z - baseZ) : (baseZ - z);
+
+            uint8_t triggered = (ratio > MAG_CHANGE_RATIO) || (deltaZ > MAG_Z_DELTA_THRESH);
+
+            /* --- 消抖: 连续3次确认 --- */
+            if (triggered)
+            {
+                if (debounceCnt < MAG_DEBOUNCE_CNT)
+                    debounceCnt++;
+                if (debounceCnt >= MAG_DEBOUNCE_CNT)
+                    MagCarPresent = 1;
+            }
+            else
+            {
+                if (debounceCnt > 0)
+                    debounceCnt--;
+                if (debounceCnt == 0)
+                    MagCarPresent = 0;
+            }
+
+            /* 调试打印: 含算法中间变量 */
+            Usart_Printf(USART_DEBUG, "QMC: X=%.2f,Y=%.2f,Z=%.2f | "
+                         "magSq=%.1f,base=%.1f,ratio=%.3f,dZ=%.2f,"
+                         "cnt=%d,car=%d\r\n",
+                         x, y, z, magSq, baseMagSq, ratio, deltaZ,
+                         debounceCnt, MagCarPresent);
+        }
+        else
+        {
+            Usart_Printf(USART_DEBUG, "QMC: Update FAIL!\r\n");
+        }
+
+        lastUpdateTick = Get_Tick();
+    }
+}
+
+/****************************************************************************
  * 函数名: main
  * 功能:   主程序入口
  * 参数:   无
@@ -333,9 +440,10 @@ void Wifi_Task(void)
  * 主循环流程(时间戳非阻塞架构):
  *   1. 超声波数据更新 (500ms)
  *   2. 车位状态检测 (主循环)
- *   3. LED控制 (主循环)
- *   4. OLED显示刷新 (500ms)
- *   5. WiFi通信: 数据上报 + 下行指令处理 (主循环)
+ *   3. QMC5883P 磁力计数据采集与打印 (1000ms)
+ *   4. LED控制 (主循环)
+ *   5. OLED显示刷新 (500ms)
+ *   6. WiFi通信: 数据上报 + 下行指令处理 (主循环)
  ****************************************************************************/
 int main(void)
 {
@@ -376,6 +484,9 @@ int main(void)
 		
 		/* 检查车位状态 */
         ParkingStatus_Check();
+
+        /* QMC5883P 磁力计数据采集与打印 */
+        QMC_Task();
 
         /* LED控制(GPIO实际控制) */
         LED_Task();
