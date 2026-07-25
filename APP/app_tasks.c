@@ -24,19 +24,17 @@
 
 /* ==================== 宏定义 ==================== */
 
-#define UPLOAD_INTERVAL         5000
-#define US_UPDATE_INTERVAL      200
-#define US_SHIFT                2
-#define US_MIN_VALID            2
-#define US_MAX_VALID            400
-#define QMC_UPDATE_INTERVAL     200
-#define MAG_DEBOUNCE_CNT        3
-#define MAG_CHANGE_RATIO        0.25f
-#define MAG_Z_DELTA_THRESH      1.2f
-#define MAG_BASE_UPDATE_MS      10000
-#define PARK_CHECK_INTERVAL     300
-#define DIST_THRESHOLD_CM       100
-#define OLED_UPDATE_INTERVAL    500
+#define UPLOAD_INTERVAL         5000    /* WiFi数据上报周期(ms) */
+#define US_UPDATE_INTERVAL      100     /* 超声波采集间隔(ms) */
+#define US_SHIFT                2       /* EMA滤波系数 alpha=1/4 */
+#define US_MIN_VALID            2       /* 超声波最小有效距离(cm) */
+#define US_MAX_VALID            400     /* 超声波最大有效距离(cm) */
+#define QMC_UPDATE_INTERVAL     20      /* 地磁采集间隔(ms) */
+#define MAG_DEBOUNCE_CNT        2       /* 地磁消抖连续采样次数 */
+#define MAG_Z_SQ_THRESH         3.0f    /* 地磁Z轴平方阈值 */
+#define PARK_CHECK_INTERVAL     200     /* 车位状态检测周期(ms) */
+#define DIST_THRESHOLD_CM       100     /* 超声波判定有车的距离阈值(cm) */
+#define OLED_UPDATE_INTERVAL    200     /* OLED刷新周期(ms) */
 
 /* ==================== 全局变量定义 ==================== */
 
@@ -65,11 +63,6 @@ uint8_t MagCarPresent = 0;
  ****************************************************************************/
 void US_Task(void)
 {
-    #define US_UPDATE_INTERVAL 200
-    #define US_SHIFT            2       /* EMA 系数 alpha = 1/2^US_SHIFT = 0.25 */
-    #define US_MIN_VALID         2      /* 最小有效距离(cm) */
-    #define US_MAX_VALID       400      /* 最大有效距离(cm) */
-
     static uint32_t lastUpdateTick = 0;
     static uint16_t smoothDist = 0;
     static uint8_t firstRun = 1;
@@ -101,6 +94,59 @@ void US_Task(void)
 }
 
 /****************************************************************************
+ * 函数名: QMC_Task
+ * 功能:   QMC5883P 地磁车辆检测任务
+ * 参数:   无
+ * 返回值: 无
+ * 说明:   每200ms采集一次Z轴磁场数据
+ *         检测逻辑: Z轴平方 > 5 判定为有车
+ *         连续采样3次均满足条件才确认有车，防止瞬时抖动误判
+ ****************************************************************************/
+void QMC_Task(void)
+{
+    static uint32_t lastUpdateTick = 0;
+    static uint8_t debounceCnt = 0;
+
+    if (Get_Tick() - lastUpdateTick >= QMC_UPDATE_INTERVAL)
+    {
+        if (QMC5883P_Update(&qmc5883p) == QMC5883P_OK)
+        {
+            float z = QMC5883P_GetZ(&qmc5883p);
+            float zSq = z * z;
+
+            /* 检测逻辑: Z轴平方大于阈值 */
+            uint8_t triggered = (zSq > MAG_Z_SQ_THRESH);
+
+            /* --- 消抖: 连续3次确认 --- */
+            if (triggered)
+            {
+                if (debounceCnt < MAG_DEBOUNCE_CNT)
+                    debounceCnt++;
+                if (debounceCnt >= MAG_DEBOUNCE_CNT)
+                    MagCarPresent = 1;
+            }
+            else
+            {
+                if (debounceCnt > 0)
+                    debounceCnt--;
+                if (debounceCnt == 0)
+                    MagCarPresent = 0;
+            }
+
+            /* 调试打印 */
+            Usart_Printf(USART_DEBUG, "QMC: Z=%.2f, zSq=%.1f, cnt=%d, car=%d\r\n",
+                         z, zSq, debounceCnt, MagCarPresent);
+        }
+        else
+        {
+            Usart_Printf(USART_DEBUG, "QMC: Update FAIL!\r\n");
+        }
+
+        lastUpdateTick = Get_Tick();
+    }
+}
+
+/****************************************************************************
  * 函数名: ParkingStatus_Check
  * 功能:   检测车位状态
  * 参数:   无
@@ -111,8 +157,6 @@ void US_Task(void)
  ****************************************************************************/
 void ParkingStatus_Check(void)
 {
-    #define PARK_CHECK_INTERVAL 300
-    #define DIST_THRESHOLD_CM 100
     static uint32_t lastCheckTick = 0;
     
     if (Get_Tick() - lastCheckTick >= PARK_CHECK_INTERVAL)
@@ -141,7 +185,7 @@ void ParkingStatus_Check(void)
                 {
                     OccupiedTime = (Get_Tick() - LastStatusChangeTick) / 1000;
                     //if (OccupiedTime > 24 * 60 * 60)
-                    if (OccupiedTime > 10)               /* 演示用：10秒变僵尸车 */
+                    if (OccupiedTime > 5)               /* 演示用：10秒变僵尸车 */
                     {
                         ParkStatus = PARK_ZOMBIE;
 
@@ -199,7 +243,6 @@ void LED_Task(void)
  ****************************************************************************/
 void OLED_Task(void)
 {
-    #define OLED_UPDATE_INTERVAL 500
     static uint32_t lastUpdateTick = 0;
     
     if (Get_Tick() - lastUpdateTick >= OLED_UPDATE_INTERVAL)
@@ -294,98 +337,4 @@ void Wifi_Task(void)
     }
 }
 
-/****************************************************************************
- * 函数名: QMC_Task
- * 功能:   QMC5883P 地磁车辆检测任务
- * 参数:   无
- * 返回值: 无
- * 说明:   每200ms采集一次三轴磁场数据，通过与基线值比较判断是否有车
- *         主判据: (magSq - baseMagSq) / baseMagSq > 0.25 (总场强增加超过25%)
- *         辅助判据: |Z - baseZ| > 1.2 Gauss (Z轴突变, 防方向不变但场强不变)
- *         连续采样3次均满足条件才确认有车，防止瞬时抖动误判
- *         车位空闲时每10s更新一次基线，缓慢跟踪环境漂移，避免紧跟车辆信号
- ****************************************************************************/
-void QMC_Task(void)
-{
-    #define QMC_UPDATE_INTERVAL     200
-    #define MAG_DEBOUNCE_CNT         3
-    #define MAG_CHANGE_RATIO       0.25f
-    #define MAG_Z_DELTA_THRESH      1.2f
-    #define MAG_BASE_UPDATE_MS    10000   /* 空闲时基线更新间隔(10s), 防瞬时跟随 */
 
-    static uint32_t lastUpdateTick = 0;
-    static uint32_t lastBaseUpdateTick = 0;
-    static float baseMagSq = 0.0f;
-    static float baseZ = 0.0f;
-    static uint8_t baseSet = 0;
-    static uint8_t debounceCnt = 0;
-    float ratio = 0.0f;
-    float deltaZ = 0.0f;
-
-    if (Get_Tick() - lastUpdateTick >= QMC_UPDATE_INTERVAL)
-    {
-        if (QMC5883P_Update(&qmc5883p) == QMC5883P_OK)
-        {
-            float x = QMC5883P_GetX(&qmc5883p);
-            float y = QMC5883P_GetY(&qmc5883p);
-            float z = QMC5883P_GetZ(&qmc5883p);
-            float magSq = x * x + y * y + z * z;
-
-            /* 首次运行: 初始化基线值 */
-            if (!baseSet)
-            {
-                baseMagSq = magSq;
-                baseZ = z;
-                baseSet = 1;
-            }
-
-            /* 基线管理: 空闲时每10s跟踪环境漂移, 忙时冻结 */
-            if (ParkStatus == PARK_IDLE)
-            {
-                if (Get_Tick() - lastBaseUpdateTick >= MAG_BASE_UPDATE_MS)
-                {
-                    baseMagSq = magSq;
-                    baseZ = z;
-                    lastBaseUpdateTick = Get_Tick();
-                }
-            }
-
-            /* --- 检测逻辑: 每个周期都执行, 不受 ParkStatus 限制 --- */
-            if (baseMagSq > 0.001f)
-                ratio = (magSq - baseMagSq) / baseMagSq;
-
-            deltaZ = (z > baseZ) ? (z - baseZ) : (baseZ - z);
-
-            uint8_t triggered = (ratio > MAG_CHANGE_RATIO) || (deltaZ > MAG_Z_DELTA_THRESH);
-
-            /* --- 消抖: 连续3次确认 --- */
-            if (triggered)
-            {
-                if (debounceCnt < MAG_DEBOUNCE_CNT)
-                    debounceCnt++;
-                if (debounceCnt >= MAG_DEBOUNCE_CNT)
-                    MagCarPresent = 1;
-            }
-            else
-            {
-                if (debounceCnt > 0)
-                    debounceCnt--;
-                if (debounceCnt == 0)
-                    MagCarPresent = 0;
-            }
-
-            /* 调试打印: 含算法中间变量 */
-            Usart_Printf(USART_DEBUG, "QMC: X=%.2f,Y=%.2f,Z=%.2f | "
-                         "magSq=%.1f,base=%.1f,ratio=%.3f,dZ=%.2f,"
-                         "cnt=%d,car=%d\r\n",
-                         x, y, z, magSq, baseMagSq, ratio, deltaZ,
-                         debounceCnt, MagCarPresent);
-        }
-        else
-        {
-            Usart_Printf(USART_DEBUG, "QMC: Update FAIL!\r\n");
-        }
-
-        lastUpdateTick = Get_Tick();
-    }
-}

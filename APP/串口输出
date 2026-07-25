@@ -1,0 +1,63 @@
+[2026-07-25 19:59:32.462]# RECV ASCII>
+QMC: X=0.61,Y=0.61,Z=0.44 | magSq=0.9,base=1.8,ratio=-0.486,dZ=1.22,cnt=0,car=0
+
+[2026-07-25 19:59:32.882]# RECV ASCII>
+QMC: X=0.62,Y=0.61,Z=0.44 | magSq=0.9,base=0.9,ratio=0.000,dZ=0.00,cnt=0,car=0
+
+[2026-07-25 19:59:33.021]# RECV ASCII>
+Publish Topic: $sys/53BV12EYcY/park1/thing/property/post, Msg: {"id":"67856","params":{"ParkStatus":{"value":0},"GeoMagnetic":{"value":0},"Ultrasonic":{"value":15},"OccupiedTime":{"value":0},"LED":{"value":false},"LedEnable":{"value":true}}}
+
+[2026-07-25 19:59:33.115]# RECV ASCII>
+Data uploaded!
+QMC: X=0.60,Y=0.61,Z=0.43 | magSq=0.9,base=0.9,ratio=-0.021,dZ=0.01,cnt=0,car=0
+
+[2026-07-25 19:59:33.534]# RECV ASCII>
+QMC: X=0.62,Y=0.61,Z=0.43 | magSq=0.9,base=0.9,ratio=0.002,dZ=0.02,cnt=0,car=0
+
+[2026-07-25 19:59:33.785]# RECV ASCII>
+QMC: X=0.63,Y=0.61,Z=0.45 | magSq=1.0,base=0.9,ratio=0.022,dZ=0.01,cnt=0,car=0
+
+[2026-07-25 20:00:04.930]# RECV ASCII>
+QMC: X=0.61,Y=0.61,Z=0.42 | magSq=0.9,base=0.9,ratio=-0.025,dZ=0.02,cnt=0,car=0
+QMC: X=0.62,Y=0.61,Z=0.44 | magSq=0.9,base=0.9,ratio=-0.005,dZ=0.01,cnt=0,car=0
+QMC: X=0.62,Y=0.61,Z=0.43 | magSq=0.9,base=0.9,ratio=-0.014,dZ=0.02,cnt=0,car=0
+QMC: X=0.62,Y=0.61,Z=0.44 | magSq=0.9,base=0.9,ratio=-0.004,dZ=0.01,cnt=0,car=0
+QMC: X=0.62,Y=0.61,Z=0.43 | magSq=0.9,base=0.9,ratio=-0.006,dZ=0.01,cnt=0,car=0
+QMC: X=0.60,Y=0.61,Z=0.43 | magSq=0.9,base=0.9,ratio=-0.028,dZ=0.01,cnt=0,car=0
+QMC: X=0.61,Y=0.61,Z=0.43 
+[2026-07-25 20:00:04.937]# RECV ASCII>
+| magSq=0.9,base=0.9,ratio=-0.018,dZ=0.01,cnt=0,car=0
+QMC: X=0.62,Y=0.61,Z=0.42 | magSq=0.9,base=0.9,ratio=-0.005,dZ=0.02,cnt=0,car=0
+QMC: X=0.61,Y=0.61,Z=0.45 | magSq=1.0,base=0.9,ratio=0.013,dZ=0.01,cnt=0,car=0
+QMC: X=0.61,Y=0.61,Z=0.44 | magSq=0.9,base=0.9,ratio=-0.022,dZ=0.01,cnt=0,car=0
+QMC: X=0.61,Y=0.60,Z=0.44 | magSq=0.9,base=0.9,ratio=-0.024,dZ=0.01,cnt=0,car=0
+QMC: X=0.62,Y=0.61,Z=0.44 | magSq=0.9,base=0.9,ratio=-0.005,dZ=0.00,cnt=0,car=0
+QMC: X=0.62,Y=0.60,Z=0.44 | magSq=0.9,base=0.9,ratio=
+[2026-07-25 20:00:04.952]# RECV ASCII>
+-0.015,dZ=0.01,cnt=0,car=0
+Publish Topic: $sys/53BV12EYcY/park1/thing/property/post, Msg: {"id":"73134","params":{"ParkStatus":{"value":0},"GeoMagnetic":{"value":0},"Ultrasonic":{"value":13},"OccupiedTime":{"value":0},"LED":{"value":false},"LedEnable":{"value":true}}}
+Data uploaded!
+QMC: X=0.61,Y=0.61,Z=0.43 | magSq=0.9,base=0.9,ratio=-0.017,dZ=0.01,cnt=0,car=0
+QMC: X=0.62,Y=0.60,Z=0.44 | magSq=0.9,base=0.9,ratio=-0.003,dZ=0.00,cnt=0,car=0
+QMC: X=0.62,Y=0.61,Z=0.44 | magSq=0.9,base=0.9,ratio=0.002,dZ=0.
+[2026-07-25 20:00:04.982]# RECV ASCII>
+00,cnt=0,car=0
+QMC: X=0.61,Y=0.61,Z=0.43 | magSq=0.9,base=0.9,ratio=-0.015,dZ=0.01,cnt=0,car=0
+QMC: 
+[2026-07-25 20:00:05.244]# RECV ASCII>
+QMC: X=0.05,Y=-0.29,Z=-2.81 | magSq=8.0,base=8.0,ratio=0.000,dZ=0.00,cnt=0,car=0
+
+[2026-07-25 20:00:05.492]# RECV ASCII>
+QMC: X=0.06,Y=-0.29,Z=-2.80 | magSq=8.0,base=8.0,ratio=-0.004,dZ=0.01,cnt=0,car=0
+
+[2026-07-25 20:00:05.895]# RECV ASCII>
+QMC: X=0.06,Y=-0.28,Z=-2.82 | magSq=8.0,base=8.0,ratio=0.004,dZ=0.01,cnt=0,car=0
+
+[2026-07-25 20:00:06.146]# RECV ASCII>
+QMC: X=0.07,Y=-0.28,Z=-2.80 | magSq=7.9,base=8.0,ratio=-0.009,dZ=0.01,cnt=0,car=0
+
+[2026-07-25 20:00:06.547]# RECV ASCII>
+QMC: X=0.06,Y=-0.28,Z=-2.82 | magSq=8.0,base=8.0,ratio=0.005,dZ=0.01,cnt=0,car=0
+
+[2026-07-25 20:00:06.794]# RECV ASCII>
+QMC: X=0.06,Y=-0.29,Z=-2.81 | magSq=8.0,base=8.0,ratio=0.003,dZ=0.00,cnt=0,car=0
