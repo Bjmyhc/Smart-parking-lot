@@ -1,0 +1,22 @@
+*** Using Compiler 'V5.06 update 5 (build 528)', folder: 'C:\Keil_v5\ARM\ARMCC\Bin'
+Build target 'Led'
+compiling main.c...
+compiling app_init.c...
+..\..\App\app_init.c(43): error:  #8: missing closing quote
+      OLED_ShowCH(0, 0, (u8 *)"网络连接�?");
+..\..\App\app_init.c(46): error:  #18: expected a ")"
+      Usart_Printf(USART_DEBUG, "ESP8266 Init...\n");
+..\..\App\app_init.c: 0 warnings, 2 errors
+compiling app_tasks.c...
+..\..\App\app_tasks.c(258): error:  #8: missing closing quote
+          OLED_ShowCH(0, 0, (u8 *)"网络已连�?");
+..\..\App\app_tasks.c(259): error:  #18: expected a ")"
+          OLED_Printf(0, 4, "距离: %.3d cm", Distance);
+..\..\App\app_tasks.c(260): warning:  #870-D: invalid multibyte character sequence
+          OLED_ShowCH(0, 6, (u8 *)"状�?: ");
+..\..\App\app_tasks.c(265): warning:  #870-D: invalid multibyte character sequence
+              case PARK_ZOMBIE:   OLED_Printf(48, 6, "僵尸�?   ");         break;
+..\..\App\app_tasks.c: 2 warnings, 2 errors
+"..\..\Output\output.axf" - 4 Error(s), 2 Warning(s).
+Target not created.
+Build Time Elapsed:  00:00:02
