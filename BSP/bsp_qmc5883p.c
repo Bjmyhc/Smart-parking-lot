@@ -433,56 +433,82 @@ uint8_t QMC5883P_Update(QMC5883P_Device_t *dev)
     return QMC5883P_OK;
 }
 
-void QMC5883P_Calibration(QMC5883P_Device_t *dev, uint8_t trigger)
+/****************************************************************************
+ * 函数名: QMC5883P_Calibration
+ * 功能:   校准 QMC5883P 设备: 采集30秒各轴最大最小值, 计算并打印校准参数
+ * 参数:   dev - 设备结构体指针
+ * 返回值: 无
+ * 说明:   1. 函数内部自动清零补偿参数, 调用前无需修改宏
+ *         2. 校准期间缓慢旋转设备, 让传感器朝向各个方向
+ *         3. 结束后串口打印6行 #define, 复制到 bsp_qmc5883p.h 即可
+ *         4. 本函数为阻塞式校准, 校准完成后删除调用
+ ****************************************************************************/
+void QMC5883P_Calibration(QMC5883P_Device_t *dev)
 {
-    float max[3] = {0};
-    float min[3] = {0};
-    float mag_offset[3] = {0};
-    float mag_scale[3] = {0};
-    float avg_delta = 0;
+    /* 采集前先清零补偿参数, 确保读到的是原始磁场值 (无需手动改宏) */
+    dev->offset_x = 0.0f;
+    dev->offset_y = 0.0f;
+    dev->offset_z = 0.0f;
+    dev->scale_x  = 1.0f;
+    dev->scale_y  = 1.0f;
+    dev->scale_z  = 1.0f;
 
-    /* 先重置校准参数 */
-    dev->offset_x = 0;
-    dev->offset_y = 0;
-    dev->offset_z = 0;
-    dev->scale_x  = 1;
-    dev->scale_y  = 1;
-    dev->scale_z  = 1;
+    float max[3] = {-9999.0f, -9999.0f, -9999.0f};
+    float min[3] = { 9999.0f,  9999.0f,  9999.0f};
+    float cur[3];
+    uint32_t startTick = QMC5883P_GetTick();
+    uint32_t printTick = startTick;
 
-    while (trigger)
+    Usart_Printf(USART_DEBUG, "\r\n=== QMC5883P Calibration Start (30s) ===\r\n");
+    Usart_Printf(USART_DEBUG, "Rotate device slowly in all directions...\r\n");
+
+    while (QMC5883P_GetTick() - startTick < 30000)
     {
-        QMC5883P_Update(dev);
-
-        /* 更新各轴最大/最小值 */
-        if (dev->mag_x >= max[0]) max[0] = dev->mag_x;
-        else if (dev->mag_x <= min[0]) min[0] = dev->mag_x;
-
-        if (dev->mag_y >= max[1]) max[1] = dev->mag_y;
-        else if (dev->mag_y <= min[1]) min[1] = dev->mag_y;
-
-        if (dev->mag_z >= max[2]) max[2] = dev->mag_z;
-        else if (dev->mag_z <= min[2]) min[2] = dev->mag_z;
-
-        /* 计算偏移和缩放 */
-        for (int i = 0; i < 3; i++)
+        if (QMC5883P_Update(dev) == QMC5883P_OK)
         {
-            mag_offset[i] = (max[i] + min[i]) / 2.0f;
-            mag_scale[i]  = (max[i] - min[i]) / 2.0f;
+            cur[0] = dev->mag_x;
+            cur[1] = dev->mag_y;
+            cur[2] = dev->mag_z;
+
+            for (int i = 0; i < 3; i++)
+            {
+                if (cur[i] > max[i]) max[i] = cur[i];
+                if (cur[i] < min[i]) min[i] = cur[i];
+            }
         }
 
-        avg_delta = (mag_scale[0] + mag_scale[1] + mag_scale[2]) / 3.0f;
-        for (int i = 0; i < 3; i++)
+        /* 每秒打印一次采集进度 */
+        if (QMC5883P_GetTick() - printTick >= 1000)
         {
-            if (mag_scale[i] != 0)
-                mag_scale[i] = avg_delta / mag_scale[i];
+            Usart_Printf(USART_DEBUG, "[%3ds] X:%.2f~%.2f  Y:%.2f~%.2f  Z:%.2f~%.2f\r\n",
+                (QMC5883P_GetTick() - startTick) / 1000,
+                min[0], max[0], min[1], max[1], min[2], max[2]);
+            printTick = QMC5883P_GetTick();
         }
     }
 
-    /* 保存校准结果 */
-    dev->offset_x = mag_offset[0];
-    dev->offset_y = mag_offset[1];
-    dev->offset_z = mag_offset[2];
-    dev->scale_x  = mag_scale[0];
-    dev->scale_y  = mag_scale[1];
-    dev->scale_z  = mag_scale[2];
+    /* 计算偏移(硬铁)与缩放(软铁) */
+    float offset[3], scale[3], delta[3], avg;
+    for (int i = 0; i < 3; i++)
+        delta[i] = (max[i] - min[i]) / 2.0f;
+    avg = (delta[0] + delta[1] + delta[2]) / 3.0f;
+
+    for (int i = 0; i < 3; i++)
+    {
+        offset[i] = (max[i] + min[i]) / 2.0f;
+        scale[i]  = (delta[i] != 0.0f) ? (avg / delta[i]) : 1.0f;
+    }
+
+    /* 打印最终结果 */
+    Usart_Printf(USART_DEBUG, "\r\n=== Calibration Done ===\r\n");
+    Usart_Printf(USART_DEBUG, "Copy these 6 lines to bsp_qmc5883p.h:\r\n\r\n");
+    Usart_Printf(USART_DEBUG, "#define MAG_X_OFFSET    %.6ff\r\n", offset[0]);
+    Usart_Printf(USART_DEBUG, "#define MAG_Y_OFFSET    %.6ff\r\n", offset[1]);
+    Usart_Printf(USART_DEBUG, "#define MAG_Z_OFFSET    %.6ff\r\n", offset[2]);
+    Usart_Printf(USART_DEBUG, "#define MAG_X_SCALE     %.6ff\r\n", scale[0]);
+    Usart_Printf(USART_DEBUG, "#define MAG_Y_SCALE     %.6ff\r\n", scale[1]);
+    Usart_Printf(USART_DEBUG, "#define MAG_Z_SCALE     %.6ff\r\n", scale[2]);
+    Usart_Printf(USART_DEBUG, "\r\nCalibration finished. Remove QMC5883P_Calibration() call.\r\n");
+
+    while (1);
 }

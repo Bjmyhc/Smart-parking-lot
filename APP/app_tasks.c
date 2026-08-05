@@ -24,17 +24,17 @@
 
 /* ==================== 宏定义 ==================== */
 
-#define UPLOAD_INTERVAL         5000    /* WiFi数据上报周期(ms) */
+#define UPLOAD_INTERVAL         2000    /* WiFi数据上报周期(ms) */
 #define US_UPDATE_INTERVAL      100     /* 超声波采集间隔(ms) */
 #define US_SHIFT                2       /* EMA滤波系数 alpha=1/4 */
 #define US_MIN_VALID            2       /* 超声波最小有效距离(cm) */
 #define US_MAX_VALID            400     /* 超声波最大有效距离(cm) */
-#define QMC_UPDATE_INTERVAL     20      /* 地磁采集间隔(ms) */
+#define QMC_UPDATE_INTERVAL     100      /* 地磁采集间隔(ms) */
 #define MAG_DEBOUNCE_CNT        2       /* 地磁消抖连续采样次数 */
-#define MAG_Z_SQ_THRESH         3.0f    /* 地磁Z轴平方阈值 */
+#define MAG_Z_SQ_THRESH         2.0f    /* 地磁Z轴平方阈值 */
 #define PARK_CHECK_INTERVAL     200     /* 车位状态检测周期(ms) */
-#define DIST_THRESHOLD_CM       100     /* 超声波判定有车的距离阈值(cm) */
-#define OLED_UPDATE_INTERVAL    200     /* OLED刷新周期(ms) */
+#define DIST_THRESHOLD_CM       10     /* 超声波判定有车的距离阈值(cm) */
+#define OLED_UPDATE_INTERVAL    250     /* OLED刷新周期(ms) */
 
 /* ==================== 全局变量定义 ==================== */
 
@@ -70,7 +70,7 @@ void US_Task(void)
     if (Get_Tick() - lastUpdateTick >= US_UPDATE_INTERVAL)
     {
         uint16_t raw = US_GetDistance();
-
+		
         /* 无效值剔除: 超时(=0), 过近, 过远 -> 保持上次有效值 */
         if (raw < US_MIN_VALID || raw > US_MAX_VALID)
             raw = smoothDist;
@@ -134,8 +134,7 @@ void QMC_Task(void)
             }
 
             /* 调试打印 */
-            Usart_Printf(USART_DEBUG, "QMC: Z=%.2f, zSq=%.1f, cnt=%d, car=%d\r\n",
-                         z, zSq, debounceCnt, MagCarPresent);
+            Usart_Printf(USART_DEBUG, "QMC: Z=%.2f, zSq=%.1f, cnt=%d, car=%d\r\n",z, zSq, debounceCnt, MagCarPresent);
         }
         else
         {

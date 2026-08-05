@@ -122,12 +122,13 @@
  * 硬编码校准值 (手动校准后更新此处)
  * ======================================================================== */
 
-#define MAG_X_OFFSET                    0.167200f
-#define MAG_Y_OFFSET                    -0.906200f
-#define MAG_Z_OFFSET                    -0.713000f
-#define MAG_X_SCALE                     2.052229f
-#define MAG_Y_SCALE                     0.711101f
-#define MAG_Z_SCALE                     0.903787f
+/* 硬编码校准值 (两次校准取平均, 2026-08-02) */
+#define MAG_X_OFFSET                    -0.324867f
+#define MAG_Y_OFFSET                    -0.435600f
+#define MAG_Z_OFFSET                    -0.014200f
+#define MAG_X_SCALE                     1.007820f
+#define MAG_Y_SCALE                     1.185244f
+#define MAG_Z_SCALE                     0.860131f
 
 /* ========================================================================
  * 状态返回类型
@@ -267,17 +268,16 @@ static inline float QMC5883P_GetY(QMC5883P_Device_t *dev) { return dev->mag_y; }
 static inline float QMC5883P_GetZ(QMC5883P_Device_t *dev) { return dev->mag_z; }
 
 /**
- * @brief 硬铁校准
+ * @brief 校准 QMC5883P 设备 (阻塞式)
  * 
- * 当 trigger 为真时进入校准模式，旋转设备采集各轴最大最小值
- * 校准完成后根据椭球拟合计算偏移和缩放系数
+ * 采集30秒各轴最大/最小值, 自动计算硬铁偏移和软铁缩放系数
+ * 结束后通过串口打印6个 #define 参数, 需手动复制到本文件头部
  * 
- * 注意: 校准完成后需将计算出的 MAG_* 宏更新到本文件头部
- * 校准结果会自动写入设备结构体中的 offset 和 scale 字段
+ * 注意: 函数内部自动清零补偿参数, 调用前无需修改宏
+ * 校准期间需缓慢旋转设备, 让传感器朝向各个方向
  * 
- * @param dev    指向 QMC5883P_Device_t 结构体的指针
- * @param trigger 校准触发 (1=启动/继续校准, 0=结束校准并保存结果)
+ * @param dev 指向 QMC5883P_Device_t 结构体的指针
  */
-void QMC5883P_Calibration(QMC5883P_Device_t *dev, uint8_t trigger);
+void QMC5883P_Calibration(QMC5883P_Device_t *dev);
 
 #endif /* __BSP_QMC5883P_H */

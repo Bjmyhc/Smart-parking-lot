@@ -49,6 +49,7 @@ void US_Init(void)
     TIM_TimeBaseInit(TIM1, &TIM_BaseInitStruct);
 
     RCC_APB2PeriphClockCmd(US_ECHO_CLK, ENABLE);
+    RCC_APB2PeriphClockCmd(US_TRIG_CLK, ENABLE);
 
     GPIO_InitTypeDef GPIO_InitStruct;
 
@@ -105,6 +106,7 @@ uint16_t US_GetDistance(void)
         if (Get_Tick() - startTime >= 200)
         {
             TIM_Cmd(TIM1, DISABLE);
+            Usart_Printf(USART_DEBUG, "US: CC1 timeout (no echo start)\r\n");
             return 0;
         }
     }
@@ -115,6 +117,7 @@ uint16_t US_GetDistance(void)
         if (Get_Tick() - startTime >= 200)
         {
             TIM_Cmd(TIM1, DISABLE);
+            Usart_Printf(USART_DEBUG, "US: CC2 timeout (no echo end)\r\n");
             return 0;
         }
     }
@@ -125,7 +128,7 @@ uint16_t US_GetDistance(void)
 
     float distance = 0.5f * 340.0f * GoBackTime * 1e-4f;
 	
-    //Usart_Printf(USART_DEBUG, "bsp_ultrasonic.c=>Distance:%.3fcm\n", distance);
+    Usart_Printf(USART_DEBUG, "bsp_ultrasonic.c=>Distance:%.3fcm\n", distance);
 	
     return (uint16_t)distance;
 }
