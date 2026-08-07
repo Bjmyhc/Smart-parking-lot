@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>智能停车场监控系统</title>
+  <link rel="stylesheet" href="style.css?v=20260807">
+</head>
+<body>
+  <div class="container">
+    <!-- 标题气泡 -->
+    <div class="title-bubble">
+      <div class="bubble-text">
+        <div class="text1">智能停车场监控系统</div>
+        <div class="text2">实时监测 / 远程控制</div>
+      </div>
+      <div class="bubble-icon">🅿️</div>
+    </div>
+
+    <!-- 设备连接状态 -->
+    <div class="conn-status" id="conn-status">设备在线</div>
+
+    <!-- 数据展示区 -->
+    <div class="bubble-group-container">
+      <!-- 车位状态 -->
+      <div class="function-bubble">
+        <div class="icon">🚗</div>
+        <div class="data-text">
+          <div class="data-title">车位状态</div>
+          <div class="data-value status-value" id="park-status">--</div>
+        </div>
+      </div>
+
+      <!-- 地磁检测 -->
+      <div class="function-bubble">
+        <div class="icon">🧲</div>
+        <div class="data-text">
+          <div class="data-title">地磁检测</div>
+          <div class="data-value mag-value" id="geo-magnetic">--</div>
+        </div>
+      </div>
+
+      <!-- 超声波距离 -->
+      <div class="function-bubble">
+        <div class="icon">📡</div>
+        <div class="data-text">
+          <div class="data-title">超声波距离</div>
+          <div class="data-value dist-value"><span id="ultrasonic">--</span> cm</div>
+        </div>
+      </div>
+
+      <!-- 占用时间 -->
+      <div class="function-bubble">
+        <div class="icon">⏱️</div>
+        <div class="data-text">
+          <div class="data-title">占用时间</div>
+          <div class="data-value time-value"><span id="occupied-time">--</span> s</div>
+        </div>
+      </div>
+
+      <!-- LED状态（只读显示） -->
+      <div class="function-bubble">
+        <div class="icon">💡</div>
+        <div class="data-text">
+          <div class="data-title">LED状态</div>
+          <div class="data-value led-value" id="led-state">--</div>
+        </div>
+      </div>
+
+      <!-- LED使能（开关控制） -->
+      <div class="function-bubble">
+        <div class="icon">⚡</div>
+        <div class="data-text">
+          <div class="data-title">LED使能</div>
+          <div class="operation-feedback" id="led-operation-feedback"></div>
+        </div>
+        <label class="switch" id="led-enable-switch-label">
+          <input type="checkbox" id="led-enable-switch" onchange="handleSwitchChange(this)">
+          <span class="slider">
+            <span class="slider-loading" id="led-switch-loading"></span>
+          </span>
+        </label>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js?v=20260807"></script>
+</body>
+</html>

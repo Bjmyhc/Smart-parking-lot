@@ -3,25 +3,25 @@
 
 #include "stm32f10x.h"
 
-#define OLED_ADDRESS	0x78 //默认0x78
+#define OLED_ADDRESS	0x78 //Ĭ��0x78
 
-//配置IIC接口连接到的GPIO端口, 用户只需要修改下面的宏即可改变SCL和SDA的引脚
-#define OLED_SCL_H   GPIO_SetBits(OLED_SCL_GPIO_PORT,OLED_SCL_PIN)   //SCL拉高
-#define OLED_SDA_H   GPIO_SetBits(OLED_SDA_GPIO_PORT,OLED_SDA_PIN)   //SDA拉高
-#define OLED_SCL_L   GPIO_ResetBits(OLED_SCL_GPIO_PORT,OLED_SCL_PIN) //SCL拉低
-#define OLED_SDA_L   GPIO_ResetBits(OLED_SDA_GPIO_PORT,OLED_SDA_PIN) //SDA拉低
+//����IIC�ӿ����ӵ���GPIO�˿�, �û�ֻ��Ҫ�޸�����ĺ꼴�ɸı�SCL��SDA������
+#define OLED_SCL_H   GPIO_SetBits(OLED_SCL_GPIO_PORT,OLED_SCL_PIN)   //SCL����
+#define OLED_SDA_H   GPIO_SetBits(OLED_SDA_GPIO_PORT,OLED_SDA_PIN)   //SDA����
+#define OLED_SCL_L   GPIO_ResetBits(OLED_SCL_GPIO_PORT,OLED_SCL_PIN) //SCL����
+#define OLED_SDA_L   GPIO_ResetBits(OLED_SDA_GPIO_PORT,OLED_SDA_PIN) //SDA����
 
 //SCL:PA6 , SDA:PA7
-#define OLED_SCL_GPIO_PORT	GPIOB			/* GPIO端口 */
-#define OLED_SCL_RCC 	      RCC_APB2Periph_GPIOB		/* GPIO端口时钟 */
-#define OLED_SCL_PIN		    GPIO_Pin_8			/* 连接到SCL时钟线的GPIO */
+#define OLED_SCL_GPIO_PORT	GPIOB			/* GPIO�˿� */
+#define OLED_SCL_RCC 	      RCC_APB2Periph_GPIOB		/* GPIO�˿�ʱ�� */
+#define OLED_SCL_PIN		    GPIO_Pin_8			/* ���ӵ�SCLʱ���ߵ�GPIO */
 
-#define OLED_SDA_GPIO_PORT	GPIOB			/* GPIO端口 */
-#define OLED_SDA_RCC 	      RCC_APB2Periph_GPIOB		/* GPIO端口时钟 */
-#define OLED_SDA_PIN		    GPIO_Pin_9			/* 连接到SDA数据线的GPIO */
+#define OLED_SDA_GPIO_PORT	GPIOB			/* GPIO�˿� */
+#define OLED_SDA_RCC 	      RCC_APB2Periph_GPIOB		/* GPIO�˿�ʱ�� */
+#define OLED_SDA_PIN		    GPIO_Pin_9			/* ���ӵ�SDA�����ߵ�GPIO */
 
 
-#define OLED_IIC_SDA_READ()  GPIO_ReadInputDataBit(OLED_SDA_GPIO_PORT, OLED_SDA_PIN)	/* 读SDA口线状态 */
+#define OLED_IIC_SDA_READ()  GPIO_ReadInputDataBit(OLED_SDA_GPIO_PORT, OLED_SDA_PIN)	/* ��SDA����״̬ */
 
 
 unsigned int Oledfont_NUM(void);

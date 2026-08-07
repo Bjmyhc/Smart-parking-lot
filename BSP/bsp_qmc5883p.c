@@ -1,12 +1,12 @@
 /**
  * @file bsp_qmc5883p.c
- * @brief QMC5883P ä¸‰è½´ç£åŠ›è®¡é©±åŠ¨æ–‡ä»¶ (Cè¯­è¨€ç‰ˆæœ¬)
+ * @brief QMC5883P ÈıÖá´ÅÁ¦¼ÆÇı¶¯ÎÄ¼ş (CÓïÑÔ°æ±¾)
  * 
- * é€šè¿‡è½¯ä»¶ I2C (GPIO æ¨¡æ‹Ÿ) è¯»å–ä¼ æ„Ÿå™¨æ•°æ®
- * å¼•è„šæ˜ å°„:
+ * Í¨¹ıÈí¼ş I2C (GPIO Ä£Äâ) ¶ÁÈ¡´«¸ĞÆ÷Êı¾İ
+ * Òı½ÅÓ³Éä:
  *   - SCL  = PB13
  *   - SDA  = PB14
- *   - DRDY = PB12 (æ•°æ®å°±ç»ªå¼•è„š)
+ *   - DRDY = PB12 (Êı¾İ¾ÍĞ÷Òı½Å)
  * 
  * @author Adapted from WilliTourt's C++ version
  * @version 1.0
@@ -18,10 +18,10 @@
 #include "bsp_usart.h"
 
 /* ========================================================================
- * è½¯ä»¶ I2C æ€»çº¿é©±åŠ¨
+ * Èí¼ş I2C ×ÜÏßÇı¶¯
  * ======================================================================== */
 
-/* ---------- GPIO å¼•è„šæ“ä½œå® ---------- */
+/* ---------- GPIO Òı½Å²Ù×÷ºê ---------- */
 
 #define QMC_SCL_LOW()       GPIO_ResetBits(QMC_SCL_PORT, QMC_SCL_PIN)
 #define QMC_SCL_HIGH()      GPIO_SetBits(QMC_SCL_PORT, QMC_SCL_PIN)
@@ -29,47 +29,47 @@
 #define QMC_SDA_HIGH()      GPIO_SetBits(QMC_SDA_PORT, QMC_SDA_PIN)
 #define QMC_SDA_READ()      GPIO_ReadInputDataBit(QMC_SDA_PORT, QMC_SDA_PIN)
 
-/* I2C æ—¶åºå»¶è¿Ÿ (çº¦5us, ç›®æ ‡é¢‘ç‡ ~100kHz) */
+/* I2C Ê±ĞòÑÓ³Ù (Ô¼5us, Ä¿±êÆµÂÊ ~100kHz) */
 #define QMC_IIC_DELAY()     DelayXus(5)
 
 /**
- * @brief åˆå§‹åŒ–è½¯ä»¶ I2C çš„ GPIO å¼•è„š
+ * @brief ³õÊ¼»¯Èí¼ş I2C µÄ GPIO Òı½Å
  * 
- * SCL å’Œ SDA é…ç½®ä¸ºå¼€æ¼è¾“å‡º (OD), DRDY é…ç½®ä¸ºæµ®ç©ºè¾“å…¥
- * é€»è¾‘ 1 = é«˜ç”µå¹³ (ç”±å¤–éƒ¨ä¸Šæ‹‰æä¾›), é€»è¾‘ 0 = ä½ç”µå¹³
+ * SCL ºÍ SDA ÅäÖÃÎª¿ªÂ©Êä³ö (OD), DRDY ÅäÖÃÎª¸¡¿ÕÊäÈë
+ * Âß¼­ 1 = ¸ßµçÆ½ (ÓÉÍâ²¿ÉÏÀ­Ìá¹©), Âß¼­ 0 = µÍµçÆ½
  */
 static void QMC_IIC_GPIO_Init(void)
 {
     GPIO_InitTypeDef gpio;
 
-    /* ä½¿èƒ½ GPIOB æ—¶é’Ÿ */
+    /* Ê¹ÄÜ GPIOB Ê±ÖÓ */
     RCC_APB2PeriphClockCmd(QMC_SCL_RCC | QMC_SDA_RCC | QMC_DRDY_RCC, ENABLE);
 
-    /* SCL - æ—¶é’Ÿè¾“å‡º */
+    /* SCL - Ê±ÖÓÊä³ö */
     gpio.GPIO_Pin   = QMC_SCL_PIN;
     gpio.GPIO_Mode  = GPIO_Mode_Out_OD;
     gpio.GPIO_Speed = GPIO_Speed_50MHz;
     GPIO_Init(QMC_SCL_PORT, &gpio);
 
-    /* SDA - æ•°æ®è¾“å…¥è¾“å‡º */
+    /* SDA - Êı¾İÊäÈëÊä³ö */
     gpio.GPIO_Pin   = QMC_SDA_PIN;
     GPIO_Init(QMC_SDA_PORT, &gpio);
 
-    /* DRDY - æ•°æ®å°±ç»ªè¾“å…¥ */
+    /* DRDY - Êı¾İ¾ÍĞ÷ÊäÈë */
     gpio.GPIO_Pin   = QMC_DRDY_PIN;
     gpio.GPIO_Mode  = GPIO_Mode_IN_FLOATING;
     gpio.GPIO_Speed = GPIO_Speed_50MHz;
     GPIO_Init(QMC_DRDY_PORT, &gpio);
 
-    /* åˆå§‹çŠ¶æ€ (æ€»çº¿ç©ºé—²) */
+    /* ³õÊ¼×´Ì¬ (×ÜÏß¿ÕÏĞ) */
     QMC_SCL_HIGH();
     QMC_SDA_HIGH();
 }
 
 /**
- * @brief I2C èµ·å§‹ä¿¡å·
+ * @brief I2C ÆğÊ¼ĞÅºÅ
  * 
- * SCL é«˜ç”µå¹³æ—¶ SDA ç”±é«˜å˜ä½
+ * SCL ¸ßµçÆ½Ê± SDA ÓÉ¸ß±äµÍ
  */
 static void QMC_IIC_Start(void)
 {
@@ -77,16 +77,16 @@ static void QMC_IIC_Start(void)
     QMC_IIC_DELAY();
     QMC_SCL_HIGH();
     QMC_IIC_DELAY();
-    QMC_SDA_LOW();      /* SDA æ‹‰ä½ = èµ·å§‹æ¡ä»¶ */
+    QMC_SDA_LOW();      /* SDA À­µÍ = ÆğÊ¼Ìõ¼ş */
     QMC_IIC_DELAY();
-    QMC_SCL_LOW();      /* æ‹‰ä½ SCL å‡†å¤‡ä¼ è¾“æ•°æ® */
+    QMC_SCL_LOW();      /* À­µÍ SCL ×¼±¸´«ÊäÊı¾İ */
     QMC_IIC_DELAY();
 }
 
 /**
- * @brief I2C åœæ­¢ä¿¡å·
+ * @brief I2C Í£Ö¹ĞÅºÅ
  * 
- * SCL é«˜ç”µå¹³æ—¶ SDA ç”±ä½å˜é«˜
+ * SCL ¸ßµçÆ½Ê± SDA ÓÉµÍ±ä¸ß
  */
 static void QMC_IIC_Stop(void)
 {
@@ -94,34 +94,34 @@ static void QMC_IIC_Stop(void)
     QMC_IIC_DELAY();
     QMC_SCL_HIGH();
     QMC_IIC_DELAY();
-    QMC_SDA_HIGH();     /* SDA ä¸Šå‡æ²¿ = åœæ­¢æ¡ä»¶ */
+    QMC_SDA_HIGH();     /* SDA ÉÏÉıÑØ = Í£Ö¹Ìõ¼ş */
     QMC_IIC_DELAY();
 }
 
 /**
- * @brief ç­‰å¾…åº”ç­”ä¿¡å·
+ * @brief µÈ´ıÓ¦´ğĞÅºÅ
  * 
- * ä¸»æœºé‡Šæ”¾ SDA, ä»æœºåœ¨ç¬¬ 9 ä¸ªæ—¶é’Ÿå‘¨æœŸå°† SDA æ‹‰ä½
+ * Ö÷»úÊÍ·Å SDA, ´Ó»úÔÚµÚ 9 ¸öÊ±ÖÓÖÜÆÚ½« SDA À­µÍ
  * 
- * @return 0 = æ”¶åˆ°åº”ç­” (ACK), 1 = æœªæ”¶åˆ°åº”ç­” (NACK)
+ * @return 0 = ÊÕµ½Ó¦´ğ (ACK), 1 = Î´ÊÕµ½Ó¦´ğ (NACK)
  */
 static uint8_t QMC_IIC_WaitAck(void)
 {
     uint8_t ack = 0;
     uint16_t timeout = 0;
 
-    QMC_SDA_HIGH();     /* é‡Šæ”¾ SDA, ç”±ä»æœºæ§åˆ¶ */
+    QMC_SDA_HIGH();     /* ÊÍ·Å SDA, ÓÉ´Ó»ú¿ØÖÆ */
     QMC_IIC_DELAY();
-    QMC_SCL_HIGH();     /* ç¬¬ 9 ä¸ªæ—¶é’Ÿè„‰å†² */
+    QMC_SCL_HIGH();     /* µÚ 9 ¸öÊ±ÖÓÂö³å */
     QMC_IIC_DELAY();
 
-    /* ç­‰å¾… SDA è¢«ä»æœºæ‹‰ä½ (ACK) */
+    /* µÈ´ı SDA ±»´Ó»úÀ­µÍ (ACK) */
     while (QMC_SDA_READ())
     {
         timeout++;
         if (timeout > 500)
         {
-            ack = 1;    /* è¶…æ—¶ = NACK */
+            ack = 1;    /* ³¬Ê± = NACK */
             break;
         }
     }
@@ -132,9 +132,9 @@ static uint8_t QMC_IIC_WaitAck(void)
 }
 
 /**
- * @brief å‘é€ä¸€ä¸ªå­—èŠ‚ (MSB å…ˆè¡Œ)
+ * @brief ·¢ËÍÒ»¸ö×Ö½Ú (MSB ÏÈĞĞ)
  * 
- * @param data å¾…å‘é€çš„å­—èŠ‚æ•°æ®
+ * @param data ´ı·¢ËÍµÄ×Ö½ÚÊı¾İ
  */
 static void QMC_IIC_SendByte(uint8_t data)
 {
@@ -149,22 +149,22 @@ static void QMC_IIC_SendByte(uint8_t data)
         QMC_IIC_DELAY();
         QMC_SCL_HIGH();
         QMC_IIC_DELAY();
-        QMC_SCL_LOW();  /* æ‹‰ä½ SCL å‡†å¤‡ä¸‹ä¸€ä½æ•°æ® */
+        QMC_SCL_LOW();  /* À­µÍ SCL ×¼±¸ÏÂÒ»Î»Êı¾İ */
         QMC_IIC_DELAY();
     }
 }
 
 /**
- * @brief æ¥æ”¶ä¸€ä¸ªå­—èŠ‚ (MSB å…ˆè¡Œ)
+ * @brief ½ÓÊÕÒ»¸ö×Ö½Ú (MSB ÏÈĞĞ)
  * 
- * @param ack åº”ç­”æ ‡å¿— (0 = å‘é€ ACK, 1 = å‘é€ NACK)
- * @return æ¥æ”¶åˆ°çš„å­—èŠ‚æ•°æ®
+ * @param ack Ó¦´ğ±êÖ¾ (0 = ·¢ËÍ ACK, 1 = ·¢ËÍ NACK)
+ * @return ½ÓÊÕµ½µÄ×Ö½ÚÊı¾İ
  */
 static uint8_t QMC_IIC_RecvByte(uint8_t ack)
 {
     uint8_t data = 0;
 
-    QMC_SDA_HIGH();     /* é‡Šæ”¾ SDA, ç”±ä»æœºæ§åˆ¶ */
+    QMC_SDA_HIGH();     /* ÊÍ·Å SDA, ÓÉ´Ó»ú¿ØÖÆ */
 
     for (uint8_t i = 0; i < 8; i++)
     {
@@ -177,49 +177,49 @@ static uint8_t QMC_IIC_RecvByte(uint8_t ack)
         QMC_IIC_DELAY();
     }
 
-    /* å‘é€åº”ç­”ä½ */
+    /* ·¢ËÍÓ¦´ğÎ» */
     if (ack)
-        QMC_SDA_HIGH(); /* NACK: æ‹‰é«˜ SDA è¡¨ç¤ºç»“æŸ */
+        QMC_SDA_HIGH(); /* NACK: À­¸ß SDA ±íÊ¾½áÊø */
     else
-        QMC_SDA_LOW();  /* ACK: æ‹‰ä½ SDA è¡¨ç¤ºç»§ç»­ */
+        QMC_SDA_LOW();  /* ACK: À­µÍ SDA ±íÊ¾¼ÌĞø */
 
     QMC_IIC_DELAY();
     QMC_SCL_HIGH();
     QMC_IIC_DELAY();
     QMC_SCL_LOW();
     QMC_IIC_DELAY();
-    QMC_SDA_HIGH();     /* é‡Šæ”¾ SDA */
+    QMC_SDA_HIGH();     /* ÊÍ·Å SDA */
 
     return data;
 }
 
 /* ========================================================================
- * I2C é€šä¿¡å‡½æ•° (å¯„å­˜å™¨çº§)
+ * I2C Í¨ĞÅº¯Êı (¼Ä´æÆ÷¼¶)
  * ======================================================================== */
 
 /**
- * @brief å‘ I2C è®¾å¤‡å†™å…¥å¯„å­˜å™¨
+ * @brief Ïò I2C Éè±¸Ğ´Èë¼Ä´æÆ÷
  * 
- * æ—¶åº: START + ä»æœºåœ°å€(W) + å¯„å­˜å™¨åœ°å€ + æ•°æ®å†™å…¥ + STOP
+ * Ê±Ğò: START + ´Ó»úµØÖ·(W) + ¼Ä´æÆ÷µØÖ· + Êı¾İĞ´Èë + STOP
  * 
- * @param reg  å¯„å­˜å™¨åœ°å€
- * @param data å¾…å†™å…¥æ•°æ®ç¼“å†²åŒº
- * @param len  æ•°æ®é•¿åº¦ (å­—èŠ‚)
- * @return 0 = æˆåŠŸ, 1 = å¤±è´¥
+ * @param reg  ¼Ä´æÆ÷µØÖ·
+ * @param data ´ıĞ´ÈëÊı¾İ»º³åÇø
+ * @param len  Êı¾İ³¤¶È (×Ö½Ú)
+ * @return 0 = ³É¹¦, 1 = Ê§°Ü
  */
 static uint8_t QMC_I2C_WriteReg(uint8_t reg, uint8_t *data, uint8_t len)
 {
     QMC_IIC_Start();
 
-    /* å‘é€ä»æœºåœ°å€ + å†™æ ‡å¿— */
+    /* ·¢ËÍ´Ó»úµØÖ· + Ğ´±êÖ¾ */
     QMC_IIC_SendByte(QMC5883P_ADDR << 1);
     if (QMC_IIC_WaitAck()) goto _err;
 
-    /* å‘é€å¯„å­˜å™¨åœ°å€ */
+    /* ·¢ËÍ¼Ä´æÆ÷µØÖ· */
     QMC_IIC_SendByte(reg);
     if (QMC_IIC_WaitAck()) goto _err;
 
-    /* å‘é€æ•°æ® */
+    /* ·¢ËÍÊı¾İ */
     for (uint8_t i = 0; i < len; i++)
     {
         QMC_IIC_SendByte(data[i]);
@@ -235,35 +235,35 @@ _err:
 }
 
 /**
- * @brief ä» I2C è®¾å¤‡è¯»å–å¯„å­˜å™¨
+ * @brief ´Ó I2C Éè±¸¶ÁÈ¡¼Ä´æÆ÷
  * 
- * æ—¶åº: START + ä»æœºåœ°å€(W) + å¯„å­˜å™¨åœ°å€ + RESTART + ä»æœºåœ°å€(R) + æ•°æ®è¯»å– + STOP
+ * Ê±Ğò: START + ´Ó»úµØÖ·(W) + ¼Ä´æÆ÷µØÖ· + RESTART + ´Ó»úµØÖ·(R) + Êı¾İ¶ÁÈ¡ + STOP
  * 
- * @param reg  å¯„å­˜å™¨åœ°å€
- * @param data æ•°æ®æ¥æ”¶ç¼“å†²åŒº
- * @param len  è¯»å–é•¿åº¦
- * @return 0 = æˆåŠŸ, 1 = å¤±è´¥
+ * @param reg  ¼Ä´æÆ÷µØÖ·
+ * @param data Êı¾İ½ÓÊÕ»º³åÇø
+ * @param len  ¶ÁÈ¡³¤¶È
+ * @return 0 = ³É¹¦, 1 = Ê§°Ü
  */
 static uint8_t QMC_I2C_ReadReg(uint8_t reg, uint8_t *data, uint8_t len)
 {
     QMC_IIC_Start();
 
-    /* å‘é€ä»æœºåœ°å€ + å†™æ ‡å¿— (å…ˆå†™å¯„å­˜å™¨åœ°å€) */
+    /* ·¢ËÍ´Ó»úµØÖ· + Ğ´±êÖ¾ (ÏÈĞ´¼Ä´æÆ÷µØÖ·) */
     QMC_IIC_SendByte(QMC5883P_ADDR << 1);
     if (QMC_IIC_WaitAck()) goto _err;
 
-    /* å‘é€å¯„å­˜å™¨åœ°å€ */
+    /* ·¢ËÍ¼Ä´æÆ÷µØÖ· */
     QMC_IIC_SendByte(reg);
     if (QMC_IIC_WaitAck()) goto _err;
 
-    /* é‡å¯æ€»çº¿ */
+    /* ÖØÆô×ÜÏß */
     QMC_IIC_Start();
 
-    /* å‘é€ä»æœºåœ°å€ + è¯»æ ‡å¿— */
+    /* ·¢ËÍ´Ó»úµØÖ· + ¶Á±êÖ¾ */
     QMC_IIC_SendByte((QMC5883P_ADDR << 1) | 0x01);
     if (QMC_IIC_WaitAck()) goto _err;
 
-    /* è¿ç»­è¯»å– len-1 ä¸ªå­—èŠ‚å‘ ACK, æœ€åä¸€å­—èŠ‚å‘ NACK */
+    /* Á¬Ğø¶ÁÈ¡ len-1 ¸ö×Ö½Ú·¢ ACK, ×îºóÒ»×Ö½Ú·¢ NACK */
     for (uint8_t i = 0; i < len; i++)
     {
         data[i] = QMC_IIC_RecvByte(i == len - 1);
@@ -278,17 +278,17 @@ _err:
 }
 
 /* ========================================================================
- * QMC5883P å†…éƒ¨åŠŸèƒ½
+ * QMC5883P ÄÚ²¿¹¦ÄÜ
  * ======================================================================== */
 
 /**
- * @brief æ£€æŸ¥æ•°æ®æ˜¯å¦å°±ç»ª
+ * @brief ¼ì²éÊı¾İÊÇ·ñ¾ÍĞ÷
  * 
- * è¯»å– DRDY å¼•è„šç”µå¹³çŠ¶æ€
- * QMC5883P åœ¨æ–°æ•°æ®å‡†å¤‡å¥½åä¼šå°† DRDY æ‹‰é«˜
- * è¯»å–æ•°æ®åè‡ªåŠ¨æ¸…é›¶
+ * ¶ÁÈ¡ DRDY Òı½ÅµçÆ½×´Ì¬
+ * QMC5883P ÔÚĞÂÊı¾İ×¼±¸ºÃºó»á½« DRDY À­¸ß
+ * ¶ÁÈ¡Êı¾İºó×Ô¶¯ÇåÁã
  * 
- * @return 0 = æ•°æ®æœªå°±ç»ª, 1 = æ•°æ®å°±ç»ª
+ * @return 0 = Êı¾İÎ´¾ÍĞ÷, 1 = Êı¾İ¾ÍĞ÷
  */
 static uint8_t QMC5883P_IsDataRdy(void)
 {
@@ -296,13 +296,13 @@ static uint8_t QMC5883P_IsDataRdy(void)
 }
 
 /* ========================================================================
- * QMC5883P å»¶è¿Ÿå‡½æ•°
+ * QMC5883P ÑÓ³Ùº¯Êı
  * ======================================================================== */
 
 /**
- * @brief æ¯«ç§’çº§å»¶è¿Ÿ (é˜»å¡)
+ * @brief ºÁÃë¼¶ÑÓ³Ù (×èÈû)
  * 
- * @param ms å»¶è¿Ÿæ—¶é•¿ (æ¯«ç§’)
+ * @param ms ÑÓ³ÙÊ±³¤ (ºÁÃë)
  */
 static void QMC5883P_Delay(uint32_t ms)
 {
@@ -310,7 +310,7 @@ static void QMC5883P_Delay(uint32_t ms)
 }
 
 /**
- * @brief è·å–ç³»ç»Ÿæ»´ç­”è®¡æ•° (æ¯«ç§’)
+ * @brief »ñÈ¡ÏµÍ³µÎ´ğ¼ÆÊı (ºÁÃë)
  */
 static uint32_t QMC5883P_GetTick(void)
 {
@@ -322,12 +322,12 @@ void QMC5883P_Init(QMC5883P_Device_t *dev, QMC5883P_Mode_t mode,
 {
     uint8_t ret;
 
-    /* ä¿å­˜é…ç½®å‚æ•° */
+    /* ±£´æÅäÖÃ²ÎÊı */
     dev->mode  = (uint8_t)mode;
     dev->speed = (uint8_t)speed;
     dev->range = (uint8_t)range;
 
-    /* æ ¹æ®é‡ç¨‹è®¾ç½®çµæ•åº¦ */
+    /* ¸ù¾İÁ¿³ÌÉèÖÃÁéÃô¶È */
     switch (dev->range)
     {
         case QMC5883P_RNG_2G:  dev->sensitivity = QMC5883P_SENS_2G;  break;
@@ -337,7 +337,7 @@ void QMC5883P_Init(QMC5883P_Device_t *dev, QMC5883P_Mode_t mode,
         default:               dev->sensitivity = QMC5883P_SENS_2G;  break;
     }
 
-    /* è®¾ç½®ç¡¬ç¼–ç æ ¡å‡†å€¼ */
+    /* ÉèÖÃÓ²±àÂëĞ£×¼Öµ */
     dev->offset_x = MAG_X_OFFSET;
     dev->offset_y = MAG_Y_OFFSET;
     dev->offset_z = MAG_Z_OFFSET;
@@ -345,15 +345,15 @@ void QMC5883P_Init(QMC5883P_Device_t *dev, QMC5883P_Mode_t mode,
     dev->scale_y  = MAG_Y_SCALE;
     dev->scale_z  = MAG_Z_SCALE;
 
-    /* åˆå§‹åŒ–ç£åœºæ•°æ® */
+    /* ³õÊ¼»¯´Å³¡Êı¾İ */
     dev->mag_x = 0.0f;
     dev->mag_y = 0.0f;
     dev->mag_z = 0.0f;
 
-    /* åˆå§‹åŒ–è½¯ä»¶ I2C å¼•è„š */
+    /* ³õÊ¼»¯Èí¼ş I2C Òı½Å */
     QMC_IIC_GPIO_Init();
 
-    /* ç¡¬ä»¶åˆå§‹åŒ– (Begin) */
+    /* Ó²¼ş³õÊ¼»¯ (Begin) */
     ret = QMC5883P_Begin(dev);
     if (ret == QMC5883P_OK)
         Usart_Printf(USART_DEBUG, "QMC5883P Init OK!\n");
@@ -367,34 +367,34 @@ uint8_t QMC5883P_Begin(QMC5883P_Device_t *dev)
 
     QMC5883P_Delay(20);
 
-    /* ---- ç¬¬ 1 æ­¥: è½¯å¤ä½ ---- */
+    /* ---- µÚ 1 ²½: Èí¸´Î» ---- */
     data = QMC5883P_CTRL2_SOFT_RESET;
     if (QMC_I2C_WriteReg(QMC5883P_REG_CONTROL_2, &data, 1))
         return QMC5883P_ERROR;
 
     QMC5883P_Delay(20);
 
-    /* é€€å‡ºå¤ä½æ¨¡å¼ */
+    /* ÍË³ö¸´Î»Ä£Ê½ */
     data = 0x00;
     if (QMC_I2C_WriteReg(QMC5883P_REG_CONTROL_2, &data, 1))
         return QMC5883P_ERROR;
 
     QMC5883P_Delay(20);
 
-    /* ---- ç¬¬ 2 æ­¥: éªŒè¯èŠ¯ç‰‡ ID ---- */
+    /* ---- µÚ 2 ²½: ÑéÖ¤Ğ¾Æ¬ ID ---- */
     if (QMC_I2C_ReadReg(QMC5883P_REG_CHIP_ID, &data, 1))
         return QMC5883P_ERROR;
 
     if (data != QMC5883P_CHIP_ID)
         return QMC5883P_ERROR_ID;
 
-    /* ---- ç¬¬ 3 æ­¥: è®¾ç½®é‡ç¨‹ (Control 2) ---- */
+    /* ---- µÚ 3 ²½: ÉèÖÃÁ¿³Ì (Control 2) ---- */
     data = dev->range;
     if (QMC_I2C_WriteReg(QMC5883P_REG_CONTROL_2, &data, 1))
         return QMC5883P_ERROR;
 
-    /* ---- ç¬¬ 4 æ­¥: è®¾ç½®è¿è¡Œå‚æ•° (Control 1) ---- */
-    /* OSR é¢„ç•™ 2 (æ€»è¿‡é‡‡æ ·ç‡ 8x, å®é™…é‡‡æ · 2x) */
+    /* ---- µÚ 4 ²½: ÉèÖÃÔËĞĞ²ÎÊı (Control 1) ---- */
+    /* OSR Ô¤Áô 2 (×Ü¹ı²ÉÑùÂÊ 8x, Êµ¼Ê²ÉÑù 2x) */
     data = dev->mode | dev->speed |
            QMC5883P_CTRL1_OSR1_2 | QMC5883P_CTRL1_OSR2_2;
     if (QMC_I2C_WriteReg(QMC5883P_REG_CONTROL_1, &data, 1))
@@ -408,7 +408,7 @@ uint8_t QMC5883P_Update(QMC5883P_Device_t *dev)
     uint8_t rawData[6];
     uint32_t start = QMC5883P_GetTick();
 
-    /* ç­‰å¾…æ•°æ®å°±ç»ª (æˆ–è¶…æ—¶è¿”å›) */
+    /* µÈ´ıÊı¾İ¾ÍĞ÷ (»ò³¬Ê±·µ»Ø) */
     while (!QMC5883P_IsDataRdy())
     {
         if (QMC5883P_GetTick() - start > QMC5883P_READ_TIMEOUT_MS)
@@ -416,16 +416,16 @@ uint8_t QMC5883P_Update(QMC5883P_Device_t *dev)
         QMC5883P_Delay(1);
     }
 
-    /* è¿ç»­è¯»å– 6 ä¸ªå­—èŠ‚ (X, Y, Z å„ 2 å­—èŠ‚) */
+    /* Á¬Ğø¶ÁÈ¡ 6 ¸ö×Ö½Ú (X, Y, Z ¸÷ 2 ×Ö½Ú) */
     if (QMC_I2C_ReadReg(QMC5883P_REG_XOUT_L, rawData, 6))
         return QMC5883P_ERROR;
 
-    /* åˆæˆ 16 ä½åŸå§‹å€¼ (æ³¨æ„: å°ç«¯æ ¼å¼) */
+    /* ºÏ³É 16 Î»Ô­Ê¼Öµ (×¢Òâ: Ğ¡¶Ë¸ñÊ½) */
     int16_t raw_x = (int16_t)(rawData[1] << 8 | rawData[0]);
     int16_t raw_y = (int16_t)(rawData[3] << 8 | rawData[2]);
     int16_t raw_z = (int16_t)(rawData[5] << 8 | rawData[4]);
 
-    /* ç£åŠ›è®¡ç®—: (åŸå§‹å€¼/çµæ•åº¦ - åç§») * ç¼©æ”¾ */
+    /* ´ÅÁ¦¼ÆËã: (Ô­Ê¼Öµ/ÁéÃô¶È - Æ«ÒÆ) * Ëõ·Å */
     dev->mag_x = ((float)raw_x / (float)dev->sensitivity - dev->offset_x) * dev->scale_x;
     dev->mag_y = ((float)raw_y / (float)dev->sensitivity - dev->offset_y) * dev->scale_y;
     dev->mag_z = ((float)raw_z / (float)dev->sensitivity - dev->offset_z) * dev->scale_z;
@@ -434,18 +434,18 @@ uint8_t QMC5883P_Update(QMC5883P_Device_t *dev)
 }
 
 /****************************************************************************
- * å‡½æ•°å: QMC5883P_Calibration
- * åŠŸèƒ½:   æ ¡å‡† QMC5883P è®¾å¤‡: é‡‡é›†30ç§’å„è½´æœ€å¤§æœ€å°å€¼, è®¡ç®—å¹¶æ‰“å°æ ¡å‡†å‚æ•°
- * å‚æ•°:   dev - è®¾å¤‡ç»“æ„ä½“æŒ‡é’ˆ
- * è¿”å›å€¼: æ— 
- * è¯´æ˜:   1. å‡½æ•°å†…éƒ¨è‡ªåŠ¨æ¸…é›¶è¡¥å¿å‚æ•°, è°ƒç”¨å‰æ— éœ€ä¿®æ”¹å®
- *         2. æ ¡å‡†æœŸé—´ç¼“æ…¢æ—‹è½¬è®¾å¤‡, è®©ä¼ æ„Ÿå™¨æœå‘å„ä¸ªæ–¹å‘
- *         3. ç»“æŸåä¸²å£æ‰“å°6è¡Œ #define, å¤åˆ¶åˆ° bsp_qmc5883p.h å³å¯
- *         4. æœ¬å‡½æ•°ä¸ºé˜»å¡å¼æ ¡å‡†, æ ¡å‡†å®Œæˆååˆ é™¤è°ƒç”¨
+ * º¯ÊıÃû: QMC5883P_Calibration
+ * ¹¦ÄÜ:   Ğ£×¼ QMC5883P Éè±¸: ²É¼¯30Ãë¸÷Öá×î´ó×îĞ¡Öµ, ¼ÆËã²¢´òÓ¡Ğ£×¼²ÎÊı
+ * ²ÎÊı:   dev - Éè±¸½á¹¹ÌåÖ¸Õë
+ * ·µ»ØÖµ: ÎŞ
+ * ËµÃ÷:   1. º¯ÊıÄÚ²¿×Ô¶¯ÇåÁã²¹³¥²ÎÊı, µ÷ÓÃÇ°ÎŞĞèĞŞ¸Äºê
+ *         2. Ğ£×¼ÆÚ¼ä»ºÂıĞı×ªÉè±¸, ÈÃ´«¸ĞÆ÷³¯Ïò¸÷¸ö·½Ïò
+ *         3. ½áÊøºó´®¿Ú´òÓ¡6ĞĞ #define, ¸´ÖÆµ½ bsp_qmc5883p.h ¼´¿É
+ *         4. ±¾º¯ÊıÎª×èÈûÊ½Ğ£×¼, Ğ£×¼Íê³ÉºóÉ¾³ıµ÷ÓÃ
  ****************************************************************************/
 void QMC5883P_Calibration(QMC5883P_Device_t *dev)
 {
-    /* é‡‡é›†å‰å…ˆæ¸…é›¶è¡¥å¿å‚æ•°, ç¡®ä¿è¯»åˆ°çš„æ˜¯åŸå§‹ç£åœºå€¼ (æ— éœ€æ‰‹åŠ¨æ”¹å®) */
+    /* ²É¼¯Ç°ÏÈÇåÁã²¹³¥²ÎÊı, È·±£¶Áµ½µÄÊÇÔ­Ê¼´Å³¡Öµ (ÎŞĞèÊÖ¶¯¸Äºê) */
     dev->offset_x = 0.0f;
     dev->offset_y = 0.0f;
     dev->offset_z = 0.0f;
@@ -477,7 +477,7 @@ void QMC5883P_Calibration(QMC5883P_Device_t *dev)
             }
         }
 
-        /* æ¯ç§’æ‰“å°ä¸€æ¬¡é‡‡é›†è¿›åº¦ */
+        /* Ã¿Ãë´òÓ¡Ò»´Î²É¼¯½ø¶È */
         if (QMC5883P_GetTick() - printTick >= 1000)
         {
             Usart_Printf(USART_DEBUG, "[%3ds] X:%.2f~%.2f  Y:%.2f~%.2f  Z:%.2f~%.2f\r\n",
@@ -487,7 +487,7 @@ void QMC5883P_Calibration(QMC5883P_Device_t *dev)
         }
     }
 
-    /* è®¡ç®—åç§»(ç¡¬é“)ä¸ç¼©æ”¾(è½¯é“) */
+    /* ¼ÆËãÆ«ÒÆ(Ó²Ìú)ÓëËõ·Å(ÈíÌú) */
     float offset[3], scale[3], delta[3], avg;
     for (int i = 0; i < 3; i++)
         delta[i] = (max[i] - min[i]) / 2.0f;
@@ -499,7 +499,7 @@ void QMC5883P_Calibration(QMC5883P_Device_t *dev)
         scale[i]  = (delta[i] != 0.0f) ? (avg / delta[i]) : 1.0f;
     }
 
-    /* æ‰“å°æœ€ç»ˆç»“æœ */
+    /* ´òÓ¡×îÖÕ½á¹û */
     Usart_Printf(USART_DEBUG, "\r\n=== Calibration Done ===\r\n");
     Usart_Printf(USART_DEBUG, "Copy these 6 lines to bsp_qmc5883p.h:\r\n\r\n");
     Usart_Printf(USART_DEBUG, "#define MAG_X_OFFSET    %.6ff\r\n", offset[0]);

@@ -27,14 +27,19 @@ Project File Date:  07/25/2026
 <h2>Output:</h2>
 *** Using Compiler 'V5.06 update 5 (build 528)', folder: 'C:\Keil_v5\ARM\ARMCC\Bin'
 Build target 'Project'
-compiling main.c...
-compiling app_init.c...
-compiling bsp_qmc5883p.c...
 compiling app_tasks.c...
+..\..\App\app_tasks.c(394): warning:  #223-D: function "ESP8266_ExitTransparent" declared implicitly
+          ESP8266_ExitTransparent();
+..\..\App\app_tasks.c(482): warning:  #223-D: function "ESP8266_GetLastRxTime" declared implicitly
+      if (Get_Tick() - ESP8266_GetLastRxTime() > LINK_DEAD_TIMEOUT_MS)
+..\..\App\app_tasks.c: 2 warnings, 0 errors
+compiling esp8266.c...
+compiling app_init.c...
+compiling onenet.c...
 linking...
-Program Size: Code=36336 RO-data=868 RW-data=3328 ZI-data=5552  
+Program Size: Code=39076 RO-data=872 RW-data=3624 ZI-data=5552  
 FromELF: creating hex file...
-"..\..\Output\output.axf" - 0 Error(s), 0 Warning(s).
+"..\..\Output\output.axf" - 0 Error(s), 2 Warning(s).
 
 <h2>Software Packages used:</h2>
 
@@ -48,7 +53,7 @@ Package Vendor: Keil
   C:\Keil_v5\ARM\PACK\Keil\STM32F1xx_DFP\2.2.0\Device\Include
 
 <h2>Collection of Component Files used:</h2>
-Build Time Elapsed:  00:00:04
+Build Time Elapsed:  00:00:02
 </pre>
 </body>
 </html>

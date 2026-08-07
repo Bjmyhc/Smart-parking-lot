@@ -21,7 +21,7 @@
 */
 
 /* cJSON */
-/* C è¯­è¨€ JSON è§£æå™¨ */
+/* C ÓïÑÔ JSON ½âÎöÆ÷ */
 
 #include <string.h>
 #include <stdio.h>
@@ -32,15 +32,15 @@
 #include <ctype.h>
 #include "cJSON.h"
 
-static const char *ep;	/**< è§£æé”™è¯¯ä½ç½®æŒ‡é’ˆ */
+static const char *ep;	/**< ½âÎö´íÎóÎ»ÖÃÖ¸Õë */
 
 /**
- * @brief è·å–è§£æé”™è¯¯ä½ç½®
+ * @brief »ñÈ¡½âÎö´íÎóÎ»ÖÃ
  */
 const char *cJSON_GetErrorPtr(void) {return ep;}
 
 /**
- * @brief å­—ç¬¦ä¸²æ¯”è¾ƒï¼ˆä¸åŒºåˆ†å¤§å°å†™ï¼‰
+ * @brief ×Ö·û´®±È½Ï£¨²»Çø·Ö´óĞ¡Ğ´£©
  */
 static int cJSON_strcasecmp(const char *s1, const char *s2)
 {
@@ -51,11 +51,11 @@ static int cJSON_strcasecmp(const char *s1, const char *s2)
 	return tolower(*(const unsigned char *)s1) - tolower(*(const unsigned char *)s2);
 }
 
-static void *(*cJSON_malloc)(size_t sz) = malloc;	/**< è‡ªå®šä¹‰å†…å­˜åˆ†é…å‡½æ•° */
-static void (*cJSON_free)(void *ptr) = free;			/**< è‡ªå®šä¹‰å†…å­˜é‡Šæ”¾å‡½æ•° */
+static void *(*cJSON_malloc)(size_t sz) = malloc;	/**< ×Ô¶¨ÒåÄÚ´æ·ÖÅäº¯Êı */
+static void (*cJSON_free)(void *ptr) = free;			/**< ×Ô¶¨ÒåÄÚ´æÊÍ·Åº¯Êı */
 
 /**
- * @brief å­—ç¬¦ä¸²å¤åˆ¶ï¼ˆä½¿ç”¨è‡ªå®šä¹‰å†…å­˜åˆ†é…ï¼‰
+ * @brief ×Ö·û´®¸´ÖÆ£¨Ê¹ÓÃ×Ô¶¨ÒåÄÚ´æ·ÖÅä£©
  */
 static char* cJSON_strdup(const char* str)
 {
@@ -69,8 +69,8 @@ static char* cJSON_strdup(const char* str)
 }
 
 /**
- * @brief åˆå§‹åŒ–å†…å­˜ç®¡ç†é’©å­
- * @param hooks é’©å­ç»“æ„ä½“ï¼Œä¼  NULL åˆ™æ¢å¤é»˜è®¤ malloc/free
+ * @brief ³õÊ¼»¯ÄÚ´æ¹ÜÀí¹³×Ó
+ * @param hooks ¹³×Ó½á¹¹Ìå£¬´« NULL Ôò»Ö¸´Ä¬ÈÏ malloc/free
  */
 void cJSON_InitHooks(cJSON_Hooks* hooks)
 {
@@ -85,7 +85,7 @@ void cJSON_InitHooks(cJSON_Hooks* hooks)
 }
 
 /**
- * @brief å†…éƒ¨å‡½æ•°ï¼šåˆ›å»ºæ–°çš„ cJSON èŠ‚ç‚¹
+ * @brief ÄÚ²¿º¯Êı£º´´½¨ĞÂµÄ cJSON ½Úµã
  */
 static cJSON *cJSON_New_Item(void)
 {
@@ -95,8 +95,8 @@ static cJSON *cJSON_New_Item(void)
 }
 
 /**
- * @brief åˆ é™¤ cJSON å¯¹è±¡åŠå…¶æ‰€æœ‰å­èŠ‚ç‚¹ï¼ˆé€’å½’é‡Šæ”¾ï¼‰
- * @param c è¦åˆ é™¤çš„ cJSON å¯¹è±¡
+ * @brief É¾³ı cJSON ¶ÔÏó¼°ÆäËùÓĞ×Ó½Úµã£¨µİ¹éÊÍ·Å£©
+ * @param c ÒªÉ¾³ıµÄ cJSON ¶ÔÏó
  */
 void cJSON_Delete(cJSON *c)
 {
@@ -113,34 +113,34 @@ void cJSON_Delete(cJSON *c)
 }
 
 /**
- * @brief è§£æ JSON æ•°å­—å­—ç¬¦ä¸²ï¼Œå¡«å……åˆ° cJSON èŠ‚ç‚¹
- * @param item ç›®æ ‡èŠ‚ç‚¹
- * @param num  æ•°å­—å­—ç¬¦ä¸²èµ·å§‹ä½ç½®
- * @return è§£æç»“æŸåçš„å­—ç¬¦æŒ‡é’ˆ
+ * @brief ½âÎö JSON Êı×Ö×Ö·û´®£¬Ìî³äµ½ cJSON ½Úµã
+ * @param item Ä¿±ê½Úµã
+ * @param num  Êı×Ö×Ö·û´®ÆğÊ¼Î»ÖÃ
+ * @return ½âÎö½áÊøºóµÄ×Ö·ûÖ¸Õë
  */
 static const char *parse_number(cJSON *item, const char *num)
 {
 	double n = 0, sign = 1, scale = 0;
 	int subscale = 0, signsubscale = 1;
 
-	if (*num == '-') sign = -1, num++;			/* æ˜¯å¦æœ‰ç¬¦å· */
-	if (*num == '0') num++;						/* æ˜¯å¦ä¸ºé›¶ */
+	if (*num == '-') sign = -1, num++;			/* ÊÇ·ñÓĞ·ûºÅ */
+	if (*num == '0') num++;						/* ÊÇ·ñÎªÁã */
 	if (*num >= '1' && *num <= '9')
-		do	n = (n * 10.0) + (*num++ - '0'); while (*num >= '0' && *num <= '9');	/* æ•´æ•°éƒ¨åˆ† */
+		do	n = (n * 10.0) + (*num++ - '0'); while (*num >= '0' && *num <= '9');	/* ÕûÊı²¿·Ö */
 	if (*num == '.' && num[1] >= '0' && num[1] <= '9') {
 		num++;
-		do	n = (n * 10.0) + (*num++ - '0'), scale--; while (*num >= '0' && *num <= '9');	/* å°æ•°éƒ¨åˆ† */
+		do	n = (n * 10.0) + (*num++ - '0'), scale--; while (*num >= '0' && *num <= '9');	/* Ğ¡Êı²¿·Ö */
 	}
-	if (*num == 'e' || *num == 'E')				/* æŒ‡æ•°éƒ¨åˆ† */
+	if (*num == 'e' || *num == 'E')				/* Ö¸Êı²¿·Ö */
 	{
 		num++;
 		if (*num == '+') num++;
-		else if (*num == '-') signsubscale = -1, num++;	/* æŒ‡æ•°ç¬¦å· */
+		else if (*num == '-') signsubscale = -1, num++;	/* Ö¸Êı·ûºÅ */
 		while (*num >= '0' && *num <= '9')
-			subscale = (subscale * 10) + (*num++ - '0');	/* æŒ‡æ•°æ•°å€¼ */
+			subscale = (subscale * 10) + (*num++ - '0');	/* Ö¸ÊıÊıÖµ */
 	}
 
-	/* è®¡ç®—æœ€ç»ˆå€¼: +/- number.fraction * 10^+/- exponent */
+	/* ¼ÆËã×îÖÕÖµ: +/- number.fraction * 10^+/- exponent */
 	n = sign * n * pow(10.0, (scale + subscale * signsubscale));
 
 	item->valuedouble = n;
@@ -150,24 +150,24 @@ static const char *parse_number(cJSON *item, const char *num)
 }
 
 /**
- * @brief è®¡ç®—å¤§äº x çš„æœ€å° 2 çš„å¹‚
+ * @brief ¼ÆËã´óÓÚ x µÄ×îĞ¡ 2 µÄÃİ
  */
 static int pow2gt(int x) { --x; x |= x >> 1; x |= x >> 2; x |= x >> 4; x |= x >> 8; x |= x >> 16; return x + 1; }
 
 /**
- * @brief æ‰“å°ç¼“å†²åŒºç»“æ„ä½“ï¼ˆç”¨äºä¼˜åŒ–å­—ç¬¦ä¸²è¾“å‡ºæ—¶çš„å†…å­˜åˆ†é…ï¼‰
+ * @brief ´òÓ¡»º³åÇø½á¹¹Ìå£¨ÓÃÓÚÓÅ»¯×Ö·û´®Êä³öÊ±µÄÄÚ´æ·ÖÅä£©
  */
 typedef struct {
-	char *buffer;	/**< ç¼“å†²åŒºæŒ‡é’ˆ */
-	int  length;	/**< ç¼“å†²åŒºæ€»å¤§å° */
-	int  offset;	/**< å½“å‰å†™å…¥åç§» */
+	char *buffer;	/**< »º³åÇøÖ¸Õë */
+	int  length;	/**< »º³åÇø×Ü´óĞ¡ */
+	int  offset;	/**< µ±Ç°Ğ´ÈëÆ«ÒÆ */
 } printbuffer;
 
 /**
- * @brief ç¡®ä¿ç¼“å†²åŒºæœ‰è¶³å¤Ÿç©ºé—´ï¼Œä¸è¶³æ—¶è‡ªåŠ¨æ‰©å®¹
- * @param p       æ‰“å°ç¼“å†²åŒº
- * @param needed  éœ€è¦çš„å­—èŠ‚æ•°
- * @return å¯ç”¨çš„ç¼“å†²åŒºæŒ‡é’ˆ
+ * @brief È·±£»º³åÇøÓĞ×ã¹»¿Õ¼ä£¬²»×ãÊ±×Ô¶¯À©Èİ
+ * @param p       ´òÓ¡»º³åÇø
+ * @param needed  ĞèÒªµÄ×Ö½ÚÊı
+ * @return ¿ÉÓÃµÄ»º³åÇøÖ¸Õë
  */
 static char* ensure(printbuffer *p, int needed)
 {
@@ -189,7 +189,7 @@ static char* ensure(printbuffer *p, int needed)
 }
 
 /**
- * @brief æ›´æ–°ç¼“å†²åŒºåç§»é‡
+ * @brief ¸üĞÂ»º³åÇøÆ«ÒÆÁ¿
  */
 static int update(printbuffer *p)
 {
@@ -200,10 +200,10 @@ static int update(printbuffer *p)
 }
 
 /**
- * @brief å°†æ•°å€¼ç±»å‹èŠ‚ç‚¹æ ¼å¼åŒ–ä¸ºå­—ç¬¦ä¸²
- * @param item æ•°å€¼èŠ‚ç‚¹
- * @param p    æ‰“å°ç¼“å†²åŒºï¼ˆå¯ä¸º NULLï¼‰
- * @return æ ¼å¼åŒ–åçš„å­—ç¬¦ä¸²
+ * @brief ½«ÊıÖµÀàĞÍ½Úµã¸ñÊ½»¯Îª×Ö·û´®
+ * @param item ÊıÖµ½Úµã
+ * @param p    ´òÓ¡»º³åÇø£¨¿ÉÎª NULL£©
+ * @return ¸ñÊ½»¯ºóµÄ×Ö·û´®
  */
 static char *print_number(cJSON *item, printbuffer *p)
 {
@@ -213,13 +213,13 @@ static char *print_number(cJSON *item, printbuffer *p)
 	if (d == 0)
 	{
 		if (p) str = ensure(p, 2);
-		else   str = (char*)cJSON_malloc(2);	/* 0 çš„ç‰¹æ®Šæƒ…å†µ */
+		else   str = (char*)cJSON_malloc(2);	/* 0 µÄÌØÊâÇé¿ö */
 		if (str) strcpy(str, "0");
 	}
 	else if (fabs(((double)item->valueint) - d) <= DBL_EPSILON && d <= INT_MAX && d >= INT_MIN)
 	{
 		if (p) str = ensure(p, 21);
-		else   str = (char*)cJSON_malloc(21);	/* 2^64+1 æœ€å¤šéœ€è¦ 21 ä¸ªå­—ç¬¦ */
+		else   str = (char*)cJSON_malloc(21);	/* 2^64+1 ×î¶àĞèÒª 21 ¸ö×Ö·û */
 		if (str) sprintf(str, "%d", item->valueint);
 	}
 	else
@@ -240,7 +240,7 @@ static char *print_number(cJSON *item, printbuffer *p)
 }
 
 /**
- * @brief è§£æ 4 ä½åå…­è¿›åˆ¶å­—ç¬¦ï¼ˆç”¨äº Unicode è½¬ä¹‰ï¼‰
+ * @brief ½âÎö 4 Î»Ê®Áù½øÖÆ×Ö·û£¨ÓÃÓÚ Unicode ×ªÒå£©
  */
 static unsigned parse_hex4(const char *str)
 {
@@ -267,14 +267,14 @@ static unsigned parse_hex4(const char *str)
 	return h;
 }
 
-/* UTF-8 é¦–å­—èŠ‚æ ‡è®°è¡¨ */
+/* UTF-8 Ê××Ö½Ú±ê¼Ç±í */
 static const unsigned char firstByteMark[7] = { 0x00, 0x00, 0xC0, 0xE0, 0xF0, 0xF8, 0xFC };
 
 /**
- * @brief è§£æ JSON å­—ç¬¦ä¸²ï¼ˆå¤„ç†è½¬ä¹‰å­—ç¬¦å’Œ Unicodeï¼‰
- * @param item ç›®æ ‡èŠ‚ç‚¹
- * @param str  å­—ç¬¦ä¸²èµ·å§‹ä½ç½®ï¼ˆå«å¼•å·ï¼‰
- * @return è§£æç»“æŸåçš„å­—ç¬¦æŒ‡é’ˆ
+ * @brief ½âÎö JSON ×Ö·û´®£¨´¦Àí×ªÒå×Ö·ûºÍ Unicode£©
+ * @param item Ä¿±ê½Úµã
+ * @param str  ×Ö·û´®ÆğÊ¼Î»ÖÃ£¨º¬ÒıºÅ£©
+ * @return ½âÎö½áÊøºóµÄ×Ö·ûÖ¸Õë
  */
 static const char *parse_string(cJSON *item, const char *str)
 {
@@ -284,13 +284,13 @@ static const char *parse_string(cJSON *item, const char *str)
 	int len = 0;
 	unsigned uc, uc2;
 
-	if (*str != '\"') { ep = str; return 0; }	/* ä¸æ˜¯å­—ç¬¦ä¸² */
+	if (*str != '\"') { ep = str; return 0; }	/* ²»ÊÇ×Ö·û´® */
 
-	/* è·³è¿‡è½¬ä¹‰å­—ç¬¦ï¼Œè®¡ç®—å­—ç¬¦ä¸²é•¿åº¦ */
+	/* Ìø¹ı×ªÒå×Ö·û£¬¼ÆËã×Ö·û´®³¤¶È */
 	while (*ptr != '\"' && *ptr && ++len)
 		if (*ptr++ == '\\') ptr++;
 
-	out = (char*)cJSON_malloc(len + 1);	/* åˆ†é…å†…å­˜ */
+	out = (char*)cJSON_malloc(len + 1);	/* ·ÖÅäÄÚ´æ */
 	if (!out) return 0;
 
 	ptr = str + 1;
@@ -304,23 +304,23 @@ static const char *parse_string(cJSON *item, const char *str)
 			ptr++;
 			switch (*ptr)
 			{
-				case 'b': *ptr2++ = '\b'; break;	/* é€€æ ¼ */
-				case 'f': *ptr2++ = '\f'; break;	/* æ¢é¡µ */
-				case 'n': *ptr2++ = '\n'; break;	/* æ¢è¡Œ */
-				case 'r': *ptr2++ = '\r'; break;	/* å›è½¦ */
-				case 't': *ptr2++ = '\t'; break;	/* åˆ¶è¡¨ç¬¦ */
-				case 'u':	/* å°† UTF-16 è½¬ç ä¸º UTF-8 */
+				case 'b': *ptr2++ = '\b'; break;	/* ÍË¸ñ */
+				case 'f': *ptr2++ = '\f'; break;	/* »»Ò³ */
+				case 'n': *ptr2++ = '\n'; break;	/* »»ĞĞ */
+				case 'r': *ptr2++ = '\r'; break;	/* »Ø³µ */
+				case 't': *ptr2++ = '\t'; break;	/* ÖÆ±í·û */
+				case 'u':	/* ½« UTF-16 ×ªÂëÎª UTF-8 */
 					uc = parse_hex4(ptr + 1);
-					ptr += 4;	/* è¯»å– Unicode å­—ç¬¦ */
+					ptr += 4;	/* ¶ÁÈ¡ Unicode ×Ö·û */
 
-					if ((uc >= 0xDC00 && uc <= 0xDFFF) || uc == 0) break;	/* æ— æ•ˆå­—ç¬¦ */
+					if ((uc >= 0xDC00 && uc <= 0xDFFF) || uc == 0) break;	/* ÎŞĞ§×Ö·û */
 
-					if (uc >= 0xD800 && uc <= 0xDBFF)	/* UTF-16 ä»£ç†å¯¹ */
+					if (uc >= 0xD800 && uc <= 0xDBFF)	/* UTF-16 ´úÀí¶Ô */
 					{
-						if (ptr[1] != '\\' || ptr[2] != 'u') break;	/* ç¼ºå°‘ä»£ç†å¯¹ååŠéƒ¨åˆ† */
+						if (ptr[1] != '\\' || ptr[2] != 'u') break;	/* È±ÉÙ´úÀí¶Ôºó°ë²¿·Ö */
 						uc2 = parse_hex4(ptr + 3);
 						ptr += 6;
-						if (uc2 < 0xDC00 || uc2 > 0xDFFF) break;	/* ä»£ç†å¯¹ååŠéƒ¨åˆ†æ— æ•ˆ */
+						if (uc2 < 0xDC00 || uc2 > 0xDFFF) break;	/* ´úÀí¶Ôºó°ë²¿·ÖÎŞĞ§ */
 						uc = 0x10000 + (((uc & 0x3FF) << 10) | (uc2 & 0x3FF));
 					}
 
@@ -351,10 +351,10 @@ static const char *parse_string(cJSON *item, const char *str)
 }
 
 /**
- * @brief å°†å­—ç¬¦ä¸²è½¬ä¹‰ä¸ºå¯æ‰“å°çš„ JSON æ ¼å¼
- * @param str åŸå§‹å­—ç¬¦ä¸²
- * @param p   æ‰“å°ç¼“å†²åŒºï¼ˆå¯ä¸º NULLï¼‰
- * @return è½¬ä¹‰åçš„å­—ç¬¦ä¸²ï¼ˆå«å¼•å·ï¼‰
+ * @brief ½«×Ö·û´®×ªÒåÎª¿É´òÓ¡µÄ JSON ¸ñÊ½
+ * @param str Ô­Ê¼×Ö·û´®
+ * @param p   ´òÓ¡»º³åÇø£¨¿ÉÎª NULL£©
+ * @return ×ªÒåºóµÄ×Ö·û´®£¨º¬ÒıºÅ£©
  */
 static char *print_string_ptr(const char *str, printbuffer *p)
 {
@@ -363,11 +363,11 @@ static char *print_string_ptr(const char *str, printbuffer *p)
 	int len = 0, flag = 0;
 	unsigned char token;
 
-	/* æ£€æŸ¥æ˜¯å¦éœ€è¦è½¬ä¹‰ */
+	/* ¼ì²éÊÇ·ñĞèÒª×ªÒå */
 	for (ptr = str; *ptr; ptr++)
 		flag |= ((*ptr > 0 && *ptr < 32) || (*ptr == '\"') || (*ptr == '\\')) ? 1 : 0;
 
-	if (!flag)	/* ä¸éœ€è¦è½¬ä¹‰ï¼Œç›´æ¥å¤åˆ¶ */
+	if (!flag)	/* ²»ĞèÒª×ªÒå£¬Ö±½Ó¸´ÖÆ */
 	{
 		len = ptr - str;
 		if (p) out = ensure(p, len + 3);
@@ -381,7 +381,7 @@ static char *print_string_ptr(const char *str, printbuffer *p)
 		return out;
 	}
 
-	if (!str)	/* ç©ºå­—ç¬¦ä¸² */
+	if (!str)	/* ¿Õ×Ö·û´® */
 	{
 		if (p) out = ensure(p, 3);
 		else   out = (char*)cJSON_malloc(3);
@@ -390,7 +390,7 @@ static char *print_string_ptr(const char *str, printbuffer *p)
 		return out;
 	}
 
-	/* è®¡ç®—è½¬ä¹‰åéœ€è¦çš„é•¿åº¦ */
+	/* ¼ÆËã×ªÒåºóĞèÒªµÄ³¤¶È */
 	ptr = str;
 	while ((token = *ptr) && ++len) {
 		if (strchr("\"\\\b\f\n\r\t", token)) len++;
@@ -421,7 +421,7 @@ static char *print_string_ptr(const char *str, printbuffer *p)
 				case '\n':	*ptr2++ = 'n';	break;
 				case '\r':	*ptr2++ = 'r';	break;
 				case '\t':	*ptr2++ = 't';	break;
-				default: sprintf(ptr2, "u%04x", token); ptr2 += 5; break;	/* è½¬ä¹‰å¹¶è¾“å‡º */
+				default: sprintf(ptr2, "u%04x", token); ptr2 += 5; break;	/* ×ªÒå²¢Êä³ö */
 			}
 		}
 	}
@@ -431,14 +431,14 @@ static char *print_string_ptr(const char *str, printbuffer *p)
 }
 
 /**
- * @brief è°ƒç”¨ print_string_ptr æ ¼å¼åŒ– cJSON å­—ç¬¦ä¸²èŠ‚ç‚¹
+ * @brief µ÷ÓÃ print_string_ptr ¸ñÊ½»¯ cJSON ×Ö·û´®½Úµã
  */
 static char *print_string(cJSON *item, printbuffer *p)
 {
 	return print_string_ptr(item->valuestring, p);
 }
 
-/* å‰ç½®å‡½æ•°å£°æ˜ */
+/* Ç°ÖÃº¯ÊıÉùÃ÷ */
 static const char *parse_value(cJSON *item, const char *value);
 static char *print_value(cJSON *item, int depth, int fmt, printbuffer *p);
 static const char *parse_array(cJSON *item, const char *value);
@@ -447,7 +447,7 @@ static const char *parse_object(cJSON *item, const char *value);
 static char *print_object(cJSON *item, int depth, int fmt, printbuffer *p);
 
 /**
- * @brief è·³è¿‡ç©ºç™½å­—ç¬¦ï¼ˆç©ºæ ¼ã€å›è½¦ã€æ¢è¡Œã€åˆ¶è¡¨ï¼‰
+ * @brief Ìø¹ı¿Õ°××Ö·û£¨¿Õ¸ñ¡¢»Ø³µ¡¢»»ĞĞ¡¢ÖÆ±í£©
  */
 static const char *skip(const char *in)
 {
@@ -456,23 +456,23 @@ static const char *skip(const char *in)
 }
 
 /**
- * @brief å¸¦é€‰é¡¹è§£æ JSON å­—ç¬¦ä¸²
- * @param value                   JSON å­—ç¬¦ä¸²
- * @param return_parse_end        å¯é€‰ï¼Œè¿”å›è§£æç»“æŸä½ç½®
- * @param require_null_terminated æ˜¯å¦è¦æ±‚ JSON ä»¥ null ç»“å°¾ï¼ˆæ— å¤šä½™å­—ç¬¦ï¼‰
- * @return è§£ææˆåŠŸè¿”å› cJSON æ ¹èŠ‚ç‚¹ï¼Œå¤±è´¥è¿”å› NULL
+ * @brief ´øÑ¡Ïî½âÎö JSON ×Ö·û´®
+ * @param value                   JSON ×Ö·û´®
+ * @param return_parse_end        ¿ÉÑ¡£¬·µ»Ø½âÎö½áÊøÎ»ÖÃ
+ * @param require_null_terminated ÊÇ·ñÒªÇó JSON ÒÔ null ½áÎ²£¨ÎŞ¶àÓà×Ö·û£©
+ * @return ½âÎö³É¹¦·µ»Ø cJSON ¸ù½Úµã£¬Ê§°Ü·µ»Ø NULL
  */
 cJSON *cJSON_ParseWithOpts(const char *value, const char **return_parse_end, int require_null_terminated)
 {
 	const char *end = 0;
 	cJSON *c = cJSON_New_Item();
 	ep = 0;
-	if (!c) return 0;       /* å†…å­˜åˆ†é…å¤±è´¥ */
+	if (!c) return 0;       /* ÄÚ´æ·ÖÅäÊ§°Ü */
 
 	end = parse_value(c, skip(value));
-	if (!end) { cJSON_Delete(c); return 0; }	/* è§£æå¤±è´¥ï¼Œep å·²è®¾ç½® */
+	if (!end) { cJSON_Delete(c); return 0; }	/* ½âÎöÊ§°Ü£¬ep ÒÑÉèÖÃ */
 
-	/* å¦‚æœè¦æ±‚ null ç»“å°¾ä¸”æ— å¤šä½™å­—ç¬¦ï¼Œåˆ™è·³è¿‡ç©ºç™½åæ£€æŸ¥ */
+	/* Èç¹ûÒªÇó null ½áÎ²ÇÒÎŞ¶àÓà×Ö·û£¬ÔòÌø¹ı¿Õ°×ºó¼ì²é */
 	if (require_null_terminated) {
 		end = skip(end);
 		if (*end) { cJSON_Delete(c); ep = end; return 0; }
@@ -482,7 +482,7 @@ cJSON *cJSON_ParseWithOpts(const char *value, const char **return_parse_end, int
 }
 
 /**
- * @brief é»˜è®¤æ–¹å¼è§£æ JSON å­—ç¬¦ä¸²ï¼ˆä¸è¦æ±‚ null ç»“å°¾ï¼Œä¸è¿”å›ç»“æŸä½ç½®ï¼‰
+ * @brief Ä¬ÈÏ·½Ê½½âÎö JSON ×Ö·û´®£¨²»ÒªÇó null ½áÎ²£¬²»·µ»Ø½áÊøÎ»ÖÃ£©
  */
 cJSON *cJSON_Parse(const char *value)
 {
@@ -490,7 +490,7 @@ cJSON *cJSON_Parse(const char *value)
 }
 
 /**
- * @brief å°† cJSON å¯¹è±¡æ ¼å¼åŒ–ä¸ºå¸¦ç¼©è¿›çš„ JSON å­—ç¬¦ä¸²
+ * @brief ½« cJSON ¶ÔÏó¸ñÊ½»¯Îª´øËõ½øµÄ JSON ×Ö·û´®
  */
 char *cJSON_Print(cJSON *item)
 {
@@ -498,7 +498,7 @@ char *cJSON_Print(cJSON *item)
 }
 
 /**
- * @brief å°† cJSON å¯¹è±¡æ ¼å¼åŒ–ä¸ºæ— ç¼©è¿›çš„ç´§å‡‘ JSON å­—ç¬¦ä¸²
+ * @brief ½« cJSON ¶ÔÏó¸ñÊ½»¯ÎªÎŞËõ½øµÄ½ô´Õ JSON ×Ö·û´®
  */
 char *cJSON_PrintUnformatted(cJSON *item)
 {
@@ -506,10 +506,10 @@ char *cJSON_PrintUnformatted(cJSON *item)
 }
 
 /**
- * @brief ä½¿ç”¨ç¼“å†²åŒºç­–ç•¥æ ¼å¼åŒ– cJSON å¯¹è±¡
- * @param item       cJSON å¯¹è±¡
- * @param prebuffer  é¢„åˆ†é…ç¼“å†²åŒºå¤§å°
- * @param fmt        æ˜¯å¦æ ¼å¼åŒ–ï¼ˆ0=ç´§å‡‘ï¼Œ1=ç¼©è¿›ï¼‰
+ * @brief Ê¹ÓÃ»º³åÇø²ßÂÔ¸ñÊ½»¯ cJSON ¶ÔÏó
+ * @param item       cJSON ¶ÔÏó
+ * @param prebuffer  Ô¤·ÖÅä»º³åÇø´óĞ¡
+ * @param fmt        ÊÇ·ñ¸ñÊ½»¯£¨0=½ô´Õ£¬1=Ëõ½ø£©
  */
 char *cJSON_PrintBuffered(cJSON *item, int prebuffer, int fmt)
 {
@@ -523,14 +523,14 @@ char *cJSON_PrintBuffered(cJSON *item, int prebuffer, int fmt)
 
 
 /**
- * @brief è§£ææ ¸å¿ƒï¼šæ ¹æ®å€¼ç±»å‹è°ƒç”¨å¯¹åº”çš„è§£æå‡½æ•°
- * @param item  ç›®æ ‡èŠ‚ç‚¹
- * @param value å¾…è§£æçš„å­—ç¬¦ä¸²
- * @return è§£æç»“æŸä½ç½®
+ * @brief ½âÎöºËĞÄ£º¸ù¾İÖµÀàĞÍµ÷ÓÃ¶ÔÓ¦µÄ½âÎöº¯Êı
+ * @param item  Ä¿±ê½Úµã
+ * @param value ´ı½âÎöµÄ×Ö·û´®
+ * @return ½âÎö½áÊøÎ»ÖÃ
  */
 static const char *parse_value(cJSON *item, const char *value)
 {
-	if (!value) return 0;	/* ç©ºæŒ‡é’ˆï¼Œè§£æå¤±è´¥ */
+	if (!value) return 0;	/* ¿ÕÖ¸Õë£¬½âÎöÊ§°Ü */
 	if (!strncmp(value, "null", 4))  { item->type = cJSON_NULL;  return value + 4; }
 	if (!strncmp(value, "false", 5)) { item->type = cJSON_False; return value + 5; }
 	if (!strncmp(value, "true", 4))  { item->type = cJSON_True;  item->valueint = 1; return value + 4; }
@@ -540,16 +540,16 @@ static const char *parse_value(cJSON *item, const char *value)
 	if (*value == '[')               { return parse_array(item, value); }
 	if (*value == '{')               { return parse_object(item, value); }
 
-	ep = value; return 0;	/* æ— æ³•è¯†åˆ«çš„å­—ç¬¦ï¼Œè§£æå¤±è´¥ */
+	ep = value; return 0;	/* ÎŞ·¨Ê¶±ğµÄ×Ö·û£¬½âÎöÊ§°Ü */
 }
 
 /**
- * @brief å°† cJSON èŠ‚ç‚¹å€¼æ¸²æŸ“ä¸ºæ–‡æœ¬
- * @param item  cJSON èŠ‚ç‚¹
- * @param depth å½“å‰åµŒå¥—æ·±åº¦ï¼ˆç”¨äºç¼©è¿›ï¼‰
- * @param fmt   æ˜¯å¦æ ¼å¼åŒ–
- * @param p     æ‰“å°ç¼“å†²åŒº
- * @return æ¸²æŸ“åçš„å­—ç¬¦ä¸²
+ * @brief ½« cJSON ½ÚµãÖµäÖÈ¾ÎªÎÄ±¾
+ * @param item  cJSON ½Úµã
+ * @param depth µ±Ç°Ç¶Ì×Éî¶È£¨ÓÃÓÚËõ½ø£©
+ * @param fmt   ÊÇ·ñ¸ñÊ½»¯
+ * @param p     ´òÓ¡»º³åÇø
+ * @return äÖÈ¾ºóµÄ×Ö·û´®
  */
 static char *print_value(cJSON *item, int depth, int fmt, printbuffer *p)
 {
@@ -585,30 +585,30 @@ static char *print_value(cJSON *item, int depth, int fmt, printbuffer *p)
 }
 
 /**
- * @brief è§£æ JSON æ•°ç»„ï¼ˆ[...]ï¼‰
- * @param item  ç›®æ ‡èŠ‚ç‚¹
- * @param value å¾…è§£æå­—ç¬¦ä¸²
- * @return è§£æç»“æŸä½ç½®
+ * @brief ½âÎö JSON Êı×é£¨[...]£©
+ * @param item  Ä¿±ê½Úµã
+ * @param value ´ı½âÎö×Ö·û´®
+ * @return ½âÎö½áÊøÎ»ÖÃ
  */
 static const char *parse_array(cJSON *item, const char *value)
 {
 	cJSON *child;
 
-	if (*value != '[') { ep = value; return 0; }	/* ä¸æ˜¯æ•°ç»„ */
+	if (*value != '[') { ep = value; return 0; }	/* ²»ÊÇÊı×é */
 
 	item->type = cJSON_Array;
 	value = skip(value + 1);
-	if (*value == ']') return value + 1;	/* ç©ºæ•°ç»„ */
+	if (*value == ']') return value + 1;	/* ¿ÕÊı×é */
 
 	item->child = child = cJSON_New_Item();
-	if (!item->child) return 0;				/* å†…å­˜åˆ†é…å¤±è´¥ */
-	value = skip(parse_value(child, skip(value)));	/* è·³è¿‡ç©ºç™½ï¼Œè§£æå…ƒç´ å€¼ */
+	if (!item->child) return 0;				/* ÄÚ´æ·ÖÅäÊ§°Ü */
+	value = skip(parse_value(child, skip(value)));	/* Ìø¹ı¿Õ°×£¬½âÎöÔªËØÖµ */
 	if (!value) return 0;
 
 	while (*value == ',')
 	{
 		cJSON *new_item;
-		if (!(new_item = cJSON_New_Item())) return 0; 	/* å†…å­˜åˆ†é…å¤±è´¥ */
+		if (!(new_item = cJSON_New_Item())) return 0; 	/* ÄÚ´æ·ÖÅäÊ§°Ü */
 		child->next = new_item;
 		new_item->prev = child;
 		child = new_item;
@@ -616,17 +616,17 @@ static const char *parse_array(cJSON *item, const char *value)
 		if (!value) return 0;
 	}
 
-	if (*value == ']') return value + 1;	/* æ•°ç»„ç»“æŸ */
-	ep = value; return 0;					/* æ ¼å¼é”™è¯¯ */
+	if (*value == ']') return value + 1;	/* Êı×é½áÊø */
+	ep = value; return 0;					/* ¸ñÊ½´íÎó */
 }
 
 /**
- * @brief å°† cJSON æ•°ç»„æ¸²æŸ“ä¸ºæ–‡æœ¬
- * @param item  æ•°ç»„èŠ‚ç‚¹
- * @param depth åµŒå¥—æ·±åº¦
- * @param fmt   æ˜¯å¦æ ¼å¼åŒ–
- * @param p     æ‰“å°ç¼“å†²åŒº
- * @return æ¸²æŸ“åçš„å­—ç¬¦ä¸²
+ * @brief ½« cJSON Êı×éäÖÈ¾ÎªÎÄ±¾
+ * @param item  Êı×é½Úµã
+ * @param depth Ç¶Ì×Éî¶È
+ * @param fmt   ÊÇ·ñ¸ñÊ½»¯
+ * @param p     ´òÓ¡»º³åÇø
+ * @return äÖÈ¾ºóµÄ×Ö·û´®
  */
 static char *print_array(cJSON *item, int depth, int fmt, printbuffer *p)
 {
@@ -708,20 +708,20 @@ static char *print_array(cJSON *item, int depth, int fmt, printbuffer *p)
 }
 
 /**
- * @brief è§£æ JSON å¯¹è±¡ï¼ˆ{...}ï¼‰
- * @param item  ç›®æ ‡èŠ‚ç‚¹
- * @param value å¾…è§£æå­—ç¬¦ä¸²
- * @return è§£æç»“æŸä½ç½®
+ * @brief ½âÎö JSON ¶ÔÏó£¨{...}£©
+ * @param item  Ä¿±ê½Úµã
+ * @param value ´ı½âÎö×Ö·û´®
+ * @return ½âÎö½áÊøÎ»ÖÃ
  */
 static const char *parse_object(cJSON *item, const char *value)
 {
 	cJSON *child;
 
-	if (*value != '{') { ep = value; return 0; }	/* ä¸æ˜¯å¯¹è±¡ */
+	if (*value != '{') { ep = value; return 0; }	/* ²»ÊÇ¶ÔÏó */
 
 	item->type = cJSON_Object;
 	value = skip(value + 1);
-	if (*value == '}') return value + 1;	/* ç©ºå¯¹è±¡ */
+	if (*value == '}') return value + 1;	/* ¿Õ¶ÔÏó */
 
 	item->child = child = cJSON_New_Item();
 	if (!item->child) return 0;
@@ -729,14 +729,14 @@ static const char *parse_object(cJSON *item, const char *value)
 	if (!value) return 0;
 	child->string = child->valuestring;
 	child->valuestring = 0;
-	if (*value != ':') { ep = value; return 0; }	/* ç¼ºå°‘å†’å· */
-	value = skip(parse_value(child, skip(value + 1)));	/* è§£æå€¼ */
+	if (*value != ':') { ep = value; return 0; }	/* È±ÉÙÃ°ºÅ */
+	value = skip(parse_value(child, skip(value + 1)));	/* ½âÎöÖµ */
 	if (!value) return 0;
 
 	while (*value == ',')
 	{
 		cJSON *new_item;
-		if (!(new_item = cJSON_New_Item())) return 0; /* å†…å­˜åˆ†é…å¤±è´¥ */
+		if (!(new_item = cJSON_New_Item())) return 0; /* ÄÚ´æ·ÖÅäÊ§°Ü */
 		child->next = new_item;
 		new_item->prev = child;
 		child = new_item;
@@ -744,22 +744,22 @@ static const char *parse_object(cJSON *item, const char *value)
 		if (!value) return 0;
 		child->string = child->valuestring;
 		child->valuestring = 0;
-		if (*value != ':') { ep = value; return 0; }	/* ç¼ºå°‘å†’å· */
+		if (*value != ':') { ep = value; return 0; }	/* È±ÉÙÃ°ºÅ */
 		value = skip(parse_value(child, skip(value + 1)));
 		if (!value) return 0;
 	}
 
-	if (*value == '}') return value + 1;	/* å¯¹è±¡ç»“æŸ */
-	ep = value; return 0;					/* æ ¼å¼é”™è¯¯ */
+	if (*value == '}') return value + 1;	/* ¶ÔÏó½áÊø */
+	ep = value; return 0;					/* ¸ñÊ½´íÎó */
 }
 
 /**
- * @brief å°† cJSON å¯¹è±¡æ¸²æŸ“ä¸ºæ–‡æœ¬
- * @param item  å¯¹è±¡èŠ‚ç‚¹
- * @param depth åµŒå¥—æ·±åº¦
- * @param fmt   æ˜¯å¦æ ¼å¼åŒ–
- * @param p     æ‰“å°ç¼“å†²åŒº
- * @return æ¸²æŸ“åçš„å­—ç¬¦ä¸²
+ * @brief ½« cJSON ¶ÔÏóäÖÈ¾ÎªÎÄ±¾
+ * @param item  ¶ÔÏó½Úµã
+ * @param depth Ç¶Ì×Éî¶È
+ * @param fmt   ÊÇ·ñ¸ñÊ½»¯
+ * @param p     ´òÓ¡»º³åÇø
+ * @return äÖÈ¾ºóµÄ×Ö·û´®
  */
 static char *print_object(cJSON *item, int depth, int fmt, printbuffer *p)
 {
@@ -872,9 +872,9 @@ static char *print_object(cJSON *item, int depth, int fmt, printbuffer *p)
 }
 
 /**
- * @brief è·å–æ•°ç»„ï¼ˆæˆ–å¯¹è±¡ï¼‰ä¸­å…ƒç´ ä¸ªæ•°
- * @param array cJSON æ•°ç»„/å¯¹è±¡èŠ‚ç‚¹
- * @return å…ƒç´ ä¸ªæ•°
+ * @brief »ñÈ¡Êı×é£¨»ò¶ÔÏó£©ÖĞÔªËØ¸öÊı
+ * @param array cJSON Êı×é/¶ÔÏó½Úµã
+ * @return ÔªËØ¸öÊı
  */
 int cJSON_GetArraySize(cJSON *array)
 {
@@ -885,10 +885,10 @@ int cJSON_GetArraySize(cJSON *array)
 }
 
 /**
- * @brief è·å–æ•°ç»„ä¸­æŒ‡å®šç´¢å¼•çš„å…ƒç´ 
- * @param array cJSON æ•°ç»„èŠ‚ç‚¹
- * @param item  ç´¢å¼•å·ï¼ˆä» 0 å¼€å§‹ï¼‰
- * @return æˆåŠŸè¿”å›å…ƒç´ æŒ‡é’ˆï¼Œå¤±è´¥è¿”å› NULL
+ * @brief »ñÈ¡Êı×éÖĞÖ¸¶¨Ë÷ÒıµÄÔªËØ
+ * @param array cJSON Êı×é½Úµã
+ * @param item  Ë÷ÒıºÅ£¨´Ó 0 ¿ªÊ¼£©
+ * @return ³É¹¦·µ»ØÔªËØÖ¸Õë£¬Ê§°Ü·µ»Ø NULL
  */
 cJSON *cJSON_GetArrayItem(cJSON *array, int item)
 {
@@ -898,10 +898,10 @@ cJSON *cJSON_GetArrayItem(cJSON *array, int item)
 }
 
 /**
- * @brief æ ¹æ®é”®åè·å–å¯¹è±¡ä¸­çš„å…ƒç´ ï¼ˆä¸åŒºåˆ†å¤§å°å†™ï¼‰
- * @param object cJSON å¯¹è±¡èŠ‚ç‚¹
- * @param string é”®å
- * @return æˆåŠŸè¿”å›å…ƒç´ æŒ‡é’ˆï¼Œå¤±è´¥è¿”å› NULL
+ * @brief ¸ù¾İ¼üÃû»ñÈ¡¶ÔÏóÖĞµÄÔªËØ£¨²»Çø·Ö´óĞ¡Ğ´£©
+ * @param object cJSON ¶ÔÏó½Úµã
+ * @param string ¼üÃû
+ * @return ³É¹¦·µ»ØÔªËØÖ¸Õë£¬Ê§°Ü·µ»Ø NULL
  */
 cJSON *cJSON_GetObjectItem(cJSON *object, const char *string)
 {
@@ -912,9 +912,9 @@ cJSON *cJSON_GetObjectItem(cJSON *object, const char *string)
 }
 
 /**
- * @brief è¿æ¥ä¸¤ä¸ª cJSON èŠ‚ç‚¹ï¼ˆè®¾ç½®é“¾è¡¨å…³ç³»ï¼‰
- * @param prev å‰ä¸€ä¸ªèŠ‚ç‚¹
- * @param item å½“å‰èŠ‚ç‚¹
+ * @brief Á¬½ÓÁ½¸ö cJSON ½Úµã£¨ÉèÖÃÁ´±í¹ØÏµ£©
+ * @param prev Ç°Ò»¸ö½Úµã
+ * @param item µ±Ç°½Úµã
  */
 static void suffix_object(cJSON *prev, cJSON *item)
 {
@@ -923,9 +923,9 @@ static void suffix_object(cJSON *prev, cJSON *item)
 }
 
 /**
- * @brief åˆ›å»º cJSON èŠ‚ç‚¹çš„å¼•ç”¨ï¼ˆä¸å¤åˆ¶æ•°æ®ï¼Œä»…å¼•ç”¨ï¼‰
- * @param item åŸèŠ‚ç‚¹
- * @return æ–°çš„å¼•ç”¨èŠ‚ç‚¹
+ * @brief ´´½¨ cJSON ½ÚµãµÄÒıÓÃ£¨²»¸´ÖÆÊı¾İ£¬½öÒıÓÃ£©
+ * @param item Ô­½Úµã
+ * @return ĞÂµÄÒıÓÃ½Úµã
  */
 static cJSON *create_reference(cJSON *item)
 {
@@ -939,9 +939,9 @@ static cJSON *create_reference(cJSON *item)
 }
 
 /**
- * @brief å‘æ•°ç»„ä¸­æ·»åŠ å…ƒç´ 
- * @param array ç›®æ ‡æ•°ç»„
- * @param item  è¦æ·»åŠ çš„å…ƒç´ 
+ * @brief ÏòÊı×éÖĞÌí¼ÓÔªËØ
+ * @param array Ä¿±êÊı×é
+ * @param item  ÒªÌí¼ÓµÄÔªËØ
  */
 void cJSON_AddItemToArray(cJSON *array, cJSON *item)
 {
@@ -956,10 +956,10 @@ void cJSON_AddItemToArray(cJSON *array, cJSON *item)
 }
 
 /**
- * @brief å‘å¯¹è±¡ä¸­æ·»åŠ é”®å€¼å¯¹
- * @param object ç›®æ ‡å¯¹è±¡
- * @param string é”®å
- * @param item   å€¼èŠ‚ç‚¹
+ * @brief Ïò¶ÔÏóÖĞÌí¼Ó¼üÖµ¶Ô
+ * @param object Ä¿±ê¶ÔÏó
+ * @param string ¼üÃû
+ * @param item   Öµ½Úµã
  */
 void cJSON_AddItemToObject(cJSON *object, const char *string, cJSON *item)
 {
@@ -970,10 +970,10 @@ void cJSON_AddItemToObject(cJSON *object, const char *string, cJSON *item)
 }
 
 /**
- * @brief å‘å¯¹è±¡ä¸­æ·»åŠ é”®å€¼å¯¹ï¼ˆå­—ç¬¦ä¸²ä¸ºå¸¸é‡ï¼Œä¸å¤åˆ¶ï¼‰
- * @param object ç›®æ ‡å¯¹è±¡
- * @param string é”®åï¼ˆå¸¸é‡å­—ç¬¦ä¸²ï¼‰
- * @param item   å€¼èŠ‚ç‚¹
+ * @brief Ïò¶ÔÏóÖĞÌí¼Ó¼üÖµ¶Ô£¨×Ö·û´®Îª³£Á¿£¬²»¸´ÖÆ£©
+ * @param object Ä¿±ê¶ÔÏó
+ * @param string ¼üÃû£¨³£Á¿×Ö·û´®£©
+ * @param item   Öµ½Úµã
  */
 void cJSON_AddItemToObjectCS(cJSON *object, const char *string, cJSON *item)
 {
@@ -986,9 +986,9 @@ void cJSON_AddItemToObjectCS(cJSON *object, const char *string, cJSON *item)
 }
 
 /**
- * @brief å‘æ•°ç»„ä¸­æ·»åŠ å…ƒç´ çš„å¼•ç”¨ï¼ˆä¸å¤åˆ¶åŸèŠ‚ç‚¹ï¼‰
- * @param array ç›®æ ‡æ•°ç»„
- * @param item  åŸèŠ‚ç‚¹
+ * @brief ÏòÊı×éÖĞÌí¼ÓÔªËØµÄÒıÓÃ£¨²»¸´ÖÆÔ­½Úµã£©
+ * @param array Ä¿±êÊı×é
+ * @param item  Ô­½Úµã
  */
 void cJSON_AddItemReferenceToArray(cJSON *array, cJSON *item)
 {
@@ -996,10 +996,10 @@ void cJSON_AddItemReferenceToArray(cJSON *array, cJSON *item)
 }
 
 /**
- * @brief å‘å¯¹è±¡ä¸­æ·»åŠ é”®å€¼å¯¹çš„å¼•ç”¨ï¼ˆä¸å¤åˆ¶åŸèŠ‚ç‚¹ï¼‰
- * @param object ç›®æ ‡å¯¹è±¡
- * @param string é”®å
- * @param item   åŸèŠ‚ç‚¹
+ * @brief Ïò¶ÔÏóÖĞÌí¼Ó¼üÖµ¶ÔµÄÒıÓÃ£¨²»¸´ÖÆÔ­½Úµã£©
+ * @param object Ä¿±ê¶ÔÏó
+ * @param string ¼üÃû
+ * @param item   Ô­½Úµã
  */
 void cJSON_AddItemReferenceToObject(cJSON *object, const char *string, cJSON *item)
 {
@@ -1007,10 +1007,10 @@ void cJSON_AddItemReferenceToObject(cJSON *object, const char *string, cJSON *it
 }
 
 /**
- * @brief ä»æ•°ç»„ä¸­åˆ†ç¦»æŒ‡å®šç´¢å¼•çš„å…ƒç´ ï¼ˆä¸é‡Šæ”¾å†…å­˜ï¼‰
- * @param array ç›®æ ‡æ•°ç»„
- * @param which ç´¢å¼•å·
- * @return åˆ†ç¦»å‡ºçš„å…ƒç´ èŠ‚ç‚¹
+ * @brief ´ÓÊı×éÖĞ·ÖÀëÖ¸¶¨Ë÷ÒıµÄÔªËØ£¨²»ÊÍ·ÅÄÚ´æ£©
+ * @param array Ä¿±êÊı×é
+ * @param which Ë÷ÒıºÅ
+ * @return ·ÖÀë³öµÄÔªËØ½Úµã
  */
 cJSON *cJSON_DetachItemFromArray(cJSON *array, int which)
 {
@@ -1026,9 +1026,9 @@ cJSON *cJSON_DetachItemFromArray(cJSON *array, int which)
 }
 
 /**
- * @brief ä»æ•°ç»„ä¸­åˆ é™¤æŒ‡å®šç´¢å¼•çš„å…ƒç´ ï¼ˆé‡Šæ”¾å†…å­˜ï¼‰
- * @param array ç›®æ ‡æ•°ç»„
- * @param which ç´¢å¼•å·
+ * @brief ´ÓÊı×éÖĞÉ¾³ıÖ¸¶¨Ë÷ÒıµÄÔªËØ£¨ÊÍ·ÅÄÚ´æ£©
+ * @param array Ä¿±êÊı×é
+ * @param which Ë÷ÒıºÅ
  */
 void cJSON_DeleteItemFromArray(cJSON *array, int which)
 {
@@ -1036,10 +1036,10 @@ void cJSON_DeleteItemFromArray(cJSON *array, int which)
 }
 
 /**
- * @brief ä»å¯¹è±¡ä¸­åˆ†ç¦»æŒ‡å®šé”®åçš„å…ƒç´ ï¼ˆä¸é‡Šæ”¾å†…å­˜ï¼‰
- * @param object ç›®æ ‡å¯¹è±¡
- * @param string é”®å
- * @return åˆ†ç¦»å‡ºçš„å…ƒç´ èŠ‚ç‚¹
+ * @brief ´Ó¶ÔÏóÖĞ·ÖÀëÖ¸¶¨¼üÃûµÄÔªËØ£¨²»ÊÍ·ÅÄÚ´æ£©
+ * @param object Ä¿±ê¶ÔÏó
+ * @param string ¼üÃû
+ * @return ·ÖÀë³öµÄÔªËØ½Úµã
  */
 cJSON *cJSON_DetachItemFromObject(cJSON *object, const char *string)
 {
@@ -1051,9 +1051,9 @@ cJSON *cJSON_DetachItemFromObject(cJSON *object, const char *string)
 }
 
 /**
- * @brief ä»å¯¹è±¡ä¸­åˆ é™¤æŒ‡å®šé”®åçš„å…ƒç´ ï¼ˆé‡Šæ”¾å†…å­˜ï¼‰
- * @param object ç›®æ ‡å¯¹è±¡
- * @param string é”®å
+ * @brief ´Ó¶ÔÏóÖĞÉ¾³ıÖ¸¶¨¼üÃûµÄÔªËØ£¨ÊÍ·ÅÄÚ´æ£©
+ * @param object Ä¿±ê¶ÔÏó
+ * @param string ¼üÃû
  */
 void cJSON_DeleteItemFromObject(cJSON *object, const char *string)
 {
@@ -1061,10 +1061,10 @@ void cJSON_DeleteItemFromObject(cJSON *object, const char *string)
 }
 
 /**
- * @brief åœ¨æ•°ç»„æŒ‡å®šä½ç½®æ’å…¥æ–°å…ƒç´ 
- * @param array    ç›®æ ‡æ•°ç»„
- * @param which    æ’å…¥ä½ç½®ç´¢å¼•
- * @param newitem  æ–°å…ƒç´ èŠ‚ç‚¹
+ * @brief ÔÚÊı×éÖ¸¶¨Î»ÖÃ²åÈëĞÂÔªËØ
+ * @param array    Ä¿±êÊı×é
+ * @param which    ²åÈëÎ»ÖÃË÷Òı
+ * @param newitem  ĞÂÔªËØ½Úµã
  */
 void cJSON_InsertItemInArray(cJSON *array, int which, cJSON *newitem)
 {
@@ -1085,10 +1085,10 @@ void cJSON_InsertItemInArray(cJSON *array, int which, cJSON *newitem)
 }
 
 /**
- * @brief æ›¿æ¢æ•°ç»„ä¸­æŒ‡å®šä½ç½®çš„å…ƒç´ 
- * @param array    ç›®æ ‡æ•°ç»„
- * @param which    æ›¿æ¢ä½ç½®ç´¢å¼•
- * @param newitem  æ–°å…ƒç´ èŠ‚ç‚¹
+ * @brief Ìæ»»Êı×éÖĞÖ¸¶¨Î»ÖÃµÄÔªËØ
+ * @param array    Ä¿±êÊı×é
+ * @param which    Ìæ»»Î»ÖÃË÷Òı
+ * @param newitem  ĞÂÔªËØ½Úµã
  */
 void cJSON_ReplaceItemInArray(cJSON *array, int which, cJSON *newitem)
 {
@@ -1108,10 +1108,10 @@ void cJSON_ReplaceItemInArray(cJSON *array, int which, cJSON *newitem)
 }
 
 /**
- * @brief æ›¿æ¢å¯¹è±¡ä¸­æŒ‡å®šé”®åçš„å€¼
- * @param object   ç›®æ ‡å¯¹è±¡
- * @param string   é”®å
- * @param newitem  æ–°å€¼èŠ‚ç‚¹
+ * @brief Ìæ»»¶ÔÏóÖĞÖ¸¶¨¼üÃûµÄÖµ
+ * @param object   Ä¿±ê¶ÔÏó
+ * @param string   ¼üÃû
+ * @param newitem  ĞÂÖµ½Úµã
  */
 void cJSON_ReplaceItemInObject(cJSON *object, const char *string, cJSON *newitem)
 {
@@ -1125,7 +1125,7 @@ void cJSON_ReplaceItemInObject(cJSON *object, const char *string, cJSON *newitem
 }
 
 /**
- * @brief åˆ›å»º null ç±»å‹èŠ‚ç‚¹
+ * @brief ´´½¨ null ÀàĞÍ½Úµã
  */
 cJSON *cJSON_CreateNull(void)
 {
@@ -1135,7 +1135,7 @@ cJSON *cJSON_CreateNull(void)
 }
 
 /**
- * @brief åˆ›å»º true ç±»å‹èŠ‚ç‚¹
+ * @brief ´´½¨ true ÀàĞÍ½Úµã
  */
 cJSON *cJSON_CreateTrue(void)
 {
@@ -1145,7 +1145,7 @@ cJSON *cJSON_CreateTrue(void)
 }
 
 /**
- * @brief åˆ›å»º false ç±»å‹èŠ‚ç‚¹
+ * @brief ´´½¨ false ÀàĞÍ½Úµã
  */
 cJSON *cJSON_CreateFalse(void)
 {
@@ -1155,8 +1155,8 @@ cJSON *cJSON_CreateFalse(void)
 }
 
 /**
- * @brief åˆ›å»ºå¸ƒå°”ç±»å‹èŠ‚ç‚¹
- * @param b å¸ƒå°”å€¼ï¼ˆé0ä¸ºtrueï¼‰
+ * @brief ´´½¨²¼¶ûÀàĞÍ½Úµã
+ * @param b ²¼¶ûÖµ£¨·Ç0Îªtrue£©
  */
 cJSON *cJSON_CreateBool(int b)
 {
@@ -1166,8 +1166,8 @@ cJSON *cJSON_CreateBool(int b)
 }
 
 /**
- * @brief åˆ›å»ºæ•°å€¼ç±»å‹èŠ‚ç‚¹
- * @param num æ•°å€¼
+ * @brief ´´½¨ÊıÖµÀàĞÍ½Úµã
+ * @param num ÊıÖµ
  */
 cJSON *cJSON_CreateNumber(double num)
 {
@@ -1181,8 +1181,8 @@ cJSON *cJSON_CreateNumber(double num)
 }
 
 /**
- * @brief åˆ›å»ºå­—ç¬¦ä¸²ç±»å‹èŠ‚ç‚¹
- * @param string å­—ç¬¦ä¸²å€¼
+ * @brief ´´½¨×Ö·û´®ÀàĞÍ½Úµã
+ * @param string ×Ö·û´®Öµ
  */
 cJSON *cJSON_CreateString(const char *string)
 {
@@ -1195,7 +1195,7 @@ cJSON *cJSON_CreateString(const char *string)
 }
 
 /**
- * @brief åˆ›å»ºç©ºæ•°ç»„èŠ‚ç‚¹
+ * @brief ´´½¨¿ÕÊı×é½Úµã
  */
 cJSON *cJSON_CreateArray(void)
 {
@@ -1205,7 +1205,7 @@ cJSON *cJSON_CreateArray(void)
 }
 
 /**
- * @brief åˆ›å»ºç©ºå¯¹è±¡èŠ‚ç‚¹
+ * @brief ´´½¨¿Õ¶ÔÏó½Úµã
  */
 cJSON *cJSON_CreateObject(void)
 {
@@ -1215,9 +1215,9 @@ cJSON *cJSON_CreateObject(void)
 }
 
 /**
- * @brief ä»æ•´å‹æ•°ç»„åˆ›å»º cJSON æ•°ç»„èŠ‚ç‚¹
- * @param numbers æ•´å‹æ•°ç»„
- * @param count   å…ƒç´ ä¸ªæ•°
+ * @brief ´ÓÕûĞÍÊı×é´´½¨ cJSON Êı×é½Úµã
+ * @param numbers ÕûĞÍÊı×é
+ * @param count   ÔªËØ¸öÊı
  */
 cJSON *cJSON_CreateIntArray(const int *numbers, int count)
 {
@@ -1235,9 +1235,9 @@ cJSON *cJSON_CreateIntArray(const int *numbers, int count)
 }
 
 /**
- * @brief ä»æµ®ç‚¹æ•°ç»„åˆ›å»º cJSON æ•°ç»„èŠ‚ç‚¹
- * @param numbers æµ®ç‚¹æ•°ç»„
- * @param count   å…ƒç´ ä¸ªæ•°
+ * @brief ´Ó¸¡µãÊı×é´´½¨ cJSON Êı×é½Úµã
+ * @param numbers ¸¡µãÊı×é
+ * @param count   ÔªËØ¸öÊı
  */
 cJSON *cJSON_CreateFloatArray(const float *numbers, int count)
 {
@@ -1255,9 +1255,9 @@ cJSON *cJSON_CreateFloatArray(const float *numbers, int count)
 }
 
 /**
- * @brief ä»åŒç²¾åº¦æ•°ç»„åˆ›å»º cJSON æ•°ç»„èŠ‚ç‚¹
- * @param numbers åŒç²¾åº¦æ•°ç»„
- * @param count   å…ƒç´ ä¸ªæ•°
+ * @brief ´ÓË«¾«¶ÈÊı×é´´½¨ cJSON Êı×é½Úµã
+ * @param numbers Ë«¾«¶ÈÊı×é
+ * @param count   ÔªËØ¸öÊı
  */
 cJSON *cJSON_CreateDoubleArray(const double *numbers, int count)
 {
@@ -1275,9 +1275,9 @@ cJSON *cJSON_CreateDoubleArray(const double *numbers, int count)
 }
 
 /**
- * @brief ä»å­—ç¬¦ä¸²æ•°ç»„åˆ›å»º cJSON æ•°ç»„èŠ‚ç‚¹
- * @param strings å­—ç¬¦ä¸²æ•°ç»„
- * @param count   å…ƒç´ ä¸ªæ•°
+ * @brief ´Ó×Ö·û´®Êı×é´´½¨ cJSON Êı×é½Úµã
+ * @param strings ×Ö·û´®Êı×é
+ * @param count   ÔªËØ¸öÊı
  */
 cJSON *cJSON_CreateStringArray(const char **strings, int count)
 {
@@ -1295,23 +1295,23 @@ cJSON *cJSON_CreateStringArray(const char **strings, int count)
 }
 
 /**
- * @brief æ·±åº¦å¤åˆ¶ cJSON èŠ‚ç‚¹
- * @param item    è¦å¤åˆ¶çš„èŠ‚ç‚¹
- * @param recurse æ˜¯å¦é€’å½’å¤åˆ¶å­èŠ‚ç‚¹
- * @return æ–°çš„ cJSON èŠ‚ç‚¹
+ * @brief Éî¶È¸´ÖÆ cJSON ½Úµã
+ * @param item    Òª¸´ÖÆµÄ½Úµã
+ * @param recurse ÊÇ·ñµİ¹é¸´ÖÆ×Ó½Úµã
+ * @return ĞÂµÄ cJSON ½Úµã
  */
 cJSON *cJSON_Duplicate(cJSON *item, int recurse)
 {
 	cJSON *newitem, *cptr, *nptr = 0, *newchild;
 
-	/* æ£€æŸ¥è¾“å…¥å‚æ•° */
+	/* ¼ì²éÊäÈë²ÎÊı */
 	if (!item) return 0;
 
-	/* åˆ›å»ºæ–°èŠ‚ç‚¹ */
+	/* ´´½¨ĞÂ½Úµã */
 	newitem = cJSON_New_Item();
 	if (!newitem) return 0;
 
-	/* å¤åˆ¶åŸºæœ¬å±æ€§ */
+	/* ¸´ÖÆ»ù±¾ÊôĞÔ */
 	newitem->type = item->type & (~cJSON_IsReference);
 	newitem->valueint = item->valueint;
 	newitem->valuedouble = item->valuedouble;
@@ -1332,26 +1332,26 @@ cJSON *cJSON_Duplicate(cJSON *item, int recurse)
 		}
 	}
 
-	/* éé€’å½’å¤åˆ¶åˆ™ç›´æ¥è¿”å› */
+	/* ·Çµİ¹é¸´ÖÆÔòÖ±½Ó·µ»Ø */
 	if (!recurse) return newitem;
 
-	/* é€’å½’å¤åˆ¶å­èŠ‚ç‚¹ */
+	/* µİ¹é¸´ÖÆ×Ó½Úµã */
 	cptr = item->child;
 	while (cptr)
 	{
-		newchild = cJSON_Duplicate(cptr, 1);	/* é€’å½’å¤åˆ¶æ¯ä¸ªå­èŠ‚ç‚¹ */
+		newchild = cJSON_Duplicate(cptr, 1);	/* µİ¹é¸´ÖÆÃ¿¸ö×Ó½Úµã */
 		if (!newchild) {
 			cJSON_Delete(newitem);
 			return 0;
 		}
 
 		if (nptr) {
-			/* å¦‚æœå·²æœ‰å­èŠ‚ç‚¹ï¼Œåˆ™è¿æ¥é“¾è¡¨ */
+			/* Èç¹ûÒÑÓĞ×Ó½Úµã£¬ÔòÁ¬½ÓÁ´±í */
 			nptr->next = newchild;
 			newchild->prev = nptr;
 			nptr = newchild;
 		} else {
-			/* ç¬¬ä¸€ä¸ªå­èŠ‚ç‚¹ */
+			/* µÚÒ»¸ö×Ó½Úµã */
 			newitem->child = newchild;
 			nptr = newchild;
 		}
@@ -1361,8 +1361,8 @@ cJSON *cJSON_Duplicate(cJSON *item, int recurse)
 }
 
 /**
- * @brief å‹ç¼© JSON å­—ç¬¦ä¸²ï¼ˆå»é™¤ç©ºç™½å­—ç¬¦å’Œæ³¨é‡Šï¼‰
- * @param json å¯ä¿®æ”¹çš„ JSON å­—ç¬¦ä¸²
+ * @brief Ñ¹Ëõ JSON ×Ö·û´®£¨È¥³ı¿Õ°××Ö·ûºÍ×¢ÊÍ£©
+ * @param json ¿ÉĞŞ¸ÄµÄ JSON ×Ö·û´®
  */
 void cJSON_Minify(char *json)
 {
@@ -1370,13 +1370,13 @@ void cJSON_Minify(char *json)
 	while (*json)
 	{
 		if (*json == ' ') json++;
-		else if (*json == '\t') json++;	/* åˆ¶è¡¨ç¬¦ */
+		else if (*json == '\t') json++;	/* ÖÆ±í·û */
 		else if (*json == '\r') json++;
 		else if (*json == '\n') json++;
-		else if (*json == '/' && json[1] == '/')  while (*json && *json != '\n') json++;	/* å•è¡Œæ³¨é‡Š */
-		else if (*json == '/' && json[1] == '*') {while (*json && !(*json == '*' && json[1] == '/')) json++;json+=2;}	/* å¤šè¡Œæ³¨é‡Š */
-		else if (*json == '\"'){*into++=*json++;while (*json && *json!='\"'){if (*json=='\\') *into++=*json++;*into++=*json++;}*into++=*json++;} /* å­—ç¬¦ä¸²ï¼ˆä¿ç•™è½¬ä¹‰ï¼‰ */
-		else *into++=*json++;			/* å…¶ä»–å­—ç¬¦ */
+		else if (*json == '/' && json[1] == '/')  while (*json && *json != '\n') json++;	/* µ¥ĞĞ×¢ÊÍ */
+		else if (*json == '/' && json[1] == '*') {while (*json && !(*json == '*' && json[1] == '/')) json++;json+=2;}	/* ¶àĞĞ×¢ÊÍ */
+		else if (*json == '\"'){*into++=*json++;while (*json && *json!='\"'){if (*json=='\\') *into++=*json++;*into++=*json++;}*into++=*json++;} /* ×Ö·û´®£¨±£Áô×ªÒå£© */
+		else *into++=*json++;			/* ÆäËû×Ö·û */
 	}
-	*into=0;	/* æ·»åŠ ç»“æŸç¬¦ */
+	*into=0;	/* Ìí¼Ó½áÊø·û */
 }

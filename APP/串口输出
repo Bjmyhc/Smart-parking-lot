@@ -1,63 +1,378 @@
-[2026-07-25 19:59:32.462]# RECV ASCII>
-QMC: X=0.61,Y=0.61,Z=0.44 | magSq=0.9,base=1.8,ratio=-0.486,dZ=1.22,cnt=0,car=0
 
-[2026-07-25 19:59:32.882]# RECV ASCII>
-QMC: X=0.62,Y=0.61,Z=0.44 | magSq=0.9,base=0.9,ratio=0.000,dZ=0.00,cnt=0,car=0
+[2026-08-07 20:28:29.591]# RECV ASCII>
+QMC5883P Init OK!
+All Bsp Init OK!
 
-[2026-07-25 19:59:33.021]# RECV ASCII>
-Publish Topic: $sys/53BV12EYcY/park1/thing/property/post, Msg: {"id":"67856","params":{"ParkStatus":{"value":0},"GeoMagnetic":{"value":0},"Ultrasonic":{"value":15},"OccupiedTime":{"value":0},"LED":{"value":false},"LedEnable":{"value":true}}}
+[2026-08-07 20:28:29.776]# RECV ASCII>
+Attempt 1/3 ESP8266 init...
+1. AT
 
-[2026-07-25 19:59:33.115]# RECV ASCII>
+[2026-08-07 20:28:36.211]# RECV ASCII>
+2. CWMODE
+
+[2026-08-07 20:28:39.758]# RECV ASCII>
+3. AT+CWDHCP
+
+[2026-08-07 20:28:40.359]# RECV ASCII>
+4. CWJAP
+
+[2026-08-07 20:28:42.227]# RECV ASCII>
+5. CIPCLOSE
+
+[2026-08-07 20:28:42.583]# RECV ASCII>
+6. CIPSTART
+
+[2026-08-07 20:28:46.579]# RECV ASCII>
+7. CIPMODE=1
+
+[2026-08-07 20:28:47.165]# RECV ASCII>
+8. CIPSEND (enter transparent)
+
+[2026-08-07 20:28:47.800]# RECV ASCII>
+9. ESP8266 Init OK (transparent mode)
+Attempt 1/3 MQTT connect...
+
+[2026-08-07 20:28:50.176]# RECV ASCII>
+OneNet_DevLink
+PROID: 53BV12EYcY, TOKEN: version=2018-10-31&res=products%2F53BV12EYcY%2Fdevices%2Fpark1&et=1815919855&method=md5&sign=WSMSUPJ7K3%2B%2ByxiohKCfFQ%3D%3D, DEVID: park1
+
+[2026-08-07 20:28:51.510]# RECV ASCII>
+Tips: ??????
+
+[2026-08-07 20:28:52.441]# RECV ASCII>
+Subscribe Topic: $sys/53BV12EYcY/park1/thing/property/set
+OneNET Connected!
+
+[2026-08-07 20:28:52.625]# RECV ASCII>
+Online! resend x3 to refresh snapshot...
+Publish Topic: $sys/53BV12EYcY/park1/thing/property/post, Msg: {"id":"23226","params":{"ParkStatus":{"value":0},"GeoMagnetic":{"value":0},"Ultrasonic":{"value":28},"OccupiedTime":{"value":0},"LED":{"value":false},"LedEnable":{"value":true}}}
+Data uploaded! (2 resend left)
+
+[2026-08-07 20:28:54.173]# RECV ASCII>
+Publish Topic: $sys/53BV12EYcY/park1/thing/property/post, Msg: {"id":"24769","params":{"ParkStatus":{"value":0},"GeoMagnetic":{"value":0},"Ultrasonic":{"value":33},"OccupiedTime":{"value":0},"LED":{"value":false},"LedEnable":{"value":true}}}
+Data uploaded! (1 resend left)
+
+[2026-08-07 20:28:55.709]# RECV ASCII>
+Publish Topic: $sys/53BV12EYcY/park1/thing/property/post, Msg: {"id":"26312","params":{"ParkStatus":{"value":0},"GeoMagnetic":{"value":0},"Ultrasonic":{"value":30},"OccupiedTime":{"value":0},"LED":{"value":false},"LedEnable":{"value":true}}}
+Data uploaded! (0 resend left)
+
+[2026-08-07 20:29:06.883]# RECV ASCII>
+Publish Topic: $sys/53BV12EYcY/park1/thing/property/post, Msg: {"id":"37487","params":{"ParkStatus":{"value":1},"GeoMagnetic":{"value":1},"Ultrasonic":{"value":7},"OccupiedTime":{"value":0},"LED":{"value":false},"LedEnable":{"value":true}}}
 Data uploaded!
-QMC: X=0.60,Y=0.61,Z=0.43 | magSq=0.9,base=0.9,ratio=-0.021,dZ=0.01,cnt=0,car=0
 
-[2026-07-25 19:59:33.534]# RECV ASCII>
-QMC: X=0.62,Y=0.61,Z=0.43 | magSq=0.9,base=0.9,ratio=0.002,dZ=0.02,cnt=0,car=0
-
-[2026-07-25 19:59:33.785]# RECV ASCII>
-QMC: X=0.63,Y=0.61,Z=0.45 | magSq=1.0,base=0.9,ratio=0.022,dZ=0.01,cnt=0,car=0
-
-[2026-07-25 20:00:04.930]# RECV ASCII>
-QMC: X=0.61,Y=0.61,Z=0.42 | magSq=0.9,base=0.9,ratio=-0.025,dZ=0.02,cnt=0,car=0
-QMC: X=0.62,Y=0.61,Z=0.44 | magSq=0.9,base=0.9,ratio=-0.005,dZ=0.01,cnt=0,car=0
-QMC: X=0.62,Y=0.61,Z=0.43 | magSq=0.9,base=0.9,ratio=-0.014,dZ=0.02,cnt=0,car=0
-QMC: X=0.62,Y=0.61,Z=0.44 | magSq=0.9,base=0.9,ratio=-0.004,dZ=0.01,cnt=0,car=0
-QMC: X=0.62,Y=0.61,Z=0.43 | magSq=0.9,base=0.9,ratio=-0.006,dZ=0.01,cnt=0,car=0
-QMC: X=0.60,Y=0.61,Z=0.43 | magSq=0.9,base=0.9,ratio=-0.028,dZ=0.01,cnt=0,car=0
-QMC: X=0.61,Y=0.61,Z=0.43 
-[2026-07-25 20:00:04.937]# RECV ASCII>
-| magSq=0.9,base=0.9,ratio=-0.018,dZ=0.01,cnt=0,car=0
-QMC: X=0.62,Y=0.61,Z=0.42 | magSq=0.9,base=0.9,ratio=-0.005,dZ=0.02,cnt=0,car=0
-QMC: X=0.61,Y=0.61,Z=0.45 | magSq=1.0,base=0.9,ratio=0.013,dZ=0.01,cnt=0,car=0
-QMC: X=0.61,Y=0.61,Z=0.44 | magSq=0.9,base=0.9,ratio=-0.022,dZ=0.01,cnt=0,car=0
-QMC: X=0.61,Y=0.60,Z=0.44 | magSq=0.9,base=0.9,ratio=-0.024,dZ=0.01,cnt=0,car=0
-QMC: X=0.62,Y=0.61,Z=0.44 | magSq=0.9,base=0.9,ratio=-0.005,dZ=0.00,cnt=0,car=0
-QMC: X=0.62,Y=0.60,Z=0.44 | magSq=0.9,base=0.9,ratio=
-[2026-07-25 20:00:04.952]# RECV ASCII>
--0.015,dZ=0.01,cnt=0,car=0
-Publish Topic: $sys/53BV12EYcY/park1/thing/property/post, Msg: {"id":"73134","params":{"ParkStatus":{"value":0},"GeoMagnetic":{"value":0},"Ultrasonic":{"value":13},"OccupiedTime":{"value":0},"LED":{"value":false},"LedEnable":{"value":true}}}
+[2026-08-07 20:29:12.909]# RECV ASCII>
+Publish Topic: $sys/53BV12EYcY/park1/thing/property/post, Msg: {"id":"43506","params":{"ParkStatus":{"value":2},"GeoMagnetic":{"value":1},"Ultrasonic":{"value":3},"OccupiedTime":{"value":6},"LED":{"value":true},"LedEnable":{"value":true}}}
 Data uploaded!
-QMC: X=0.61,Y=0.61,Z=0.43 | magSq=0.9,base=0.9,ratio=-0.017,dZ=0.01,cnt=0,car=0
-QMC: X=0.62,Y=0.60,Z=0.44 | magSq=0.9,base=0.9,ratio=-0.003,dZ=0.00,cnt=0,car=0
-QMC: X=0.62,Y=0.61,Z=0.44 | magSq=0.9,base=0.9,ratio=0.002,dZ=0.
-[2026-07-25 20:00:04.982]# RECV ASCII>
-00,cnt=0,car=0
-QMC: X=0.61,Y=0.61,Z=0.43 | magSq=0.9,base=0.9,ratio=-0.015,dZ=0.01,cnt=0,car=0
-QMC: 
-[2026-07-25 20:00:05.244]# RECV ASCII>
-QMC: X=0.05,Y=-0.29,Z=-2.81 | magSq=8.0,base=8.0,ratio=0.000,dZ=0.00,cnt=0,car=0
 
-[2026-07-25 20:00:05.492]# RECV ASCII>
-QMC: X=0.06,Y=-0.29,Z=-2.80 | magSq=8.0,base=8.0,ratio=-0.004,dZ=0.01,cnt=0,car=0
+[2026-08-07 20:29:20.345]# RECV ASCII>
+Drop partial MQTT packet (timeout)
 
-[2026-07-25 20:00:05.895]# RECV ASCII>
-QMC: X=0.06,Y=-0.28,Z=-2.82 | magSq=8.0,base=8.0,ratio=0.004,dZ=0.01,cnt=0,car=0
+[2026-08-07 20:29:21.441]# RECV ASCII>
+Drop partial MQTT packet (timeout)
 
-[2026-07-25 20:00:06.146]# RECV ASCII>
-QMC: X=0.07,Y=-0.28,Z=-2.80 | magSq=7.9,base=8.0,ratio=-0.009,dZ=0.01,cnt=0,car=0
+[2026-08-07 20:29:27.947]# RECV ASCII>
+Publish Topic: $sys/53BV12EYcY/park1/thing/property/post, Msg: {"id":"58548","params":{"ParkStatus":{"value":2},"GeoMagnetic":{"value":1},"Ultrasonic":{"value":3},"OccupiedTime":{"value":21},"LED":{"value":true},"LedEnable":{"value":true}}}
+Data uploaded!
 
-[2026-07-25 20:00:06.547]# RECV ASCII>
-QMC: X=0.06,Y=-0.28,Z=-2.82 | magSq=8.0,base=8.0,ratio=0.005,dZ=0.01,cnt=0,car=0
+[2026-08-07 20:29:29.355]# RECV ASCII>
+Heartbeat PINGREQ sent
 
-[2026-07-25 20:00:06.794]# RECV ASCII>
-QMC: X=0.06,Y=-0.29,Z=-2.81 | magSq=8.0,base=8.0,ratio=0.003,dZ=0.00,cnt=0,car=0
+[2026-08-07 20:29:39.925]# RECV ASCII>
+topic: $sys/53BV12EYcY/park1/thing/property/set, payload[57]: {"id":"125","version":"1.0","params":{"LedEnable":false}}
+LEDEnable set to: 0
+Property Reply: {"id":"125","code":200,"msg":"success"}
+Publish Topic: $sys/53BV12EYcY/park1/thing/property/set_reply, Msg: {"id":"125","code":200,"msg":"success"}
+Publish Topic: $sys/53BV12EYcY/park1/thing/property/post, Msg: {"id":"70599","params":{"ParkStatus":{"value":2},"GeoMagnetic":{"value":1},"Ultrasonic":{"value":3},"OccupiedTime":{"value":32},"LED":{"value
+[2026-08-07 20:29:39.991]# RECV ASCII>
+":false},"LedEnable":{"value":false}}}
+Data uploaded!
+
+[2026-08-07 20:29:46.879]# RECV ASCII>
+topic: $sys/53BV12EYcY/park1/thing/property/set, payload[56]: {"id":"126","version":"1.0","params":{"LedEnable":true}}
+LEDEnable set to: 1
+Property Reply: {"id":"126","code":200,"msg":"success"}
+Publish Topic: $sys/53BV12EYcY/park1/thing/property/set_reply, Msg: {"id":"126","code":200,"msg":"success"}
+Publish Topic: $sys/53BV12EYcY/park1/thing/property/post, Msg: {"id":"77553","params":{"ParkStatus":{"value":2},"GeoMagnetic":{"value":1},"Ultrasonic":{"value":3},"OccupiedTime":{"value":39},"LED":{"value"
+[2026-08-07 20:29:46.954]# RECV ASCII>
+:true},"LedEnable":{"value":true}}}
+Data uploaded!
+
+[2026-08-07 20:29:54.741]# RECV ASCII>
+topic: $sys/53BV12EYcY/park1/thing/property/set, payload[57]: {"id":"127","version":"1.0","params":{"LedEnable":false}}
+LEDEnable set to: 0
+Property Reply: {"id":"127","code":200,"msg":"success"}
+Publish Topic: $sys/53BV12EYcY/park1/thing/property/set_reply, Msg: {"id":"127","code":200,"msg":"success"}
+Publish Topic: $sys/53BV12EYcY/park1/thing/property/post, Msg: {"id":"85414","params":{"ParkStatus":{"value":2},"GeoMagnetic":{"value":1},"Ultrasonic":{"value":3},"OccupiedTime":{"value":47},"LED":{"value
+[2026-08-07 20:29:54.804]# RECV ASCII>
+":false},"LedEnable":{"value":false}}}
+Data uploaded!
+
+[2026-08-07 20:30:00.722]# RECV ASCII>
+topic: $sys/53BV12EYcY/park1/thing/property/set, payload[56]: {"id":"128","version":"1.0","params":{"LedEnable":true}}
+LEDEnable set to: 1
+Property Reply: {"id":"128","code":200,"msg":"success"}
+Publish Topic: $sys/53BV12EYcY/park1/thing/property/set_reply, Msg: {"id":"128","code":200,"msg":"success"}
+Publish Topic: $sys/53BV12EYcY/park1/thing/property/post, Msg: {"id":"91395","params":{"ParkStatus":{"value":2},"GeoMagnetic":{"value":1},"Ultrasonic":{"value":3},"OccupiedTime":{"value":53},"LED":{"value"
+[2026-08-07 20:30:00.796]# RECV ASCII>
+:true},"LedEnable":{"value":true}}}
+Data uploaded!
+
+[2026-08-07 20:30:05.964]# RECV ASCII>
+topic: $sys/53BV12EYcY/park1/thing/property/set, payload[57]: {"id":"129","version":"1.0","params":{"LedEnable":false}}
+LEDEnable set to: 0
+Property Reply: {"id":"129","code":200,"msg":"success"}
+Publish Topic: $sys/53BV12EYcY/park1/thing/property/set_reply, Msg: {"id":"129","code":200,"msg":"success"}
+Publish Topic: $sys/53BV12EYcY/park1/thing/property/post, Msg: {"id":"96636","params":{"ParkStatus":{"value":2},"GeoMagnetic":{"value":1},"Ultrasonic":{"value":3},"OccupiedTime":{"value":59},"LED":{"value
+[2026-08-07 20:30:06.040]# RECV ASCII>
+":false},"LedEnable":{"value":false}}}
+Data uploaded!
+
+[2026-08-07 20:30:17.001]# RECV ASCII>
+topic: $sys/53BV12EYcY/park1/thing/property/set, payload[56]: {"id":"130","version":"1.0","params":{"LedEnable":true}}
+LEDEnable set to: 1
+Property Reply: {"id":"130","code":200,"msg":"success"}
+Publish Topic: $sys/53BV12EYcY/park1/thing/property/set_reply, Msg: {"id":"130","code":200,"msg":"success"}
+Publish Topic: $sys/53BV12EYcY/park1/thing/property/post, Msg: {"id":"107671","params":{"ParkStatus":{"value":2},"GeoMagnetic":{"value":1},"Ultrasonic":{"value":3},"OccupiedTime":{"value":70},"LED":{"value
+[2026-08-07 20:30:17.079]# RECV ASCII>
+":true},"LedEnable":{"value":true}}}
+Data uploaded!
+
+[2026-08-07 20:30:29.359]# RECV ASCII>
+Heartbeat PINGREQ sent
+
+[2026-08-07 20:30:32.203]# RECV ASCII>
+Publish Topic: $sys/53BV12EYcY/park1/thing/property/post, Msg: {"id":"122801","params":{"ParkStatus":{"value":2},"GeoMagnetic":{"value":1},"Ultrasonic":{"value":3},"OccupiedTime":{"value":85},"LED":{"value":true},"LedEnable":{"value":true}}}
+Data uploaded!
+
+[2026-08-07 20:30:47.242]# RECV ASCII>
+Publish Topic: $sys/53BV12EYcY/park1/thing/property/post, Msg: {"id":"137845","params":{"ParkStatus":{"value":2},"GeoMagnetic":{"value":1},"Ultrasonic":{"value":3},"OccupiedTime":{"value":100},"LED":{"value":true},"LedEnable":{"value":true}}}
+Data uploaded!
+
+[2026-08-07 20:31:02.300]# RECV ASCII>
+Publish Topic: $sys/53BV12EYcY/park1/thing/property/post, Msg: {"id":"152888","params":{"ParkStatus":{"value":2},"GeoMagnetic":{"value":1},"Ultrasonic":{"value":3},"OccupiedTime":{"value":115},"LED":{"value":true},"LedEnable":{"value":true}}}
+Data uploaded!
+
+[2026-08-07 20:31:17.333]# RECV ASCII>
+Publish Topic: $sys/53BV12EYcY/park1/thing/property/post, Msg: {"id":"167931","params":{"ParkStatus":{"value":2},"GeoMagnetic":{"value":1},"Ultrasonic":{"value":3},"OccupiedTime":{"value":130},"LED":{"value":true},"LedEnable":{"value":true}}}
+Data uploaded!
+
+[2026-08-07 20:31:29.441]# RECV ASCII>
+Heartbeat PINGREQ sent
+
+[2026-08-07 20:31:32.463]# RECV ASCII>
+Publish Topic: $sys/53BV12EYcY/park1/thing/property/post, Msg: {"id":"183060","params":{"ParkStatus":{"value":2},"GeoMagnetic":{"value":1},"Ultrasonic":{"value":3},"OccupiedTime":{"value":145},"LED":{"value":true},"LedEnable":{"value":true}}}
+Data uploaded!
+
+[2026-08-07 20:31:47.505]# RECV ASCII>
+Publish Topic: $sys/53BV12EYcY/park1/thing/property/post, Msg: {"id":"198104","params":{"ParkStatus":{"value":2},"GeoMagnetic":{"value":1},"Ultrasonic":{"value":3},"OccupiedTime":{"value":160},"LED":{"value":true},"LedEnable":{"value":true}}}
+Data uploaded!
+
+[2026-08-07 20:31:50.397]# RECV ASCII>
+topic: $sys/53BV12EYcY/park1/thing/property/set, payload[57]: {"id":"131","version":"1.0","params":{"LedEnable":false}}
+LEDEnable set to: 0
+Property Reply: {"id":"131","code":200,"msg":"success"}
+Publish Topic: $sys/53BV12EYcY/park1/thing/property/set_reply, Msg: {"id":"131","code":200,"msg":"success"}
+Publish Topic: $sys/53BV12EYcY/park1/thing/property/post, Msg: {"id":"201064","params":{"ParkStatus":{"value":2},"GeoMagnetic":{"value":1},"Ultrasonic":{"value":3},"OccupiedTime":{"value":163},"LED":{"val
+[2026-08-07 20:31:50.459]# RECV ASCII>
+ue":false},"LedEnable":{"value":false}}}
+Data uploaded!
+
+[2026-08-07 20:31:56.749]# RECV ASCII>
+topic: $sys/53BV12EYcY/park1/thing/property/set, payload[56]: {"id":"132","version":"1.0","params":{"LedEnable":true}}
+LEDEnable set to: 1
+Property Reply: {"id":"132","code":200,"msg":"success"}
+Publish Topic: $sys/53BV12EYcY/park1/thing/property/set_reply, Msg: {"id":"132","code":200,"msg":"success"}
+Publish Topic: $sys/53BV12EYcY/park1/thing/property/post, Msg: {"id":"207415","params":{"ParkStatus":{"value":2},"GeoMagnetic":{"value":1},"Ultrasonic":{"value":3},"OccupiedTime":{"value":169},"LED":{"valu
+[2026-08-07 20:31:56.831]# RECV ASCII>
+e":true},"LedEnable":{"value":true}}}
+Data uploaded!
+
+[2026-08-07 20:32:11.873]# RECV ASCII>
+Publish Topic: $sys/53BV12EYcY/park1/thing/property/post, Msg: {"id":"222458","params":{"ParkStatus":{"value":2},"GeoMagnetic":{"value":1},"Ultrasonic":{"value":3},"OccupiedTime":{"value":184},"LED":{"value":true},"LedEnable":{"value":true}}}
+Data uploaded!
+
+[2026-08-07 20:32:26.908]# RECV ASCII>
+Publish Topic: $sys/53BV12EYcY/park1/thing/property/post, Msg: {"id":"237501","params":{"ParkStatus":{"value":2},"GeoMagnetic":{"value":1},"Ultrasonic":{"value":3},"OccupiedTime":{"value":199},"LED":{"value":true},"LedEnable":{"value":true}}}
+Data uploaded!
+
+[2026-08-07 20:32:29.436]# RECV ASCII>
+Heartbeat PINGREQ sent
+
+[2026-08-07 20:32:42.041]# RECV ASCII>
+Publish Topic: $sys/53BV12EYcY/park1/thing/property/post, Msg: {"id":"252634","params":{"ParkStatus":{"value":2},"GeoMagnetic":{"value":1},"Ultrasonic":{"value":3},"OccupiedTime":{"value":214},"LED":{"value":true},"LedEnable":{"value":true}}}
+Data uploaded!
+
+[2026-08-07 20:32:57.083]# RECV ASCII>
+Publish Topic: $sys/53BV12EYcY/park1/thing/property/post, Msg: {"id":"267678","params":{"ParkStatus":{"value":2},"GeoMagnetic":{"value":1},"Ultrasonic":{"value":3},"OccupiedTime":{"value":230},"LED":{"value":true},"LedEnable":{"value":true}}}
+Data uploaded!
+
+[2026-08-07 20:33:12.142]# RECV ASCII>
+Publish Topic: $sys/53BV12EYcY/park1/thing/property/post, Msg: {"id":"282721","params":{"ParkStatus":{"value":2},"GeoMagnetic":{"value":1},"Ultrasonic":{"value":3},"OccupiedTime":{"value":245},"LED":{"value":true},"LedEnable":{"value":true}}}
+Data uploaded!
+
+[2026-08-07 20:33:26.565]# RECV ASCII>
+Publish Topic: $sys/53BV12EYcY/park1/thing/property/post, Msg: {"id":"297150","params":{"ParkStatus":{"value":0},"GeoMagnetic":{"value":0},"Ultrasonic":{"value":19},"OccupiedTime":{"value":0},"LED":{"value":false},"LedEnable":{"value":true}}}
+Data uploaded!
+
+[2026-08-07 20:33:29.404]# RECV ASCII>
+Publish Topic: $sys/53BV12EYcY/park1/thing/property/post, Msg: {"id":"299996","params":{"ParkStatus":{"value":1},"GeoMagnetic":{"value":1},"Ultrasonic":{"value":9},"OccupiedTime":{"value":0},"LED":{"value":false},"LedEnable":{"value":true}}}
+Data uploaded!
+
+[2026-08-07 20:33:29.544]# RECV ASCII>
+Heartbeat PINGREQ sent
+
+[2026-08-07 20:33:34.308]# RECV ASCII>
+Publish Topic: $sys/53BV12EYcY/park1/thing/property/post, Msg: {"id":"304894","params":{"ParkStatus":{"value":0},"GeoMagnetic":{"value":0},"Ultrasonic":{"value":15},"OccupiedTime":{"value":0},"LED":{"value":false},"LedEnable":{"value":true}}}
+Data uploaded!
+
+[2026-08-07 20:33:34.926]# RECV ASCII>
+Link dead (no RX 65001ms), force reconnect...
+WiFi offline, wait before reconnect...
+
+[2026-08-07 20:34:04.920]# RECV ASCII>
+WiFi offline, reconnecting...
+
+[2026-08-07 20:34:04.982]# RECV ASCII>
+Reconnect (1/3)...
+
+[2026-08-07 20:34:07.336]# RECV ASCII>
+Exit transparent mode
+1. AT
+
+[2026-08-07 20:41:35.273]# RECV ASCII>
+QMC5883P Init OK!
+All Bsp Init OK!
+
+[2026-08-07 20:41:35.490]# RECV ASCII>
+Attempt 1/3 ESP8266 init...
+1. AT
+
+[2026-08-07 20:41:44.357]# RECV ASCII>
+ESP8266 Init failed
+
+[2026-08-07 20:41:45.790]# RECV ASCII>
+Attempt 2/3 ESP8266 init...
+1. AT
+
+[2026-08-07 20:41:54.657]# RECV ASCII>
+ESP8266 Init failed
+
+[2026-08-07 20:41:56.096]# RECV ASCII>
+Attempt 3/3 ESP8266 init...
+1. AT
+
+[2026-08-07 20:42:02.510]# RECV ASCII>
+2. CWMODE
+
+[2026-08-07 20:42:03.114]# RECV ASCII>
+3. AT+CWDHCP
+
+[2026-08-07 20:42:03.721]# RECV ASCII>
+4. CWJAP
+
+[2026-08-07 20:42:05.318]# RECV ASCII>
+5. CIPCLOSE
+
+[2026-08-07 20:42:05.688]# RECV ASCII>
+6. CIPSTART
+
+[2026-08-07 20:42:09.677]# RECV ASCII>
+7. CIPMODE=1
+
+[2026-08-07 20:42:10.259]# RECV ASCII>
+8. CIPSEND (enter transparent)
+
+[2026-08-07 20:42:10.898]# RECV ASCII>
+9. ESP8266 Init OK (transparent mode)
+Attempt 3/3 MQTT connect...
+
+[2026-08-07 20:42:13.271]# RECV ASCII>
+OneNet_DevLink
+PROID: 53BV12EYcY, TOKEN: version=2018-10-31&res=products%2F53BV12EYcY%2Fdevices%2Fpark1&et=1815919855&method=md5&sign=WSMSUPJ7K3%2B%2ByxiohKCfFQ%3D%3D, DEVID: park1
+
+[2026-08-07 20:42:14.585]# RECV ASCII>
+Tips: ??????
+
+[2026-08-07 20:42:15.555]# RECV ASCII>
+Subscribe Topic: $sys/53BV12EYcY/park1/thing/property/set
+OneNET Connected!
+
+[2026-08-07 20:42:15.775]# RECV ASCII>
+Online! resend x3 to refresh snapshot...
+Publish Topic: $sys/53BV12EYcY/park1/thing/property/post, Msg: {"id":"40709","params":{"ParkStatus":{"value":0},"GeoMagnetic":{"value":0},"Ultrasonic":{"value":26},"OccupiedTime":{"value":0},"LED":{"value":false},"LedEnable":{"value":true}}}
+Data uploaded! (2 resend left)
+
+[2026-08-07 20:42:17.359]# RECV ASCII>
+Publish Topic: $sys/53BV12EYcY/park1/thing/property/post, Msg: {"id":"42290","params":{"ParkStatus":{"value":0},"GeoMagnetic":{"value":0},"Ultrasonic":{"value":26},"OccupiedTime":{"value":0},"LED":{"value":false},"LedEnable":{"value":true}}}
+Data uploaded! (1 resend left)
+
+[2026-08-07 20:42:18.941]# RECV ASCII>
+Publish Topic: $sys/53BV12EYcY/park1/thing/property/post, Msg: {"id":"43874","params":{"ParkStatus":{"value":0},"GeoMagnetic":{"value":0},"Ultrasonic":{"value":26},"OccupiedTime":{"value":0},"LED":{"value":false},"LedEnable":{"value":true}}}
+Data uploaded! (0 resend left)
+
+[2026-08-07 20:42:22.323]# RECV ASCII>
+Publish Topic: $sys/53BV12EYcY/park1/thing/property/post, Msg: {"id":"47272","params":{"ParkStatus":{"value":1},"GeoMagnetic":{"value":1},"Ultrasonic":{"value":7},"OccupiedTime":{"value":0},"LED":{"value":false},"LedEnable":{"value":true}}}
+Data uploaded!
+
+[2026-08-07 20:42:28.489]# RECV ASCII>
+Publish Topic: $sys/53BV12EYcY/park1/thing/property/post, Msg: {"id":"53428","params":{"ParkStatus":{"value":2},"GeoMagnetic":{"value":1},"Ultrasonic":{"value":3},"OccupiedTime":{"value":6},"LED":{"value":true},"LedEnable":{"value":true}}}
+Data uploaded!
+
+[2026-08-07 20:42:35.132]# RECV ASCII>
+Heartbeat PINGREQ sent
+
+[2026-08-07 20:42:37.910]# RECV ASCII>
+topic: $sys/53BV12EYcY/park1/thing/property/set, payload[56]: {"id":"134","version":"1.0","params":{"LedEnable":true}}
+LEDEnable set to: 1
+Property Reply: {"id":"134","code":200,"msg":"success"}
+Publish Topic: $sys/53BV12EYcY/park1/thing/property/set_reply, Msg: {"id":"134","code":200,"msg":"success"}
+Publish Topic: $sys/53BV12EYcY/park1/thing/property/post, Msg: {"id":"62922","params":{"ParkStatus":{"value":2},"GeoMagnetic":{"value":1},"Ultrasonic":{"value":3},"OccupiedTime":{"value":15},"LED":{"value"
+[2026-08-07 20:42:37.981]# RECV ASCII>
+:true},"LedEnable":{"value":true}}}
+Data uploaded!
+
+[2026-08-07 20:42:48.772]# RECV ASCII>
+Drop partial MQTT packet (timeout)
+
+[2026-08-07 20:42:49.761]# RECV ASCII>
+Drop partial MQTT packet (timeout)
+
+[2026-08-07 20:42:53.030]# RECV ASCII>
+Publish Topic: $sys/53BV12EYcY/park1/thing/property/post, Msg: {"id":"77965","params":{"ParkStatus":{"value":2},"GeoMagnetic":{"value":1},"Ultrasonic":{"value":3},"OccupiedTime":{"value":30},"LED":{"value":true},"LedEnable":{"value":true}}}
+Data uploaded!
+
+[2026-08-07 20:42:57.274]# RECV ASCII>
+topic: $sys/53BV12EYcY/park1/thing/property/set, payload[56]: {"id":"136","version":"1.0","params":{"LedEnable":true}}
+LEDEnable set to: 1
+Property Reply: {"id":"136","code":200,"msg":"success"}
+Publish Topic: $sys/53BV12EYcY/park1/thing/property/set_reply, Msg: {"id":"136","code":200,"msg":"success"}
+Publish Topic: $sys/53BV12EYcY/park1/thing/property/post, Msg: {"id":"82285","params":{"ParkStatus":{"value":2},"GeoMagnetic":{"value":1},"Ultrasonic":{"value":3},"OccupiedTime":{"value":34},"LED":{"value"
+[2026-08-07 20:42:57.363]# RECV ASCII>
+:true},"LedEnable":{"value":true}}}
+Data uploaded!
+
+[2026-08-07 20:43:03.003]# RECV ASCII>
+topic: $sys/53BV12EYcY/park1/thing/property/set, payload[57]: {"id":"137","version":"1.0","params":{"LedEnable":false}}
+LEDEnable set to: 0
+Property Reply: {"id":"137","code":200,"msg":"success"}
+Publish Topic: $sys/53BV12EYcY/park1/thing/property/set_reply, Msg: {"id":"137","code":200,"msg":"success"}
+Publish Topic: $sys/53BV12EYcY/park1/thing/property/post, Msg: {"id":"88013","params":{"ParkStatus":{"value":2},"GeoMagnetic":{"value":1},"Ultrasonic":{"value":3},"OccupiedTime":{"value":40},"LED":{"value
+[2026-08-07 20:43:03.079]# RECV ASCII>
+":false},"LedEnable":{"value":false}}}
+Data uploaded!
+
+[2026-08-07 20:43:09.158]# RECV ASCII>
+topic: $sys/53BV12EYcY/park1/thing/property/set, payload[56]: {"id":"138","version":"1.0","params":{"LedEnable":true}}
+LEDEnable set to: 1
+Property Reply: {"id":"138","code":200,"msg":"success"}
+Publish Topic: $sys/53BV12EYcY/park1/thing/property/set_reply, Msg: {"id":"138","code":200,"msg":"success"}
+Publish Topic: $sys/53BV12EYcY/park1/thing/property/post, Msg: {"id":"94169","params":{"ParkStatus":{"value":2},"GeoMagnetic":{"value":1},"Ultrasonic":{"value":3},"OccupiedTime":{"value":46},"LED":{"value"
+[2026-08-07 20:43:09.237]# RECV ASCII>
+:true},"LedEnable":{"value":true}}}
+Data uploaded!
+
+[2026-08-07 20:43:14.466]# RECV ASCII>
+Drop partial MQTT packet (timeout)
+
+[2026-08-07 20:43:15.475]# RECV ASCII>
+Drop partial MQTT packet (timeout)

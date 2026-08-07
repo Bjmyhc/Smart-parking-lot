@@ -1,14 +1,14 @@
 /**
  * @file bsp_qmc5883p.h
- * @brief QMC5883P 三轴磁力计驱动头文件 (C语言版本)
+ * @brief QMC5883P �������������ͷ�ļ� (C���԰汾)
  * 
- * 通过软件模拟 I2C (GPIO 位翻转) 驱动 QMC5883P 磁力计
- * 提供配置、数据读取和校准功能，支持多种量程范围
+ * ͨ������ģ�� I2C (GPIO λ��ת) ���� QMC5883P ������
+ * �ṩ���á����ݶ�ȡ��У׼���ܣ�֧�ֶ������̷�Χ
  * 
- * 引脚映射:
- *   - SCL:  PB13 (软件 I2C 时钟线)
- *   - SDA:  PB14 (软件 I2C 数据线)
- *   - DRDY: PB12 (数据就绪中断引脚)
+ * ����ӳ��:
+ *   - SCL:  PB13 (���� I2C ʱ����)
+ *   - SDA:  PB14 (���� I2C ������)
+ *   - DRDY: PB12 (���ݾ����ж�����)
  * 
  * @author Adapted from WilliTourt's C++ version
  * @version 1.0
@@ -22,107 +22,107 @@
 #include "stm32f10x.h"
 
 /* ========================================================================
- * 引脚映射定义（硬件连接配置）
+ * ����ӳ�䶨�壨Ӳ���������ã�
  * ======================================================================== */
 
-/* I2C 时钟线 - PB14 */
+/* I2C ʱ���� - PB14 */
 #define QMC_SCL_PORT                    GPIOB
 #define QMC_SCL_PIN                     GPIO_Pin_14
 #define QMC_SCL_RCC                     RCC_APB2Periph_GPIOB
 
-/* I2C 数据线 - PB13 */
+/* I2C ������ - PB13 */
 #define QMC_SDA_PORT                    GPIOB
 #define QMC_SDA_PIN                     GPIO_Pin_13
 #define QMC_SDA_RCC                     RCC_APB2Periph_GPIOB
 
-/* 数据就绪引脚 - PB12 */
+/* ���ݾ������� - PB12 */
 #define QMC_DRDY_PORT                   GPIOB
 #define QMC_DRDY_PIN                    GPIO_Pin_12
 #define QMC_DRDY_RCC                    RCC_APB2Periph_GPIOB
 
 /* ========================================================================
- * I2C 设备地址与参数
+ * I2C �豸��ַ�����
  * ======================================================================== */
 
-#define QMC5883P_ADDR                   0x2C    /* I2C 设备地址 (7位) */
-#define QMC5883P_CHIP_ID                0x80    /* 芯片 ID 值 */
-#define QMC5883P_READ_TIMEOUT_MS        100     /* I2C 读取超时时间 (ms) */
+#define QMC5883P_ADDR                   0x2C    /* I2C �豸��ַ (7λ) */
+#define QMC5883P_CHIP_ID                0x80    /* оƬ ID ֵ */
+#define QMC5883P_READ_TIMEOUT_MS        100     /* I2C ��ȡ��ʱʱ�� (ms) */
 
 /* ========================================================================
- * 寄存器地址定义
+ * �Ĵ�����ַ����
  * ======================================================================== */
 
-#define QMC5883P_REG_CHIP_ID            0x00    /* 芯片 ID 寄存器 */
-#define QMC5883P_REG_XOUT_L             0x01    /* X 轴数据低字节 */
-#define QMC5883P_REG_XOUT_H             0x02    /* X 轴数据高字节 */
-#define QMC5883P_REG_YOUT_L             0x03    /* Y 轴数据低字节 */
-#define QMC5883P_REG_YOUT_H             0x04    /* Y 轴数据高字节 */
-#define QMC5883P_REG_ZOUT_L             0x05    /* Z 轴数据低字节 */
-#define QMC5883P_REG_ZOUT_H             0x06    /* Z 轴数据高字节 */
-#define QMC5883P_REG_STATUS             0x09    /* 状态寄存器 (OVFL, DRDY) */
-#define QMC5883P_REG_CONTROL_1          0x0A    /* 控制寄存器 1 (OSR, ODR, MODE) */
-#define QMC5883P_REG_CONTROL_2          0x0B    /* 控制寄存器 2 (量程,自检,复位,软复位) */
+#define QMC5883P_REG_CHIP_ID            0x00    /* оƬ ID �Ĵ��� */
+#define QMC5883P_REG_XOUT_L             0x01    /* X �����ݵ��ֽ� */
+#define QMC5883P_REG_XOUT_H             0x02    /* X �����ݸ��ֽ� */
+#define QMC5883P_REG_YOUT_L             0x03    /* Y �����ݵ��ֽ� */
+#define QMC5883P_REG_YOUT_H             0x04    /* Y �����ݸ��ֽ� */
+#define QMC5883P_REG_ZOUT_L             0x05    /* Z �����ݵ��ֽ� */
+#define QMC5883P_REG_ZOUT_H             0x06    /* Z �����ݸ��ֽ� */
+#define QMC5883P_REG_STATUS             0x09    /* ״̬�Ĵ��� (OVFL, DRDY) */
+#define QMC5883P_REG_CONTROL_1          0x0A    /* ���ƼĴ��� 1 (OSR, ODR, MODE) */
+#define QMC5883P_REG_CONTROL_2          0x0B    /* ���ƼĴ��� 2 (����,�Լ�,��λ,����λ) */
 
 /* ========================================================================
- * 状态寄存器位定义
+ * ״̬�Ĵ���λ����
  * ======================================================================== */
 
-#define QMC5883P_STATUS_DRDY            0x01    /* 数据就绪标志 */
-#define QMC5883P_STATUS_OVL             0x02    /* 溢出标志 */
+#define QMC5883P_STATUS_DRDY            0x01    /* ���ݾ�����־ */
+#define QMC5883P_STATUS_OVL             0x02    /* �����־ */
 
 /* ========================================================================
- * 控制寄存器 1 位定义
+ * ���ƼĴ��� 1 λ����
  * ======================================================================== */
 
-/* 工作模式 */
-#define QMC5883P_CTRL1_MODE_SUSPEND     0x00    /* 挂起模式 (待机) */
-#define QMC5883P_CTRL1_MODE_NORMAL      0x01    /* 正常模式 */
-#define QMC5883P_CTRL1_MODE_SINGLE      0x02    /* 单次测量模式 */
-#define QMC5883P_CTRL1_MODE_CONT        0x03    /* 连续测量模式 */
+/* ����ģʽ */
+#define QMC5883P_CTRL1_MODE_SUSPEND     0x00    /* ����ģʽ (����) */
+#define QMC5883P_CTRL1_MODE_NORMAL      0x01    /* ����ģʽ */
+#define QMC5883P_CTRL1_MODE_SINGLE      0x02    /* ���β���ģʽ */
+#define QMC5883P_CTRL1_MODE_CONT        0x03    /* ��������ģʽ */
 
-/* 过采样率 (OSR1) */
-#define QMC5883P_CTRL1_OSR1_8           0x00    /* 过采样率: 8 */
-#define QMC5883P_CTRL1_OSR1_4           0x10    /* 过采样率: 4 */
-#define QMC5883P_CTRL1_OSR1_2           0x20    /* 过采样率: 2 */
-#define QMC5883P_CTRL1_OSR1_1           0x30    /* 过采样率: 1 */
+/* �������� (OSR1) */
+#define QMC5883P_CTRL1_OSR1_8           0x00    /* ��������: 8 */
+#define QMC5883P_CTRL1_OSR1_4           0x10    /* ��������: 4 */
+#define QMC5883P_CTRL1_OSR1_2           0x20    /* ��������: 2 */
+#define QMC5883P_CTRL1_OSR1_1           0x30    /* ��������: 1 */
 
-/* 过采样率 (OSR2) */
-#define QMC5883P_CTRL1_OSR2_1           0x00    /* 过采样率: 1 */
-#define QMC5883P_CTRL1_OSR2_2           0x40    /* 过采样率: 2 */
-#define QMC5883P_CTRL1_OSR2_4           0x80    /* 过采样率: 4 */
-#define QMC5883P_CTRL1_OSR2_8           0xC0    /* 过采样率: 8 */
+/* �������� (OSR2) */
+#define QMC5883P_CTRL1_OSR2_1           0x00    /* ��������: 1 */
+#define QMC5883P_CTRL1_OSR2_2           0x40    /* ��������: 2 */
+#define QMC5883P_CTRL1_OSR2_4           0x80    /* ��������: 4 */
+#define QMC5883P_CTRL1_OSR2_8           0xC0    /* ��������: 8 */
 
-/* 数据输出速率 */
-#define QMC5883P_CTRL1_ODR_10HZ         0x00    /* 输出速率: 10Hz */
-#define QMC5883P_CTRL1_ODR_50HZ         0x04    /* 输出速率: 50Hz */
-#define QMC5883P_CTRL1_ODR_100HZ        0x08    /* 输出速率: 100Hz */
-#define QMC5883P_CTRL1_ODR_200HZ        0x0C    /* 输出速率: 200Hz */
+/* ����������� */
+#define QMC5883P_CTRL1_ODR_10HZ         0x00    /* �������: 10Hz */
+#define QMC5883P_CTRL1_ODR_50HZ         0x04    /* �������: 50Hz */
+#define QMC5883P_CTRL1_ODR_100HZ        0x08    /* �������: 100Hz */
+#define QMC5883P_CTRL1_ODR_200HZ        0x0C    /* �������: 200Hz */
 
 /* ========================================================================
- * 控制寄存器 2 位定义
+ * ���ƼĴ��� 2 λ����
  * ======================================================================== */
 
-#define QMC5883P_CTRL2_SOFT_RESET       0x80    /* 软复位位 */
-#define QMC5883P_CTRL2_SELF_TEST        0x40    /* 自检 */
-#define QMC5883P_CTRL2_RNG_2G           0x0C    /* 量程: ±2G */
-#define QMC5883P_CTRL2_RNG_8G           0x08    /* 量程: ±8G */
-#define QMC5883P_CTRL2_RNG_12G          0x04    /* 量程: ±12G */
-#define QMC5883P_CTRL2_RNG_30G          0x00    /* 量程: ±30G */
+#define QMC5883P_CTRL2_SOFT_RESET       0x80    /* ����λλ */
+#define QMC5883P_CTRL2_SELF_TEST        0x40    /* �Լ� */
+#define QMC5883P_CTRL2_RNG_2G           0x0C    /* ����: ��2G */
+#define QMC5883P_CTRL2_RNG_8G           0x08    /* ����: ��8G */
+#define QMC5883P_CTRL2_RNG_12G          0x04    /* ����: ��12G */
+#define QMC5883P_CTRL2_RNG_30G          0x00    /* ����: ��30G */
 
 /* ========================================================================
- * 灵敏度参数 (单位: LSB/Gauss)
+ * �����Ȳ��� (��λ: LSB/Gauss)
  * ======================================================================== */
 
-#define QMC5883P_SENS_2G                15000   /* ±2G 量程灵敏度 */
-#define QMC5883P_SENS_8G                3750    /* ±8G 量程灵敏度 */
-#define QMC5883P_SENS_12G               2500    /* ±12G 量程灵敏度 */
-#define QMC5883P_SENS_30G               1000    /* ±30G 量程灵敏度 */
+#define QMC5883P_SENS_2G                15000   /* ��2G ���������� */
+#define QMC5883P_SENS_8G                3750    /* ��8G ���������� */
+#define QMC5883P_SENS_12G               2500    /* ��12G ���������� */
+#define QMC5883P_SENS_30G               1000    /* ��30G ���������� */
 
 /* ========================================================================
- * 硬编码校准值 (手动校准后更新此处)
+ * Ӳ����У׼ֵ (�ֶ�У׼����´˴�)
  * ======================================================================== */
 
-/* 硬编码校准值 (两次校准取平均, 2026-08-02) */
+/* Ӳ����У׼ֵ (����У׼ȡƽ��, 2026-08-02) */
 #define MAG_X_OFFSET                    -0.324867f
 #define MAG_Y_OFFSET                    -0.435600f
 #define MAG_Z_OFFSET                    -0.014200f
@@ -131,30 +131,30 @@
 #define MAG_Z_SCALE                     0.860131f
 
 /* ========================================================================
- * 状态返回类型
+ * ״̬��������
  * ======================================================================== */
 
 /**
- * @brief QMC5883P 操作状态枚举
+ * @brief QMC5883P ����״̬ö��
  */
 typedef enum {
-    QMC5883P_OK = 0,        /* 操作成功 */
-    QMC5883P_ERROR,         /* 操作失败 */
-    QMC5883P_ERROR_ID       /* 芯片 ID 验证失败 */
+    QMC5883P_OK = 0,        /* �����ɹ� */
+    QMC5883P_ERROR,         /* ����ʧ�� */
+    QMC5883P_ERROR_ID       /* оƬ ID ��֤ʧ�� */
 } QMC5883P_Status_t;
 
 /**
- * @brief 工作模式枚举
+ * @brief ����ģʽö��
  */
 typedef enum {
-    QMC5883P_MODE_SUSPEND   = QMC5883P_CTRL1_MODE_SUSPEND,    /* 挂起模式 */
-    QMC5883P_MODE_NORMAL    = QMC5883P_CTRL1_MODE_NORMAL,     /* 正常模式 */
-    QMC5883P_MODE_SINGLE    = QMC5883P_CTRL1_MODE_SINGLE,     /* 单次测量 */
-    QMC5883P_MODE_CONTINUOUS = QMC5883P_CTRL1_MODE_CONT       /* 连续测量 */
+    QMC5883P_MODE_SUSPEND   = QMC5883P_CTRL1_MODE_SUSPEND,    /* ����ģʽ */
+    QMC5883P_MODE_NORMAL    = QMC5883P_CTRL1_MODE_NORMAL,     /* ����ģʽ */
+    QMC5883P_MODE_SINGLE    = QMC5883P_CTRL1_MODE_SINGLE,     /* ���β��� */
+    QMC5883P_MODE_CONTINUOUS = QMC5883P_CTRL1_MODE_CONT       /* �������� */
 } QMC5883P_Mode_t;
 
 /**
- * @brief 数据输出速率枚举
+ * @brief �����������ö��
  */
 typedef enum {
     QMC5883P_ODR_10HZ   = QMC5883P_CTRL1_ODR_10HZ,    /* 10Hz */
@@ -164,119 +164,119 @@ typedef enum {
 } QMC5883P_Spd_t;
 
 /**
- * @brief 量程范围枚举
+ * @brief ���̷�Χö��
  */
 typedef enum {
-    QMC5883P_RNG_2G  = QMC5883P_CTRL2_RNG_2G,      /* ±2G */
-    QMC5883P_RNG_8G  = QMC5883P_CTRL2_RNG_8G,      /* ±8G */
-    QMC5883P_RNG_12G = QMC5883P_CTRL2_RNG_12G,     /* ±12G */
-    QMC5883P_RNG_30G = QMC5883P_CTRL2_RNG_30G      /* ±30G */
+    QMC5883P_RNG_2G  = QMC5883P_CTRL2_RNG_2G,      /* ��2G */
+    QMC5883P_RNG_8G  = QMC5883P_CTRL2_RNG_8G,      /* ��8G */
+    QMC5883P_RNG_12G = QMC5883P_CTRL2_RNG_12G,     /* ��12G */
+    QMC5883P_RNG_30G = QMC5883P_CTRL2_RNG_30G      /* ��30G */
 } QMC5883P_Rng_t;
 
 /* ========================================================================
- * 设备结构定义
+ * �豸�ṹ����
  * ======================================================================== */
 
 /**
- * @brief QMC5883P 设备数据结构体
+ * @brief QMC5883P �豸���ݽṹ��
  * 
- * 保存设备配置参数、校准偏移和缩放系数、以及最新的磁场数据
- * 用户无需直接操作此结构体，由 QMC5883P_Init() 自动初始化
+ * �����豸���ò�����У׼ƫ�ƺ�����ϵ�����Լ����µĴų�����
+ * �û�����ֱ�Ӳ����˽ṹ�壬�� QMC5883P_Init() �Զ���ʼ��
  */
 typedef struct {
-    /* 配置参数 */
-    uint8_t mode;               /* 工作模式 */
-    uint8_t speed;              /* 数据输出速率 */
-    uint8_t range;              /* 量程范围 */
-    uint16_t sensitivity;       /* 当前量程对应的灵敏度 */
+    /* ���ò��� */
+    uint8_t mode;               /* ����ģʽ */
+    uint8_t speed;              /* ����������� */
+    uint8_t range;              /* ���̷�Χ */
+    uint16_t sensitivity;       /* ��ǰ���̶�Ӧ�������� */
     
-    /* 校准偏移 (硬铁补偿) */
+    /* У׼ƫ�� (Ӳ������) */
     float offset_x;
     float offset_y;
     float offset_z;
     
-    /* 校准缩放 (软铁补偿) */
+    /* У׼���� (��������) */
     float scale_x;
     float scale_y;
     float scale_z;
     
-    /* 最新磁场数据 (单位: Gauss) */
+    /* ���´ų����� (��λ: Gauss) */
     float mag_x;
     float mag_y;
     float mag_z;
 } QMC5883P_Device_t;
 
 /* ========================================================================
- * 函数声明
+ * ��������
  * ======================================================================== */
 
 /**
- * @brief 初始化 QMC5883P 设备
+ * @brief ��ʼ�� QMC5883P �豸
  * 
- * 包含完整的初始化流程:
- *   1. 初始化设备结构体参数
- *   2. 初始化软件 I2C 引脚 (PB12/PB13/PB14)
- *   3. 硬复位芯片并验证芯片 ID
- *   4. 设置量程范围和运行参数
+ * ���������ĳ�ʼ������:
+ *   1. ��ʼ���豸�ṹ�����
+ *   2. ��ʼ������ I2C ���� (PB12/PB13/PB14)
+ *   3. Ӳ��λоƬ����֤оƬ ID
+ *   4. �������̷�Χ�����в���
  * 
- * @param dev   指向 QMC5883P_Device_t 结构体的指针
- * @param mode  工作模式 (QMC5883P_Mode_t)
- * @param speed 数据输出速率 (QMC5883P_Spd_t)
- * @param range 量程范围 (QMC5883P_Rng_t)
+ * @param dev   ָ�� QMC5883P_Device_t �ṹ���ָ��
+ * @param mode  ����ģʽ (QMC5883P_Mode_t)
+ * @param speed ����������� (QMC5883P_Spd_t)
+ * @param range ���̷�Χ (QMC5883P_Rng_t)
  */
 void QMC5883P_Init(QMC5883P_Device_t *dev, QMC5883P_Mode_t mode,
                    QMC5883P_Spd_t speed, QMC5883P_Rng_t range);
 
 /**
- * @brief 启动传感器 (硬件初始化)
+ * @brief ���������� (Ӳ����ʼ��)
  * 
- * 执行以下4个步骤:
- *   1. 软复位芯片
- *   2. 验证芯片 ID
- *   3. 设置量程范围
- *   4. 设置运行参数
+ * ִ������4������:
+ *   1. ����λоƬ
+ *   2. ��֤оƬ ID
+ *   3. �������̷�Χ
+ *   4. �������в���
  * 
- * @param dev 指向 QMC5883P_Device_t 结构体的指针
- * @return QMC5883P_Status_t 操作状态
+ * @param dev ָ�� QMC5883P_Device_t �ṹ���ָ��
+ * @return QMC5883P_Status_t ����״̬
  */
 uint8_t QMC5883P_Begin(QMC5883P_Device_t *dev);
 
 /**
- * @brief 更新磁场数据
+ * @brief ���´ų�����
  * 
- * 等待数据就绪后从传感器读取最新数据
- * 经校准转换后存入 dev->mag_x/y/z 中
+ * �ȴ����ݾ�����Ӵ�������ȡ��������
+ * ��У׼ת������� dev->mag_x/y/z ��
  * 
- * @param dev 指向 QMC5883P_Device_t 结构体的指针
- * @return QMC5883P_Status_t 操作状态
+ * @param dev ָ�� QMC5883P_Device_t �ṹ���ָ��
+ * @return QMC5883P_Status_t ����״̬
  */
 uint8_t QMC5883P_Update(QMC5883P_Device_t *dev);
 
 /**
- * @brief 获取 X 轴数据
+ * @brief ��ȡ X ������
  */
 static inline float QMC5883P_GetX(QMC5883P_Device_t *dev) { return dev->mag_x; }
 
 /**
- * @brief 获取 Y 轴数据
+ * @brief ��ȡ Y ������
  */
 static inline float QMC5883P_GetY(QMC5883P_Device_t *dev) { return dev->mag_y; }
 
 /**
- * @brief 获取 Z 轴数据
+ * @brief ��ȡ Z ������
  */
 static inline float QMC5883P_GetZ(QMC5883P_Device_t *dev) { return dev->mag_z; }
 
 /**
- * @brief 校准 QMC5883P 设备 (阻塞式)
+ * @brief У׼ QMC5883P �豸 (����ʽ)
  * 
- * 采集30秒各轴最大/最小值, 自动计算硬铁偏移和软铁缩放系数
- * 结束后通过串口打印6个 #define 参数, 需手动复制到本文件头部
+ * �ɼ�30��������/��Сֵ, �Զ�����Ӳ��ƫ�ƺ���������ϵ��
+ * ������ͨ�����ڴ�ӡ6�� #define ����, ���ֶ����Ƶ����ļ�ͷ��
  * 
- * 注意: 函数内部自动清零补偿参数, 调用前无需修改宏
- * 校准期间需缓慢旋转设备, 让传感器朝向各个方向
+ * ע��: �����ڲ��Զ����㲹������, ����ǰ�����޸ĺ�
+ * У׼�ڼ��軺����ת�豸, �ô����������������
  * 
- * @param dev 指向 QMC5883P_Device_t 结构体的指针
+ * @param dev ָ�� QMC5883P_Device_t �ṹ���ָ��
  */
 void QMC5883P_Calibration(QMC5883P_Device_t *dev);
 
