@@ -3,7 +3,7 @@
 <title>Static Call Graph - [..\..\Output\output.axf]</title></head>
 <body><HR>
 <H1>Static Call Graph for image ..\..\Output\output.axf</H1><HR>
-<BR><P>#&#060CALLGRAPH&#062# ARM Linker, 5060528: Last Updated: Fri Aug 07 20:41:24 2026
+<BR><P>#&#060CALLGRAPH&#062# ARM Linker, 5060528: Last Updated: Fri Aug 07 23:34:44 2026
 <BR><P>
 <H3>Maximum Stack Usage =        808 bytes + Unknown(Cycles, Untraceable Function Pointers)</H3><H3>
 Call chain for Maximum Stack Depth:</H3>
@@ -164,7 +164,7 @@ Global Symbols
 <BR>[Called By]<UL><LI><a href="#[37]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;main
 </UL>
 
-<P><STRONG><a name="[3f]"></a>Wifi_Init</STRONG> (Thumb, 216 bytes, Stack size 8 bytes, app_init.o(.text))
+<P><STRONG><a name="[3f]"></a>Wifi_Init</STRONG> (Thumb, 232 bytes, Stack size 8 bytes, app_init.o(.text))
 <BR><BR>[Stack]<UL><LI>Max Depth = 504<LI>Call Chain = Wifi_Init &rArr; OneNet_DevLink &rArr; ESP8266_SendData &rArr; ESP8266_SendCmd &rArr; ESP8266_WaitRecive &rArr; Usart_Printf &rArr; vsnprintf
 </UL>
 <BR>[Calls]<UL><LI><a href="#[4c]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;Usart_Printf
@@ -237,7 +237,7 @@ Global Symbols
 <BR>[Called By]<UL><LI><a href="#[45]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;Wifi_Task
 </UL>
 
-<P><STRONG><a name="[45]"></a>Wifi_Task</STRONG> (Thumb, 820 bytes, Stack size 32 bytes, app_tasks.o(.text))
+<P><STRONG><a name="[45]"></a>Wifi_Task</STRONG> (Thumb, 832 bytes, Stack size 32 bytes, app_tasks.o(.text))
 <BR><BR>[Stack]<UL><LI>Max Depth = 808<LI>Call Chain = Wifi_Task &rArr; OneNet_RevPro &rArr; OneNet_SendPropertyReply &rArr; OneNet_Publish &rArr; ESP8266_SendData &rArr; ESP8266_SendCmd &rArr; ESP8266_WaitRecive &rArr; Usart_Printf &rArr; vsnprintf
 </UL>
 <BR>[Calls]<UL><LI><a href="#[64]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;OneNet_RevPro
@@ -761,6 +761,7 @@ Global Symbols
 <LI><a href="#[c1]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;strstr
 </UL>
 <BR>[Called By]<UL><LI><a href="#[62]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ESP8266_SendData
+<LI><a href="#[5f]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ESP8266_ExitTransparent
 <LI><a href="#[4f]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ESP8266_Init
 </UL>
 
@@ -794,7 +795,7 @@ Global Symbols
 <LI><a href="#[45]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;Wifi_Task
 </UL>
 
-<P><STRONG><a name="[4f]"></a>ESP8266_Init</STRONG> (Thumb, 554 bytes, Stack size 8 bytes, esp8266.o(.text))
+<P><STRONG><a name="[4f]"></a>ESP8266_Init</STRONG> (Thumb, 578 bytes, Stack size 8 bytes, esp8266.o(.text))
 <BR><BR>[Stack]<UL><LI>Max Depth = 400<LI>Call Chain = ESP8266_Init &rArr; ESP8266_SendCmd &rArr; ESP8266_WaitRecive &rArr; Usart_Printf &rArr; vsnprintf
 </UL>
 <BR>[Calls]<UL><LI><a href="#[bf]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ESP8266_SendCmd
@@ -809,10 +810,11 @@ Global Symbols
 
 <P><STRONG><a name="[169]"></a>ESP8266_IsTransparent</STRONG> (Thumb, 6 bytes, Stack size 0 bytes, esp8266.o(.text), UNUSED)
 
-<P><STRONG><a name="[5f]"></a>ESP8266_ExitTransparent</STRONG> (Thumb, 58 bytes, Stack size 8 bytes, esp8266.o(.text))
-<BR><BR>[Stack]<UL><LI>Max Depth = 360<LI>Call Chain = ESP8266_ExitTransparent &rArr; Usart_Printf &rArr; vsnprintf
+<P><STRONG><a name="[5f]"></a>ESP8266_ExitTransparent</STRONG> (Thumb, 106 bytes, Stack size 8 bytes, esp8266.o(.text))
+<BR><BR>[Stack]<UL><LI>Max Depth = 400<LI>Call Chain = ESP8266_ExitTransparent &rArr; ESP8266_SendCmd &rArr; ESP8266_WaitRecive &rArr; Usart_Printf &rArr; vsnprintf
 </UL>
-<BR>[Calls]<UL><LI><a href="#[b6]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ESP8266_Clear
+<BR>[Calls]<UL><LI><a href="#[bf]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ESP8266_SendCmd
+<LI><a href="#[b6]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ESP8266_Clear
 <LI><a href="#[7a]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;Usart_SendString
 <LI><a href="#[4c]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;Usart_Printf
 <LI><a href="#[50]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;DelayXms
@@ -1111,7 +1113,7 @@ Global Symbols
 <BR>[Called By]<UL><LI><a href="#[64]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;OneNet_RevPro
 </UL>
 
-<P><STRONG><a name="[64]"></a>OneNet_RevPro</STRONG> (Thumb, 1680 bytes, Stack size 136 bytes, onenet.o(.text))
+<P><STRONG><a name="[64]"></a>OneNet_RevPro</STRONG> (Thumb, 1708 bytes, Stack size 136 bytes, onenet.o(.text))
 <BR><BR>[Stack]<UL><LI>Max Depth = 776<LI>Call Chain = OneNet_RevPro &rArr; OneNet_SendPropertyReply &rArr; OneNet_Publish &rArr; ESP8266_SendData &rArr; ESP8266_SendCmd &rArr; ESP8266_WaitRecive &rArr; Usart_Printf &rArr; vsnprintf
 </UL>
 <BR>[Calls]<UL><LI><a href="#[da]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;cJSON_Parse
