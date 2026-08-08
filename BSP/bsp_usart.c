@@ -18,6 +18,11 @@
 #include <string.h>
 #include <stdio.h>
 
+/* ==================== USART2 接收环形缓冲 ==================== */
+static volatile uint8_t  usart2_rbuf[USART2_RBUF_SIZE];
+static volatile uint16_t usart2_rhead = 0;    /* 写入位置 */
+static volatile uint16_t usart2_rtail = 0;    /* 读取位置 */
+
 /****************************************************************************
  * 函数名: Usart1_Init
  * 功能:   初始化串口1
@@ -180,6 +185,60 @@ void USART1_IRQHandler(void)
 {
     if (USART_GetITStatus(USART1, USART_IT_RXNE) != RESET)
     {
+        /* 清空中断标志, 调试串口丢弃接收字节 */
+        (void)USART_ReceiveData(USART1);
         USART_ClearFlag(USART1, USART_FLAG_RXNE);
     }
+}
+
+/****************************************************************************
+ * 函数名: USART2_IRQHandler
+ * 功能:   串口2接收中断服务函数
+ * 参数:   无
+ * 返回值: 无
+ * 说明:   每个收到的字节存入环形缓冲(usart2_rbuf)供上层读取
+ *         用于 LoRa 模块下行数据接收
+ ****************************************************************************/
+void USART2_IRQHandler(void)
+{
+    if (USART_GetITStatus(USART2, USART_IT_RXNE) != RESET)
+    {
+        uint16_t nextHead;
+        uint8_t data;
+
+        data = (uint8_t)USART_ReceiveData(USART2);
+
+        nextHead = (usart2_rhead + 1) % USART2_RBUF_SIZE;
+        if (nextHead == usart2_rtail)
+        {
+            /* 缓冲满: 丢弃新字节(避免覆盖tail正在读的数据) */
+        }
+        else
+        {
+            usart2_rbuf[usart2_rhead] = data;
+            usart2_rhead = nextHead;
+        }
+
+        USART_ClearFlag(USART2, USART_FLAG_RXNE);
+    }
+}
+
+/****************************************************************************
+ * 函数名: Usart2_GetData
+ * 功能:   从 USART2 接收环形缓冲取出数据 (非阻塞)
+ * 参数:   buf    - 目标缓冲区
+ *         maxlen - 最大读取字节数
+ * 返回值: 实际读取字节数 (0=无数据)
+ ****************************************************************************/
+uint16_t Usart2_GetData(uint8_t *buf, uint16_t maxlen)
+{
+    uint16_t count = 0;
+
+    while (usart2_rhead != usart2_rtail && count < maxlen)
+    {
+        buf[count++] = usart2_rbuf[usart2_rtail];
+        usart2_rtail = (usart2_rtail + 1) % USART2_RBUF_SIZE;
+    }
+
+    return count;
 }

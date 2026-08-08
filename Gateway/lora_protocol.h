@@ -1,0 +1,89 @@
+﻿/* lora_protocol.h - LoRa 协议统一常量/结构体
+ *
+ * 说明: 本文件 STM32 节点端 和 ESP8266 网关端 必须同步引用,
+ *       包含帧头、定点传输地址、数据结构等内容，保证两端一致。
+ *       任何修改需两端同步更新
+ *
+ * 作者: Bjmyhc
+ * 日期: 2026-08-08
+ */
+#ifndef LORA_PROTOCOL_H
+#define LORA_PROTOCOL_H
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+#include <stdint.h>
+
+/* ============ 定点传输配置 ============ */
+#define LORA_GATEWAY_ADDR       0x0000   /* 网关固定地址 */
+#define LORA_CHANNEL            0x00     /* 信道(0), DX-LR22模块: 00=433.15MHz */
+#define LORA_BAUD_DEFAULT       9600     /* 串口波特率(LoRa模块UART), ESP8266软串稳定 */
+
+/* 定点传输帧头(3字节): [AddrH][AddrL][CH]
+ * 发送前要加在数据前面 */
+#define LORA_FRAME_HEADER_SIZE  3
+
+/* ============ 帧头字节 (子设备→网关) ============ */
+#define LORA_FRAME_CERT         0xA1    /* 证书数据(响应 AT+CERx) */
+#define LORA_FRAME_DATA         0xB1    /* 传感器数据(响应 AT+DATAx) */
+#define LORA_FRAME_ACK          0xC1    /* 命令执行确认(响应 AT+LedEnable 等) */
+#define LORA_FRAME_OTA_OK       0xD1    /* OTA接收128B成功, 准备下一包 */
+#define LORA_FRAME_OTA_RETRY    0xE1    /* OTA要求重发上一包 */
+
+/* ============ 节点传感器数据 ============
+ * 注意: 字段顺序、类型、对齐必须与 STM32 端 lora_node.h 完全一致
+ * 任何改动需同步修改两端 */
+
+#if defined(__cplusplus) && defined(ARDUINO)
+/* ESP8266 / ESP32 Arduino 使用 packed 属性 */
+#define LORA_PACKED  __attribute__((packed))
+#else
+/* STM32 KEIL 使用 pragma pack(在 include 前外部打开) */
+#define LORA_PACKED
+#endif
+
+/* 节点传感器数据帧(7 字段, 共 10 字节)
+ * LORA_FRAME_DATA + 下面结构体 */
+typedef struct LORA_PACKED {
+    uint8_t  ParkStatus;      /* 0=空闲, 1=有车, 2=僵尸车 */
+    uint8_t  GeoMagnetic;     /* 0/1 地磁检测值 */
+    uint16_t Ultrasonic;      /* cm, 小端 */
+    uint32_t OccupiedTime;    /* 秒, 小端 */
+    uint8_t  LED;             /* 当前LED状态 0/1 */
+    uint8_t  LedEnable;       /* LED使能开关 0/1 */
+} LoraNodeData_t;
+
+/* 节点证书帧(供网关代上线 OneNET)
+ * LORA_FRAME_CERT + 下面结构体 */
+typedef struct LORA_PACKED {
+    uint8_t  valid;                    /* 0=未配置, 1=有效 */
+    char     ProductKey[12];           /* OneNET 产品ID */
+    char     DeviceName[33];           /* OneNET 设备名称(park1/park2...) */
+    char     AccessKey[33];            /* OneNET 设备密钥 */
+} LoraNodeCert_t;
+
+/* ============ 下行命令格式 ============
+ * 网关使用定点传输(目标节点地址) 发送 ASCII 命令:
+ *   AT+CER<node>\r\n            查询节点<node>证书
+ *   AT+DATA<node>\r\n           查询节点<node>数据
+ *   AT+LedEnable<node>=<v>\r\n  设置节点<node>LedEnable, v=0/1
+ *
+ * 注意: <node>是十进制节点ID(如 1 2 3), 与地址相同
+ */
+
+/* 命令最大长度(含\r\n) */
+#define LORA_CMD_MAX_LEN       48
+
+/* ============ 轮询调度参数(网关端使用) ============ */
+#define LORA_POLL_CERT_INTERVAL_MS     27000   /* 证书轮询周期(首次上线前) */
+#define LORA_POLL_DATA_INTERVAL_MS     10000   /* 数据轮询周期 */
+#define LORA_RESPONSE_TIMEOUT_MS       3000    /* 单节点响应超时(ms) */
+#define LORA_MAX_NODES                 2       /* 最大支持节点数，接更多节点时改大即可 */
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif /* LORA_PROTOCOL_H */

@@ -16,13 +16,8 @@
 #include "bsp_ultrasonic.h"
 #include "bsp_oled.h"
 #include "bsp_qmc5883p.h"
-#include "esp8266.h"
-#include "onenet.h"
-#include "device_config.h"
+#include "lora_node.h"
 #include "app_global.h"
-
-#define WIFI_INIT_MAX_RETRIES    3       /* WiFi初始化最大重试次数 */
-#define WIFI_INIT_RETRY_DELAY    1000    /* 重试间隔(ms) */
 
 /****************************************************************************
  * 函数名: BSP_Init
@@ -38,69 +33,6 @@ void BSP_Init(void)
     Usart_Init();
     OLED_Init();
     QMC5883P_Init(&qmc5883p, QMC5883P_MODE_CONTINUOUS, QMC5883P_ODR_100HZ, QMC5883P_RNG_8G);
+    LoRa_Node_Init();
     Usart_Printf(USART_DEBUG, "All Bsp Init OK!\n");
-}
-
-/****************************************************************************
- * 函数名: Wifi_Init
- * 功能:   WiFi模块初始化并连接OneNET平台
- * 参数:   无
- * 返回值: 无
- * 说明:   流程: ESP8266初始化 -> 连接平台(最多3次重试)
- *         每次重试OLED屏幕显示当前状态
- *         连接成功后订阅主题并设置WifiConnected标志
- ****************************************************************************/
-void Wifi_Init(void)
-{
-    uint8_t i;
-
-    for (i = 0; i < WIFI_INIT_MAX_RETRIES; i++)
-    {
-        OLED_Clear();
-        OLED_Printf(0, 0, "WiFi连接中...");
-        if (i > 0)
-            OLED_Printf(0, 2, "重试(%d/3)", i);
-        Usart_Printf(USART_DEBUG, "Attempt %d/3 ESP8266 init...\n", i + 1);
-
-        /* 每次尝试都重新初始化ESP8266(含CIPCLOSE+CIPSTART重建TCP)
-         * MQTT协议规定同一TCP连接只能发一个CONNECT,
-         * 失败后需要重建TCP再连接
-         * Init失败(ESP8266无响应)则跳过DevLink, 直接进入下一轮重试 */
-        if (ESP8266_Init() != 0)
-        {
-            Usart_Printf(USART_DEBUG, "ESP8266 Init failed\n");
-            DelayXms(WIFI_INIT_RETRY_DELAY);
-            continue;
-        }
-		OLED_Printf(0, 0, "WiFi连接成功!");
-		DelayXms(100);
-        OLED_ShowCH(0, 0, (u8 *)"服务器连接中...");
-        Usart_Printf(USART_DEBUG, "Attempt %d/3 MQTT connect...\n", i + 1);
-
-        /* 等待Lora模块网络/TCP稳定后再发起MQTT连接,
-         * 确保CONNACK能在OneNet_DevLink内部超时内收到 */
-        DelayXms(2000);
-
-        if (OneNet_DevLink() == 0)
-        {
-            OLED_Clear();
-            OLED_ShowCH(0, 0, (u8 *)"服务器连接成功!");
-            DelayXms(500);
-            OLED_Clear();
-            OneNet_Subscribe(SubTopic, 1);
-            WifiConnected = 1;
-            Usart_Printf(USART_DEBUG, "OneNET Connected!\n");
-            return;
-        }
-
-        DelayXms(WIFI_INIT_RETRY_DELAY);
-    }
-
-    /* 3次重试均失败 */
-    OLED_Clear();
-    OLED_ShowCH(0, 0, (u8 *)"服务器连接失败!");
-    DelayXms(1000);
-    OLED_Clear();
-    WifiConnected = 0;
-    Usart_Printf(USART_DEBUG, "OneNET Connect FAILED!\n");
 }

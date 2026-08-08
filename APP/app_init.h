@@ -12,6 +12,5 @@
 #define __APP_INIT_H
 
 void BSP_Init(void);
-void Wifi_Init(void);
 
 #endif /* __APP_INIT_H */

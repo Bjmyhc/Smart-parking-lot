@@ -10,6 +10,8 @@
  ****************************************************************************/
 
 #include <stdio.h>
+#include <string.h>
+#include <stdlib.h>
 #include "stm32f10x.h"
 #include "bsp_delay.h"
 #include "bsp_led.h"
@@ -17,10 +19,7 @@
 #include "bsp_ultrasonic.h"
 #include "bsp_oled.h"
 #include "bsp_qmc5883p.h"
-#include "esp8266.h"
-#include "onenet.h"
-#include "mqttkit.h"
-#include "device_config.h"
+#include "lora_node.h"
 #include "app_global.h"
 
 /* ==================== 宏定义 ==================== */
@@ -30,14 +29,6 @@
 #define QMC_UPDATE_INTERVAL     100     /* 地磁采样周期(ms) */
 #define PARK_CHECK_INTERVAL     200     /* 车位状态检测周期(ms) */
 #define OLED_UPDATE_INTERVAL    250     /* OLED刷新周期(ms) */
-#define UPLOAD_INTERVAL         15000   /* WiFi上报周期(ms)
-                                         * 上传周期(15s): LoRa低带宽通道,
-                                         * 发送(TX)耗时较长, 会占用链路,
-                                         * 若频繁上报会造成拥堵, 3s间隔容易
-                                         * 产生大量待发送数据帧!
-                                         * 仅当StatusChanged被置位时
-                                         * 可立即上传(状态变化触发) + 定时
-                                         * occTimer每1s递增统计占用时长 */
 
 /* -------- 传感器参数 -------- */
 /* 超声波 */
@@ -51,46 +42,7 @@
 /* -------- 车位状态判定阈值 -------- */
 #define DIST_THRESHOLD_CM       10      /* 超声波判断有车的距离阈值(cm) */
 
-/* -------- WiFi / OneNET / MQTT 通信 -------- */
-/* 断线重连 */
-#define WIFI_RECONNECT_DELAY    2000    /* 重连间隔(ms) */
-#define WIFI_MAX_RETRIES        10       /* 重连最大次数 */
-#define WIFI_RECONNECT_INTERVAL 30000   /* WiFi重连尝试最大间隔时间(ms) */
-
-/* 心跳与链路活性检测 */
-#define HEARTBEAT_INTERVAL_MS   20000   /* MQTT发送PINGREQ心跳包间隔(ms)
-                                         * 必须小于CONNECT keepalive(20s)时间,
-                                         * 用于检测TCP链路, 特别LoRa链路
-                                         * 因为信道较窄较慢(约256s超时) */
-#define LINK_DEAD_TIMEOUT_MS    25000   /* 链路失效判定时间(ms)
-                                         * 小于心跳间隔(20s): 如果收到过
-                                         * 任何消息(包括PINGRESP),
-                                         * 判定链路正常, 不主动断开.
-                                         * PINGRESP发送间隔(心跳帧0x00),
-                                         * 故20s内必然更新lastRxTick, 25s
-                                         * 无数据则判定PINGRESP丢失, 链路断开 */
-
-/* 上线后补发(防QoS0丢包) */
-#define CONNECT_RESEND_TIMES    3       /* 上线后重发次数
-                                         * MQTT QoS0消息可能丢失: "Data
-                                         * uploaded!"发送时可能尚未连上ESP8266
-                                         * 透传, 造成消息丢失. 上线/重连成功后
-                                         * 重发几次可确保LoRa信道中的数据帧被
-                                         * 正确送达, 也能覆盖因OneNET的
-                                         * 下行query指令造成的冲突帧丢失.
-                                         * 每次3帧等间隔重发, 代价不大,
-                                         * 确保上位机看到最新设备状态 */
-#define CONNECT_RESEND_INTERVAL 1500    /* 重发间隔(ms)
-                                         * 若SUBSCRIBE尚未订阅完成就重发, 需
-                                         * TX发送占用的时间, 因此预留出TX时间
-                                         * LoRa信道占用 */
-
 /* ==================== 全局变量定义 ==================== */
-
-char PublishBuf[256];
-const char PubTopic[] = TOPIC_PROPERTY_POST;
-const char *SubTopic[] = {TOPIC_PROPERTY_SET};
-unsigned char *pData = NULL;
 
 uint16_t Distance = 0;
 ParkStatus_t ParkStatus = PARK_IDLE;
@@ -99,7 +51,7 @@ uint32_t LastStatusChangeTick = 0;
 uint8_t LEDEnable = 1;
 QMC5883P_Device_t qmc5883p;
 uint8_t MagCarPresent = 0;
-uint8_t WifiConnected = 0;
+NodeData_t NodeDataCache;
 volatile uint8_t StatusChanged = 1;     /* 车位状态变化标志
                                          * 置位1: 有人/无人状态切换时
                                          * 触发立即上传, 不用等定时
@@ -301,10 +253,10 @@ void OLED_Task(void)
 
     if (Get_Tick() - lastUpdateTick >= OLED_UPDATE_INTERVAL)
     {
-        if (WifiConnected)
-            OLED_ShowCH(0, 0, (u8 *)"WiFi已连接");
+        if (LoRa_Node_IsOnline())
+            OLED_ShowCH(0, 0, (u8 *)"LoRa已连接");
         else
-            OLED_ShowCH(0, 0, (u8 *)"WiFi未连接");
+            OLED_ShowCH(0, 0, (u8 *)"LoRa未连接");
 
         OLED_Printf(0, 2, "地磁: %d", MagCarPresent);
         OLED_Printf(0, 4, "距离: %.3d cm", Distance);
@@ -330,234 +282,84 @@ void OLED_Task(void)
 }
 
 /****************************************************************************
- * 函数名: GenerateParkingData
- * 功能:   生成上报数据JSON格式
+ * 函数名: PackNodeData
+ * 功能:   打包节点传感器数据到结构体(替代原 GenerateParkingData)
  * 参数:   无
  * 返回:   无
- *
- * 数据说明:
- *   ParkStatus:    车位状态 (0=空闲, 1=有车, 2=僵尸占用)
- *   GeoMagnetic:   地磁检测值
- *   Ultrasonic:    超声波距离值(cm)
- *   OccupiedTime:  占用时长(秒)
- *   LED:           LED状态值 (true=亮起, false=熄灭, 只读展示)
- *   LedEnable:     使能状态值 (true=开启, false=关闭, 可远程控制)
+ * 说明:   将所有传感器数据打包到 NodeDataCache 结构体,
+ *         通过 LoRa 发送给网关, 网关代为上报 OneNET
  ****************************************************************************/
-void GenerateParkingData(void)
+static void PackNodeData(void)
 {
-    sprintf(PublishBuf,
-            "{\"id\":\"%u\",\"params\":{"
-            "\"ParkStatus\":{\"value\":%d},"
-            "\"GeoMagnetic\":{\"value\":%d},"
-            "\"Ultrasonic\":{\"value\":%d},"
-            "\"OccupiedTime\":{\"value\":%d},"
-             "\"LED\":{\"value\":%s},"
-             "\"LedEnable\":{\"value\":%s}}}",
-            (unsigned int)Get_Tick(),
-            ParkStatus,
-            MagCarPresent,
-            Distance,
-            OccupiedTime,
-            LED_GetState() ? "true" : "false",
-            LEDEnable ? "true" : "false");
+    NodeDataCache.ParkStatus    = (uint8_t)ParkStatus;
+    NodeDataCache.GeoMagnetic   = MagCarPresent;
+    NodeDataCache.Ultrasonic    = Distance;
+    NodeDataCache.OccupiedTime  = OccupiedTime;
+    NodeDataCache.LED           = LED_GetState() ? 1 : 0;
+    NodeDataCache.LedEnable     = LEDEnable;
 }
 
 /****************************************************************************
- * 函数名: Wifi_Reconnect
- * 功能:   WiFi断线重连处理函数
- * 参数:   无
+ * 函数名: LoRa_CmdCallback
+ * 功能:   LoRa 下行命令回调函数
+ * 参数:   cmd - 命令名称 (如 "AT+DATA1", "AT+CER1", "AT+LedEnable")
+ *         value - 命令参数值 (如 "0", "1", 无参数时为NULL)
  * 返回:   无
- * 说明:   检测到 WifiConnected=0 时调用
- *         每次重试间隔逐渐增大, 避免频繁重试(影响正常通信)
- *         超过30秒重试间隔上限, 会重置TCP(CIPCLOSE+CIPSTART)
- *         重新建立MQTT CONNECT并保持Lora通信正常
+ * 说明:   网关通过 LoRa 定点传输发送 AT 命令轮询节点,
+ *         节点在回调中响应数据/证书, 或执行下行控制命令
  ****************************************************************************/
-static void Wifi_Reconnect(void)
+static void LoRa_CmdCallback(const char *cmd, const char *value)
 {
-    static uint32_t lastReconnectTick = 0;
-    static uint8_t firstCall = 1;
-    uint8_t i;
+    /* 注意: 命令名带节点编号(如 AT+DATA1 / AT+CER2),
+     *       但定点传输已经保证"本节点只会收到发给自己的命令"(地址区分),
+     *       因此只用前缀匹配即可, 不用再检查数字后缀 */
 
-    /* 首次调用时初始化时间基准, 间隔30秒后
-     * 才会尝试Wifi_Init重新初始化ESP8266的TCP连接 */
-    if (firstCall)
+    /* 网关查询数据: AT+DATA<N>  -> 发送传感器数据 */
+    if (strncmp(cmd, "AT+DATA", 7) == 0)
     {
-        lastReconnectTick = Get_Tick();
-        firstCall = 0;
-        Usart_Printf(USART_DEBUG, "WiFi offline, wait before reconnect...\n");
-        return;
-    }
-
-    /* 超过30秒重试间隔才执行 */
-    if (Get_Tick() - lastReconnectTick < WIFI_RECONNECT_INTERVAL)
-        return;
-    lastReconnectTick = Get_Tick();
-
-    Usart_Printf(USART_DEBUG, "WiFi offline, reconnecting...\n");
-
-    for (i = 0; i < WIFI_MAX_RETRIES; i++)
-    {
-        OLED_ShowCH(0, 0, (u8 *)"WiFi重连中...");
-        OLED_Printf(0, 2, "(%d/3)...", i + 1);
-        Usart_Printf(USART_DEBUG, "Reconnect (%d/3)...\n", i + 1);
-
-        /* 先退出透传模式, 发送AT指令(CIPCLOSE/CIPSTART等)
-         * 确保ESP8266处于命令模式, 方便控制 */
-        ESP8266_ExitTransparent();
-
-        /* 本次重试需要重新初始化ESP8266(包括CIPCLOSE+CIPSTART+重新连接)
-         * 然后MQTT CONNECT建立TCP连接, 保持
-         * Init内部(ESP8266连接/断开连接)成功后调用DevLink, 并订阅数据 */
-        if (ESP8266_Init() != 0)
-        {
-            Usart_Printf(USART_DEBUG, "ESP8266 Init failed, skip DevLink\n");
-            continue;
-        }
-
-        /* 等待Lora数据缓冲/TCP缓冲清空后再连接MQTT */
-        DelayXms(2000);
-
-        if (OneNet_DevLink() == 0)
-        {
-            OLED_ShowCH(0, 0, (u8 *)"WiFi连接成功!");
-            OneNet_Subscribe(SubTopic, 1);
-            WifiConnected = 1;
-            DelayXms(500);
-            OLED_Clear();
-            Usart_Printf(USART_DEBUG, "Reconnect OK!\n");
-            return;
-        }
-
-        DelayXms(WIFI_RECONNECT_DELAY);
-    }
-
-    OLED_ShowCH(0, 0, (u8 *)"WiFi连接失败!");
-    Usart_Printf(USART_DEBUG, "Reconnect FAILED!\n");
-    DelayXms(1000);
-    OLED_Clear();
-}
-
-/****************************************************************************
- * 函数名: Wifi_Task
- * 功能:   WiFi通信与数据上报任务
- * 参数:   无
- * 返回:   无
- * 说明:   定时(15s)上报传感器数据到OneNET平台
- *         断线时进行自动重连(最多3次)
- *
- *         结合Lora链路本身的特性(低速信道):
- *         1. 定时上传(15s): LoRa使节点设备占据信道(TX)时
- *            耗时较长, 应避免频繁上传造成链路拥塞. 状态变化(3s)
- *            内可立即上传, 覆盖实时性需求.
- *         2. 节点设备上传时LoRa信道处于RX状态, 下行指令到达
- *            会先进入节点设备的缓冲区, 无法立即上传
- *            ESP8266_GetIPD解析下行指令, 可能造成部分丢失.
- *         3. 每条上行数据到达平台后都会触发下行, 包括ESP8266_Clear
- *            等操作(对应平台下行ack/命令响应).
- *         4. 上行发送期间请勿执行下行操作, 避免Delay阻塞等
- *            OLED/显示刷新操作.
- ****************************************************************************/
-void Wifi_Task(void)
-{
-    static uint32_t lastUploadTick = 0;
-    static uint32_t lastHeartbeatTick = 0;
-    static uint8_t  wasConnected = 0;       /* 记录上次连接状态(用于上升沿检测) */
-    static uint8_t  resendRemain = 0;       /* 剩余待重发帧数 */
-    static uint32_t lastResendTick = 0;     /* 上次重发时间戳(ms) */
-
-    /* === 上线后立即重发 ===
-     * 刚"连上"(上升沿: 断开->连接成功), 立即重发:
-     * MQTT QoS0消息可能丢失, 上线/重连成功后仍可能丢在LoRa
-     * 上行链路/平台缓冲中, 主动重发几次, 确保
-     * query指令后设备状态更新. 每次3帧(间隔1.5s)依次重发
-     * 减少碰撞, 保证上位机看到最新设备状态 */
-    if (WifiConnected && !wasConnected)
-    {
-        resendRemain = CONNECT_RESEND_TIMES;
-        lastResendTick = Get_Tick();
-        Usart_Printf(USART_DEBUG, "Online! resend x%d to refresh snapshot...\n",
-                     CONNECT_RESEND_TIMES);
-    }
-    wasConnected = WifiConnected;
-
-    /* 未连接时执行重连逻辑, 并跳过本轮其他操作 */
-    if (!WifiConnected)
-    {
-        Wifi_Reconnect();
-        return;
-    }
-
-    /* === 链路活性检测(心跳超时) ===
-     * 超过阈值未收到任何下行消息(包括PINGRESP) 视为 链路断开,
-     * 主动断开重连, 避免长时间假在线(收不到任何响应,
-     * TCP连接已断但设备未感知, 不主动断开, 一直假在线) */
-    if (Get_Tick() - ESP8266_GetLastRxTime() > LINK_DEAD_TIMEOUT_MS)
-    {
-        Usart_Printf(USART_DEBUG, "Link dead (no RX %dms), force reconnect...\r\n",
-                     (unsigned int)(Get_Tick() - ESP8266_GetLastRxTime()));
-        WifiConnected = 0;
-        return;
-    }
-
-    /* === MQTT心跳(PINGREQ) ===
-     * 每60s发送一次, 并等待PINGRESP(2字节响应包), 维持TCP连接,
-     * 并更新链路活性: PINGRESP到达后会刷新lastRxTick */
-    if (Get_Tick() - lastHeartbeatTick >= HEARTBEAT_INTERVAL_MS)
-    {
-        MQTT_PACKET_STRUCTURE pingPacket = {NULL, 0, 0, 0};
-        if (MQTT_PacketPing(&pingPacket) == 0)
-        {
-            ESP8266_SendData(pingPacket._data, pingPacket._len);
-            MQTT_DeleteBuffer(&pingPacket);
-            lastHeartbeatTick = Get_Tick();
-            Usart_Printf(USART_DEBUG, "Heartbeat PINGREQ sent\r\n");
-        }
-    }
-
-    /* 上报条件判断: 定时到 或 状态变化(如车位占用变化) 或 重发中
-     * 说明: 状态变化(车位/地磁变化)>0 或 剩余重发帧数>=阈值,
-     * 则 1.5s 间隔连续重发最多3次, 应对QoS0消息可能丢失的情况 */
-    if ((Get_Tick() - lastUploadTick >= UPLOAD_INTERVAL) || StatusChanged ||
-        (resendRemain > 0 && (Get_Tick() - lastResendTick >= CONNECT_RESEND_INTERVAL)))
-    {
-        /* 清除状态变化标记, 避免重复上报 */
+        PackNodeData();
+        LoRa_Node_SendData(&NodeDataCache);
         StatusChanged = 0;
-
-        /* 上报前先处理完下行指令缓存, 确保没有残留的LoRa帧.
-         * 处理逻辑: OneNet_RevPro 每帧解析并做业务处理, 可处理多帧
-         * 直到缓存为空. 处理过程中可能触发状态位变化(如LED/α设置)
-         * 部分会等待下次上报周期再处理 */
-        while ((pData = ESP8266_GetIPD(0)) != NULL)
-        {
-            OneNet_RevPro(pData);
-        }
-
-        GenerateParkingData();
-        OneNet_Publish(PubTopic, PublishBuf);
-        lastUploadTick = Get_Tick();
-        if (resendRemain > 0)
-        {
-            /* 重发流程: 递减计数, 更新时间戳以保持间隔 */
-            resendRemain--;
-            lastResendTick = Get_Tick();
-            Usart_Printf(USART_DEBUG, "Data uploaded! (%d resend left)\n", resendRemain);
-        }
-        else
-        {
-            Usart_Printf(USART_DEBUG, "Data uploaded!\n");
-        }
-
-        /* 本次已上传, 避免本轮剩余逻辑重复执行(直接返回) */
-        return;
     }
-
-    /* === 下行指令处理(无上报时, 轮询处理) ===
-     * LoRa链路: 节点设备长时间占用信道RX, 下行指令到达
-     * ESP8266缓冲区, 必须及时读取, 否则可能丢失. 这里在
-     * 非上报周期内轮询: RevPro 逐条解析并立即响应, 且同时处理
-     * 多条(无残留处理则清空缓存) */
-    while ((pData = ESP8266_GetIPD(0)) != NULL)
+    /* 网关查询证书: AT+CER<N>   -> 发送节点证书(含 OneNET 子设备身份) */
+    else if (strncmp(cmd, "AT+CER", 6) == 0)
     {
-        OneNet_RevPro(pData);
+        NodeCert_t cert;
+        memset(&cert, 0, sizeof(cert));
+        cert.valid = 1;
+        strncpy(cert.ProductKey, LORA_SUB_PRODUCT_KEY, sizeof(cert.ProductKey) - 1);
+        strncpy(cert.DeviceName, LORA_SUB_DEVICE_NAME, sizeof(cert.DeviceName) - 1);
+        LoRa_Node_SendCert(&cert);
     }
+    /* 网关下发 LED 使能控制: AT+LedEnable=<v> */
+    else if (strcmp(cmd, "AT+LedEnable") == 0)
+    {
+        if (value != NULL)
+        {
+            LEDEnable = (uint8_t)atoi(value);
+            StatusChanged = 1;
+            Usart_Printf(USART_DEBUG, "LEDEnable set to: %d\r\n", LEDEnable);
+        }
+        LoRa_Node_SendAck("AT+LedEnable");
+    }
+    else
+    {
+        Usart_Printf(USART_DEBUG, "LoRa: unknown cmd: %s\r\n", cmd);
+    }
+}
+
+/****************************************************************************
+ * 函数名: LoRa_Task
+ * 功能:   LoRa 通信任务(替代原 Wifi_Task)
+ * 参数:   无
+ * 返回:   无
+ * 说明:   轮询接收网关命令并响应, 采用网关轮询模式:
+ *         - 网关定时发送 AT+DATA1 查询数据 → 节点回传 NodeData
+ *         - 网关首次发送 AT+CER1 查询证书 → 节点回传证书
+ *         - 网关转发平台命令 AT+LedEnable=0 → 节点执行并确认
+ *         节点不主动发送, 避免多节点 LoRa 碰撞
+ ****************************************************************************/
+void LoRa_Task(void)
+{
+    LoRa_Node_Poll(LoRa_CmdCallback);
 }

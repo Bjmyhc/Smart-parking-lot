@@ -29,11 +29,8 @@
 
 int main(void)
 {
-    /* 初始化所有板级外设 */
+    /* 初始化所有板级外设(含LoRa模块) */
     BSP_Init();
-
-    /* 初始化 WiFi 并连接云平台 */
-    Wifi_Init();
 
     /* 主循环 - 时间戳非阻塞架构 */
     while (1)
@@ -43,6 +40,6 @@ int main(void)
         QMC_Task();                 /* 地磁采集 */
         LED_Task();                 /* LED控制 */
         OLED_Task();                /* OLED显示 */
-        Wifi_Task();                /* 数据上报 + 下行指令 */
+        LoRa_Task();                /* LoRa通信: 响应网关轮询 + 下行命令 */
     }
 }

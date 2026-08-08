@@ -16,7 +16,6 @@ void QMC_Task(void);
 void ParkingStatus_Check(void);
 void LED_Task(void);
 void OLED_Task(void);
-void GenerateParkingData(void);
-void Wifi_Task(void);
+void LoRa_Task(void);
 
 #endif /* __APP_TASKS_H */

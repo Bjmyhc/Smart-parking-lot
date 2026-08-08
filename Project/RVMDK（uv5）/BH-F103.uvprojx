@@ -336,7 +336,7 @@
               <MiscControls></MiscControls>
               <Define>STM32F10X_MD, USE_STDPERIPH_DRIVER</Define>
               <Undefine></Undefine>
-              <IncludePath>..\..\Libraries\CMSIS;..\..\User;..\..\Libraries\FWlib\inc;..\..\APP;..\..\BSP;..\..\Main;..\..\Wifi;..\..\Onenet</IncludePath>
+              <IncludePath>..\..\Libraries\CMSIS;..\..\User;..\..\Libraries\FWlib\inc;..\..\APP;..\..\BSP;..\..\Main;..\..\Wifi</IncludePath>
             </VariousControls>
           </Cads>
           <Aads>
@@ -399,11 +399,6 @@
               <FileName>stm32f10x_it.h</FileName>
               <FileType>5</FileType>
               <FilePath>..\..\Main\stm32f10x_it.h</FilePath>
-            </File>
-            <File>
-              <FileName>device_config.h</FileName>
-              <FileType>5</FileType>
-              <FilePath>..\..\Main\device_config.h</FilePath>
             </File>
           </Files>
         </Group>
@@ -525,55 +520,15 @@
               <FileType>5</FileType>
               <FilePath>..\..\BSP\bsp_qmc5883p.h</FilePath>
             </File>
-          </Files>
-        </Group>
-        <Group>
-          <GroupName>Wifi</GroupName>
-          <Files>
             <File>
-              <FileName>esp8266.c</FileName>
+              <FileName>lora_node.c</FileName>
               <FileType>1</FileType>
-              <FilePath>..\..\Onenet\esp8266.c</FilePath>
+              <FilePath>..\..\BSP\lora_node.c</FilePath>
             </File>
             <File>
-              <FileName>esp8266.h</FileName>
+              <FileName>lora_node.h</FileName>
               <FileType>5</FileType>
-              <FilePath>..\..\Onenet\esp8266.h</FilePath>
-            </File>
-            <File>
-              <FileName>MqttKit.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\Onenet\MqttKit.c</FilePath>
-            </File>
-            <File>
-              <FileName>MqttKit.h</FileName>
-              <FileType>5</FileType>
-              <FilePath>..\..\Onenet\MqttKit.h</FilePath>
-            </File>
-            <File>
-              <FileName>onenet.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\Onenet\onenet.c</FilePath>
-            </File>
-            <File>
-              <FileName>onenet.h</FileName>
-              <FileType>5</FileType>
-              <FilePath>..\..\Onenet\onenet.h</FilePath>
-            </File>
-            <File>
-              <FileName>cJSON.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\Onenet\cJSON.c</FilePath>
-            </File>
-            <File>
-              <FileName>cJSON.h</FileName>
-              <FileType>5</FileType>
-              <FilePath>..\..\Onenet\cJSON.h</FilePath>
-            </File>
-            <File>
-              <FileName>Common.h</FileName>
-              <FileType>5</FileType>
-              <FilePath>..\..\Onenet\Common.h</FilePath>
+              <FilePath>..\..\BSP\lora_node.h</FilePath>
             </File>
           </Files>
         </Group>
