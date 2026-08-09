@@ -70,12 +70,37 @@
 #define LORA_POLL_FROM_NODE         1
 #define LORA_POLL_TO_NODE           LORA_MAX_NODES  /* 最大搜索 1..16 号 */
 
+/* ==================== AP+Web 配网配置 ==================== */
+#define CONFIG_AP_SSID      "ParkingGateway_Config"  /* 配网热点名 */
+#define CONFIG_AP_PASSWORD  "12345678"               /* 配网热点密码(需8位以上) */
+#define CONFIG_KEY_LONG_PRESS_MS  5000               /* 长按触发配网(ms) */
+#define WIFI_CFG_FILE       "/wifi.cfg"              /* WiFi 配置存储文件 */
+#if defined(ESP32)
+  #define CONFIG_KEY_PIN    0    /* ESP32 开发板 BOOT 按键 (GPIO0) */
+#else
+  #define CONFIG_KEY_PIN    0    /* NodeMCU 板载 FLASH 按键 (D3/GPIO0) */
+#endif
+
 /* ==================== 上报与心跳 ==================== */
 #define UPLOAD_INTERVAL     15000   /* 定时上报周期(ms) */
 #define HEARTBEAT_INTERVAL  20000   /* MQTT心跳间隔(ms), < OneNET keepalive */
 #define NODE_DATA_TIMEOUT   60000   /* 节点超时离线(ms) */
 #define MQTT_RETRY_DELAY    5000    /* MQTT重连间隔(ms) */
 #define WIFI_RETRY_DELAY    2000    /* WiFi重连间隔(ms) */
+#define PING_INTERVAL       60000   /* MQTT PING 心跳间隔(ms) */
+
+/* ==================== 系统事件标志位 ====================
+ * 借鉴参考项目 main.h 的 32 位标志位设计, O(1) 判断系统状态 */
+#define SYS_EVENT_MQTT_CONNECTED    0x80000000  /* MQTT 已连接(CONNACK收到) */
+#define SYS_EVENT_PING_SENT         0x40000000  /* PINGREQ 已发, 等 PINGRESP */
+#define SYS_EVENT_CONFIG_PORTAL     0x20000000  /* AP 配网模式 */
+#define SYS_EVENT_NODE1_ONLINE      0x00000001  /* 节点1 在线 */
+#define SYS_EVENT_NODE2_ONLINE      0x00000002  /* 节点2 在线 */
+#define SYS_EVENT_NODE3_ONLINE      0x00000004  /* 节点3 在线 */
+/* ... 按需扩展, 每位对应一个节点, 最多16节点 */
+
+/* 外部声明 */
+extern uint32_t sysEventFlag;
 
 /* ==================== 调试输出 ==================== */
 #if defined(ESP32)

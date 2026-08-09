@@ -1,6 +1,81 @@
 ﻿/* node_data.cpp - Gateway 节点数据缓存管理 */
 #include "node_data.h"
 #include "config.h"
+#include <LittleFS.h>
+
+/* ==================== 证书持久化 (LittleFS) ====================
+ * 每次收到节点证书后保存到 Flash, 重启后可直接加载, 无需等 LoRa 重新上报 */
+#define CERTS_FILE  "/certs.dat"
+
+typedef struct {
+    uint8_t  nodeId;               /* 节点ID 1..N */
+    char     productKey[12];       /* 子设备产品ID */
+    char     deviceName[33];       /* 子设备设备名 */
+    bool     certSent;             /* 是否已收到证书 */
+} PersistedCert_t;
+
+static const uint8_t CERTS_MAGIC = 0xA5;  /* 文件有效性标记 */
+
+void saveCertsToLittleFS(void)
+{
+    if (!LittleFS.begin()) return;
+    File f = LittleFS.open(CERTS_FILE, "w");
+    if (!f) { LittleFS.end(); return; }
+
+    f.write(CERTS_MAGIC);
+    f.write(nodeCount);
+    for (uint8_t i = 0; i < nodeCount; i++)
+    {
+        if (!nodes[i].certSent) continue;
+        PersistedCert_t pc;
+        pc.nodeId   = nodes[i].nodeId;
+        pc.certSent = true;
+        memcpy(pc.productKey, nodes[i].productKey, sizeof(pc.productKey));
+        memcpy(pc.deviceName, nodes[i].deviceName, sizeof(pc.deviceName));
+        f.write((uint8_t *)&pc, sizeof(PersistedCert_t));
+    }
+    f.close();
+    LittleFS.end();
+    DBG_PRINTF("[LFS] Saved %d certs\n", nodeCount);
+}
+
+void loadCertsFromLittleFS(void)
+{
+    if (!LittleFS.begin()) return;
+    if (!LittleFS.exists(CERTS_FILE)) { LittleFS.end(); return; }
+
+    File f = LittleFS.open(CERTS_FILE, "r");
+    if (!f) { LittleFS.end(); return; }
+
+    uint8_t magic = f.read();
+    if (magic != CERTS_MAGIC) { f.close(); LittleFS.end(); return; }
+
+    uint8_t count = f.read();
+    for (uint8_t i = 0; i < count; i++)
+    {
+        PersistedCert_t pc;
+        if (f.read((uint8_t *)&pc, sizeof(PersistedCert_t)) != sizeof(PersistedCert_t))
+            break;
+        if (!pc.certSent) continue;
+
+        /* 注册节点并填充证书 */
+        int slot = findNode(pc.nodeId);
+        if (slot < 0) slot = registerNode(pc.nodeId);
+        if (slot < 0) continue;
+
+        nodes[slot].certSent = true;
+        memcpy(nodes[slot].productKey, pc.productKey, sizeof(nodes[slot].productKey));
+        memcpy(nodes[slot].deviceName, pc.deviceName, sizeof(nodes[slot].deviceName));
+        nodes[slot].loginPending = true;  /* 加载后重新代上线 */
+        sysEventFlag |= (1 << (pc.nodeId - 1));
+        DBG_PRINTF("[LFS] Loaded cert: node%d (%s/%s)\n",
+                   pc.nodeId, pc.productKey, pc.deviceName);
+    }
+    f.close();
+    LittleFS.end();
+    dataChanged = true;
+    DBG_PRINTF("[LFS] Loaded %d certs from flash\n", count);
+}
 
 NodeData nodes[LORA_MAX_NODES];
 uint8_t  nodeCount   = 0;
@@ -52,6 +127,7 @@ void updateNodeFromRaw(uint8_t nodeId, const LoraNodeData_t *raw)
     nd.ledEnable    = (raw->LedEnable != 0);
     nd.lastUpdate   = millis();
     nd.online       = true;
+    sysEventFlag |= (1 << (nd.nodeId - 1));   /* 同步事件标志位 */
 
     /* 离线恢复: 若之前已上线过但掉线, 需要重新代上线 */
     if (wasOffline && nd.certSent && !nd.subLogin)
@@ -81,6 +157,9 @@ void updateNodeCert(uint8_t nodeId, const LoraNodeCert_t *cert)
                       (nd.deviceName[0] != '\0');
     nd.logoutPending = false;
     dataChanged = true;
+
+    /* 证书已更新 → 持久化到 Flash, 重启后无需等 LoRa 重新上报 */
+    saveCertsToLittleFS();
 }
 
 void checkNodeTimeout(void)
@@ -91,6 +170,7 @@ void checkNodeTimeout(void)
         if (nodes[i].online && (now - nodes[i].lastUpdate > NODE_DATA_TIMEOUT))
         {
             nodes[i].online = false;
+            sysEventFlag &= ~(1 << (nodes[i].nodeId - 1));  /* 清除事件标志位 */
             /* 已代上线过, 需要通知平台子设备下线 */
             if (nodes[i].subLogin)
             {

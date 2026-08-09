@@ -49,4 +49,8 @@ void checkNodeTimeout(void);
 /* 清空所有 */
 void resetAllNodes(void);
 
+/* 证书持久化 (LittleFS): 保存到 Flash / 重启后加载 */
+void saveCertsToLittleFS(void);
+void loadCertsFromLittleFS(void);
+
 #endif /* NODE_DATA_H */

@@ -202,6 +202,8 @@ static void mqtt_callback(char *topic, byte *payload, unsigned int length)
         int code = doc["code"] | -1;
         if (code != 200)
             DBG_PRINTF("[MQTT] pack/post reply code=%d\n", code);
+        /* 收到 pack/post reply 也算平台正常回复, 间接证明 MQTT 在线 */
+        sysEventFlag &= ~SYS_EVENT_PING_SENT;
         return;
     }
 
@@ -231,13 +233,28 @@ bool onenet_connect(void)
     bool ok = mqtt.connect(ONENET_DEVID, ONENET_PROID, ONENET_TOKEN);
     if (!ok)
     {
-        DBG_PRINTF("[MQTT] Connect failed, state=%d\n", mqtt.state());
+        /* CONNACK 错误码处理 (借鉴参考项目 wifi.c) */
+        switch (mqtt.state())
+        {
+            case -4: DBG_PRINTLN("[MQTT] Connection timeout, retry later");  break;
+            case -3: DBG_PRINTLN("[MQTT] Lost connection, will retry");      break;
+            case -2: DBG_PRINTLN("[MQTT] Connect failed (TCP), retry");      break;
+            case -1: DBG_PRINTLN("[MQTT] Disconnected, will retry");         break;
+            case 1:  DBG_PRINTLN("[MQTT] Rejected: unsupported protocol");   break;
+            case 2:  DBG_PRINTLN("[MQTT] Rejected: invalid client ID");      break;
+            case 3:  DBG_PRINTLN("[MQTT] Rejected: server unavailable");     break;
+            case 4:  DBG_PRINTLN("[MQTT] Rejected: bad username/password (Token?)"); break;
+            case 5:  DBG_PRINTLN("[MQTT] Rejected: unauthorized (check Token)");    break;
+            default: DBG_PRINTF("[MQTT] Connect failed, state=%d\n", mqtt.state()); break;
+        }
         return false;
     }
     mqtt.subscribe(TOPIC_SUB_LOGIN_REPLY);
     mqtt.subscribe(TOPIC_PACK_POST_REPLY);
     mqtt.subscribe(TOPIC_SUB_SET);
     DBG_PRINTLN("[MQTT] Connected, subscribed sub-login/pack/set topics");
+    sysEventFlag |= SYS_EVENT_MQTT_CONNECTED;
+    sysEventFlag &= ~SYS_EVENT_PING_SENT;
 
     /* MQTT 重连后平台会话重置, 已注册节点全部需要重新代上线 */
     awaitingLogin = false;
@@ -252,11 +269,30 @@ bool onenet_connect(void)
     return true;
 }
 
-void onenet_disconnect(void) { mqtt.disconnect(); }
+void onenet_disconnect(void)
+{
+    mqtt.disconnect();
+    sysEventFlag &= ~(SYS_EVENT_MQTT_CONNECTED | SYS_EVENT_PING_SENT);
+}
+
+/* 发送 MQTT PINGREQ 心跳包, 返回 true 表示发送成功
+ * 注: 兼容旧版 PubSubClient(<2.8 没有 mqtt.ping()),
+ *     手动组 PINGREQ 包 (0xC0 0x00) 经 write() 直接发出 */
+bool onenet_ping(void)
+{
+    if (!mqtt.connected()) return false;
+    return (mqtt.write(0xC0) && mqtt.write(0x00));
+}
 
 void onenet_loop(void)
 {
     mqtt.loop();
+
+    /* 同步标志位: 如果 mqtt 掉线了, 清除连接标志 */
+    if (!mqtt.connected() && (sysEventFlag & SYS_EVENT_MQTT_CONNECTED))
+    {
+        sysEventFlag &= ~(SYS_EVENT_MQTT_CONNECTED | SYS_EVENT_PING_SENT);
+    }
 }
 
 bool onenet_connected(void) { return mqtt.connected(); }
