@@ -1,8 +1,9 @@
-﻿/* lora_protocol.h - LoRa 协议统一常量/结构体
+/* lora_protocol.h - LoRa 协议统一常量/结构体
  *
- * 说明: 本文件 STM32 节点端 和 ESP8266 网关端 必须同步引用,
- *       包含帧头、定点传输地址、数据结构等内容，保证两端一致。
- *       任何修改需两端同步更新
+ * 说明: 本文件只包含协议本身(帧头/定点地址/数据结构/命令格式),
+ *       不包含任何网关调度参数(那些在 app_cfg.h)。
+ *       网关端 STM32 节点端(BSP/lora_node.h) 各自维护一份副本,
+ *       任何结构体修改需两端人工同步(字段顺序/类型/对齐必须一致)。
  *
  * 作者: Bjmyhc
  * 日期: 2026-08-08
@@ -19,7 +20,6 @@ extern "C" {
 /* ============ 定点传输配置 ============ */
 #define LORA_GATEWAY_ADDR       0x0000   /* 网关固定地址 */
 #define LORA_CHANNEL            0x00     /* 信道(0), DX-LR22模块: 00=433.15MHz */
-#define LORA_BAUD_DEFAULT       9600     /* 串口波特率(LoRa模块UART), ESP8266软串稳定 */
 
 /* 定点传输帧头(3字节): [AddrH][AddrL][CH]
  * 发送前要加在数据前面 */
@@ -75,12 +75,6 @@ typedef struct LORA_PACKED {
 
 /* 命令最大长度(含\r\n) */
 #define LORA_CMD_MAX_LEN       48
-
-/* ============ 轮询调度参数(网关端使用) ============ */
-#define LORA_POLL_CERT_INTERVAL_MS     27000   /* 证书轮询周期(首次上线前) */
-#define LORA_POLL_DATA_INTERVAL_MS     10000   /* 数据轮询周期 */
-#define LORA_RESPONSE_TIMEOUT_MS       3000    /* 单节点响应超时(ms) */
-#define LORA_MAX_NODES                 2       /* 最大支持节点数，接更多节点时改大即可 */
 
 #ifdef __cplusplus
 }

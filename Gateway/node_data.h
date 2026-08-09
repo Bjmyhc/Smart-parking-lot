@@ -1,9 +1,10 @@
-﻿/* node_data.h - 节点数据管理 (Gateway 端)
+/* node_data.h - 节点数据管理 (Gateway 端)
  * 字段 LoraNodeData_t 必须与 lora_protocol.h / STM32 端 lora_node.h 一致 */
 #ifndef NODE_DATA_H
 #define NODE_DATA_H
 
 #include <Arduino.h>
+#include "app_cfg.h"      /* LORA_MAX_NODES */
 #include "lora_protocol.h"
 
 /* 节点状态缓存 */

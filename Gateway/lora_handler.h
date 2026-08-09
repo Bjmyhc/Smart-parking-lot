@@ -1,4 +1,4 @@
-﻿/* lora_handler.h - Gateway LoRa 轮询调度 + 定点传输 */
+/* lora_handler.h - Gateway LoRa 轮询调度 + 定点传输 */
 #ifndef LORA_HANDLER_H
 #define LORA_HANDLER_H
 

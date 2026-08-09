@@ -1,29 +1,29 @@
-/*
- * ÖÇÄÜÍ£³µ³¡ - ESP8266/ESP32 Íø¹ØÖ÷³ÌĞò v2
+ï»¿/*
+ * æ™ºèƒ½åœè½¦åœº - ESP8266/ESP32 ç½‘å…³ä¸»ç¨‹åº v2
  *
- * ¼Ü¹¹(·½°¸A: ¶¨µã´«Êä + ¶ş½øÖÆÖ¡ + Íø¹ØÂÖÑ¯):
+ * æ¶æ„(æ–¹æ¡ˆA: å®šç‚¹ä¼ è¾“ + äºŒè¿›åˆ¶å¸§ + ç½‘å…³è½®è¯¢):
  *
- *   STM32½Úµã1 (addr 0x0001) ©¤©¤©´
- *   STM32½Úµã2 (addr 0x0002) ©¤©¤©à©¤©¤LoRa¶¨µã©¤©¤¡ú ESPx Íø¹Ø(addr 0x0000) ©¤©¤WiFi©¤©¤¡ú OneNET
- *   STM32½ÚµãN (addr N)     ©¤©¤©¼
+ *   STM32èŠ‚ç‚¹1 (addr 0x0001) â”€â”€â”
+ *   STM32èŠ‚ç‚¹2 (addr 0x0002) â”€â”€â”¼â”€â”€LoRaå®šç‚¹â”€â”€â†’ ESPx ç½‘å…³(addr 0x0000) â”€â”€WiFiâ”€â”€â†’ OneNET
+ *   STM32èŠ‚ç‚¹N (addr N)     â”€â”€â”˜
  *
- * Gateway ºËĞÄÈÎÎñ:
- *   1. LoRa ÂÖÑ¯µ÷¶È:  ÂÖÁ÷·¢ AT+CERx / AT+DATAx
- *   2. ½ÓÊÕ¶ş½øÖÆÖ¡:  [Ö¡Í· 0xB1] + 10×Ö½Ú NodeData  ¡ú ¸üĞÂ±¾µØ»º´æ
- *   3. OneNET MQTT:   ´ú×ÓÉè±¸ÉÏÏß + ´ú×ÓÉè±¸ÉÏ±¨
- *   4. ÏÂĞĞÃüÁî:      OneNET ÉèÖÃ LedEnable ¡ú LoRa ¶¨µãÖ¡ AT+LedEnable=X
+ * Gateway æ ¸å¿ƒä»»åŠ¡:
+ *   1. LoRa è½®è¯¢è°ƒåº¦:  è½®æµå‘ AT+CERx / AT+DATAx
+ *   2. æ¥æ”¶äºŒè¿›åˆ¶å¸§:  [å¸§å¤´ 0xB1] + 10å­—èŠ‚ NodeData  â†’ æ›´æ–°æœ¬åœ°ç¼“å­˜
+ *   3. OneNET MQTT:   ä»£å­è®¾å¤‡ä¸Šçº¿ + ä»£å­è®¾å¤‡ä¸ŠæŠ¥
+ *   4. ä¸‹è¡Œå‘½ä»¤:      OneNET è®¾ç½® LedEnable â†’ LoRa å®šç‚¹å¸§ AT+LedEnable=X
  *
- * ÊÂ¼şÇı¶¯¼Ü¹¹(½è¼ø²Î¿¼ÏîÄ¿):
- *   passiveEvent(): ´®¿Ú/ÍøÂç½ÓÊÕµ½µÄÊı¾İ, Á¢¼´´¦Àí
- *   activeEvent():  ¶¨Ê±Æ÷´¥·¢(ÂÖÑ¯/PING/ÉÏ´«), ·ÖÊ±Ö´ĞĞ
+ * äº‹ä»¶é©±åŠ¨æ¶æ„(å€Ÿé‰´å‚è€ƒé¡¹ç›®):
+ *   passiveEvent(): ä¸²å£/ç½‘ç»œæ¥æ”¶åˆ°çš„æ•°æ®, ç«‹å³å¤„ç†
+ *   activeEvent():  å®šæ—¶å™¨è§¦å‘(è½®è¯¢/PING/ä¸Šä¼ ), åˆ†æ—¶æ‰§è¡Œ
  *
- * ÒÀÀµ¿â:
- *   PubSubClient (Nick O'Leary)    MQTT ¿Í»§¶Ë
- *   ArduinoJson  (Benoit Blanchon) JSON ½âÎö/ĞòÁĞ»¯
+ * ä¾èµ–åº“:
+ *   PubSubClient (Nick O'Leary)    MQTT å®¢æˆ·ç«¯
+ *   ArduinoJson  (Benoit Blanchon) JSON è§£æ/åºåˆ—åŒ–
  *
- * ¿ª·¢°å:
- *   - NodeMCU 1.0(ESP-12E) / Wemos D1 mini ¡ú SoftSerial(LORA_BAUD ÇëÉè9600)
- *   - ESP32 / ESP32-S3           ¡ú HardwareSerial UART1 (ÎÈ¶¨, 115200)
+ * å¼€å‘æ¿:
+ *   - NodeMCU 1.0(ESP-12E) / Wemos D1 mini â†’ SoftSerial(LORA_BAUD è¯·è®¾9600)
+ *   - ESP32 / ESP32-S3           â†’ HardwareSerial UART1 (ç¨³å®š, 115200)
  */
 
 #include <Arduino.h>
@@ -32,31 +32,32 @@
 #else
   #include <ESP8266WiFi.h>
 #endif
-#include "config.h"
+#include "config.h"                 /* é…ç½®æ€»å…¥å£ */
 #include "node_data.h"
 #include "lora_handler.h"
 #include "onenet_handler.h"
 #include "config_portal.h"
+#include "gateway_oled.h"
 
-/* ==================== È«¾Ö±äÁ¿ ==================== */
-uint32_t sysEventFlag = 0;          /* ÏµÍ³ÊÂ¼ş±êÖ¾Î» */
+/* ==================== å…¨å±€å˜é‡ ==================== */
+uint32_t sysEventFlag = 0;          /* ç³»ç»Ÿäº‹ä»¶æ ‡å¿—ä½ */
 
 static uint32_t lastUpload    = 0;
 static uint32_t lastWifiRetry = 0;
 static uint32_t lastMqttRetry = 0;
 static uint32_t lastPingReq   = 0;
 
-/* µ±Ç°Ê¹ÓÃµÄ WiFi ÅäÖÃ (Ä¬ÈÏÈ¡ config.h ºê, ÓĞ´æµµÔò¸²¸Ç) */
+/* å½“å‰ä½¿ç”¨çš„ WiFi é…ç½® (é»˜è®¤å– config.h å®, æœ‰å­˜æ¡£åˆ™è¦†ç›–) */
 static char wifiSsid[33]     = WIFI_SSID;
 static char wifiPassword[65] = WIFI_PASSWORD;
 
 /* ==================== WiFi ==================== */
 static void wifi_init(void)
 {
-    /* ³¤°´ÅäÍø°´¼ü */
+    /* é•¿æŒ‰é…ç½‘æŒ‰é”® */
     pinMode(CONFIG_KEY_PIN, INPUT_PULLUP);
 
-    /* ¶ÁÈ¡ Flash ÖĞÒÑ±£´æµÄ WiFi ÅäÖÃ, ¸²¸ÇÄ¬ÈÏÖµ */
+    /* è¯»å– Flash ä¸­å·²ä¿å­˜çš„ WiFi é…ç½®, è¦†ç›–é»˜è®¤å€¼ */
     WifiConfig_t cfg;
     if (loadWifiConfig(&cfg))
     {
@@ -68,7 +69,7 @@ static void wifi_init(void)
     }
     else
     {
-        /* Ê×´ÎÆô¶¯ÎŞÅäÖÃ ¡ú ×Ô¶¯½øÈëÅäÍøÄ£Ê½ (±£´æºó×Ô¶¯ÖØÆô) */
+        /* é¦–æ¬¡å¯åŠ¨æ— é…ç½® â†’ è‡ªåŠ¨è¿›å…¥é…ç½‘æ¨¡å¼ (ä¿å­˜åè‡ªåŠ¨é‡å¯) */
         DBG_PRINTLN("[WiFi] No saved config, entering config portal");
         runConfigPortal();
     }
@@ -79,27 +80,67 @@ static void wifi_init(void)
 }
 static bool wifi_connected(void) { return WiFi.status() == WL_CONNECTED; }
 
+static bool     wasWifiConnected  = false;  /* ä¸Šä¸€æ¬¡ WiFi æ˜¯å¦åœ¨çº¿ (è¾¹æ²¿æ£€æµ‹) */
+static bool     wifiBeginInFlight = false;  /* begin() å·²å‘èµ·, è¿æ¥è¿‡ç¨‹è¿›è¡Œä¸­ */
+static uint32_t wifiBeginAt       = 0;      /* begin() å‘èµ·æ—¶åˆ» */
+
 static void wifi_handleReconnect(void)
 {
-    if (wifi_connected()) return;
+    if (wifi_connected())
+    {
+        /* ä»æ–­çº¿æ¢å¤: æ‰“å°é‡è¿æˆåŠŸæ—¥å¿— (é¦–æ¬¡è¿æ¥å·²åœ¨ setup æ‰“å°) */
+        if (!wasWifiConnected)
+            DBG_PRINTF("[WiFi] Reconnected! IP=%s\n", WiFi.localIP().toString().c_str());
+        wasWifiConnected  = true;
+        wifiBeginInFlight = false;
+        return;
+    }
     uint32_t now = millis();
+
+    /* WiFi æ–­çº¿ç¬é—´: MQTT è¿æ¥å¿…ç„¶å¤±æ•ˆ, ç«‹å³æ¸…é™¤è¿æ¥æ ‡å¿—.
+     * è‹¥ä¸æ¸…ç†, WiFi æ¢å¤åä»è®¤ä¸º MQTT åœ¨çº¿, ä¸ä¼šèµ°é‡è¿ â†’ æ•°æ®å‘ä¸å‡ºå»(å‡æ­»).
+     * è¯´æ˜: passiveEvent é‡Œçš„ onenet_loop() åªçœ‹ MQTT æ ‡å¿—ä¸çœ‹ WiFi,
+     *       æ–­çº¿å mqtt.loop() å¤šæ•°ä¹Ÿèƒ½æ„ŸçŸ¥åº•å±‚æ–­å¼€å¹¶æ¸…æ ‡å¿—(OLED æ˜¾ç¤ºç©ºå¿ƒåœ†);
+     *       è¿™é‡Œåœ¨è¾¹æ²¿ç¬é—´ä¸»åŠ¨æ¸…ç†å±äºåŒä¿é™©, è¦†ç›– TCP åŠå¼€ç­‰
+     *       mqtt.loop() æ£€æµ‹æ…¢çš„è¾¹ç¼˜åœºæ™¯. */
+    if (wasWifiConnected && (sysEventFlag & SYS_EVENT_MQTT_CONNECTED))
+    {
+        DBG_PRINTLN("[WiFi] Lost connection, MQTT flag cleared");
+        onenet_disconnect();
+    }
+    wasWifiConnected = false;
+
+    /* å…³é”®: WiFi.begin() æ˜¯å¼‚æ­¥çš„, è¿æ¥è¦èµ° æ‰«æâ†’è®¤è¯â†’å…³è”â†’DHCP, éœ€æ•°ç§’.
+     * è‹¥æ¯ 2s å°± disconnect()/begin(), ä¼šåå¤æ‰“æ–­è¿æ¥è¿‡ç¨‹å¯¼è‡´æ°¸è¿œè¿ä¸ä¸Š.
+     * å› æ­¤ begin() åç»™ WIFI_CONNECT_TIMEOUT_MS çš„è¿æ¥çª—å£, æœŸé—´ä¸æ‰“æ‰°,
+     * è¶…æ—¶ä»æ²¡è¿ä¸Š(å¦‚ AP ä¸å¯ç”¨) æ‰é‡æ–°å‘èµ· */
+    if (wifiBeginInFlight)
+    {
+        if (now - wifiBeginAt < WIFI_CONNECT_TIMEOUT_MS) return;
+        wifiBeginInFlight = false;   /* è¶…æ—¶æœªè¿ä¸Š, è½åˆ°ä¸‹é¢é‡æ–° begin */
+    }
+
     if (now - lastWifiRetry < WIFI_RETRY_DELAY) return;
     lastWifiRetry = now;
-    DBG_PRINTLN("[WiFi] Disconnected, retrying...");
-    WiFi.reconnect();
+
+    wifiBeginInFlight = true;
+    wifiBeginAt       = now;
+    DBG_PRINTLN("[WiFi] Disconnected, force begin()");
+    WiFi.disconnect();
+    WiFi.begin(wifiSsid, wifiPassword);
 }
 
-/* ==================== Ö÷¶¯ÊÂ¼ş: ¶¨Ê±´¥·¢ ==================== */
+/* ==================== ä¸»åŠ¨äº‹ä»¶: å®šæ—¶è§¦å‘ ==================== */
 static void activeEvent(void)
 {
     uint32_t now = millis();
 
-    /* 1. Ã¿ 60s: MQTT PING ĞÄÌø (½è¼ø²Î¿¼ÏîÄ¿ PING_SENT ±êÖ¾Î») */
+    /* 1. æ¯ 60s: MQTT PING å¿ƒè·³ (å€Ÿé‰´å‚è€ƒé¡¹ç›® PING_SENT æ ‡å¿—ä½) */
     if ((sysEventFlag & SYS_EVENT_MQTT_CONNECTED) && (now - lastPingReq >= PING_INTERVAL))
     {
         if (sysEventFlag & SYS_EVENT_PING_SENT)
         {
-            /* ÉÏ´Î PING Ã»ÊÕµ½ PINGRESP ¡ú MQTT µôÏß */
+            /* ä¸Šæ¬¡ PING æ²¡æ”¶åˆ° PINGRESP â†’ MQTT æ‰çº¿ */
             DBG_PRINTLN("[MQTT] PING timeout, disconnecting");
             onenet_disconnect();
             sysEventFlag &= ~(SYS_EVENT_MQTT_CONNECTED | SYS_EVENT_PING_SENT);
@@ -113,7 +154,7 @@ static void activeEvent(void)
         lastPingReq = now;
     }
 
-    /* 2. Ã¿ 15s »ò dataChanged: ´ú×ÓÉè±¸ÉÏÏß/ÏÂÏß/Êı¾İÉÏ±¨ */
+    /* 2. æ¯ 15s æˆ– dataChanged: ä»£å­è®¾å¤‡ä¸Šçº¿/ä¸‹çº¿/æ•°æ®ä¸ŠæŠ¥ */
     if (sysEventFlag & SYS_EVENT_MQTT_CONNECTED)
     {
         if (dataChanged || (now - lastUpload >= UPLOAD_INTERVAL))
@@ -125,16 +166,16 @@ static void activeEvent(void)
     }
 }
 
-/* ==================== ±»¶¯ÊÂ¼ş: Íâ²¿Êı¾İµ½´ï, Á¢¼´´¦Àí ==================== */
+/* ==================== è¢«åŠ¨äº‹ä»¶: å¤–éƒ¨æ•°æ®åˆ°è¾¾, ç«‹å³å¤„ç† ==================== */
 static void passiveEvent(void)
 {
-    /* 1. LoRa ÂÖÑ¯ + Êı¾İ½ÓÊÕ (×îÓÅÏÈ, Ã¿´ÎÑ­»·¶¼ÅÜ) */
+    /* 1. LoRa è½®è¯¢ + æ•°æ®æ¥æ”¶ (æœ€ä¼˜å…ˆ, æ¯æ¬¡å¾ªç¯éƒ½è·‘) */
     lora_tick();
 
-    /* 2. ½Úµã³¬Ê±ÀëÏß¼ì²â */
+    /* 2. èŠ‚ç‚¹è¶…æ—¶ç¦»çº¿æ£€æµ‹ */
     checkNodeTimeout();
 
-    /* 3. MQTT ±£»î + ½ÓÊÕÏÂĞĞÃüÁî */
+    /* 3. MQTT ä¿æ´» + æ¥æ”¶ä¸‹è¡Œå‘½ä»¤ */
     if (sysEventFlag & SYS_EVENT_MQTT_CONNECTED)
     {
         onenet_loop();
@@ -148,51 +189,66 @@ void setup(void)
     delay(200);
     DBG_PRINTLN("\n=============================");
     DBG_PRINTLN(" Smart Parking Gateway v2.0 ");
-    DBG_PRINTLN(" LoRa ¶¨µã + ¶ş½øÖÆ + ÂÖÑ¯ ");
+    DBG_PRINTLN(" LoRa å®šç‚¹ + äºŒè¿›åˆ¶ + è½®è¯¢ ");
     DBG_PRINTLN("=============================");
 
+    oled_init();                       /* OLED å…ˆåˆå§‹åŒ– (å¯åŠ¨é˜¶æ®µç”»é¢) */
     lora_init();
     resetAllNodes();
-    /* ´Ó Flash ¼ÓÔØÒÑ³Ö¾Ã»¯µÄ×ÓÉè±¸Ö¤Êé (Èô´æÔÚ) */
+    /* ä» Flash åŠ è½½å·²æŒä¹…åŒ–çš„å­è®¾å¤‡è¯ä¹¦ (è‹¥å­˜åœ¨) */
     loadCertsFromLittleFS();
     onenet_init();
 
+    /* --- é˜¶æ®µ1: ç½‘ç»œè¿æ¥ä¸­ (WiFi) --- */
+    oled_showStartupPhase(1);
     wifi_init();
     WiFi.begin(wifiSsid, wifiPassword);
     uint32_t t0 = millis();
     while (!wifi_connected() && (millis() - t0 < 15000))
     {
         delay(500);
+        oled_refresh();              /* åˆ·æ–°"ç½‘ç»œè¿æ¥ä¸­"ç”»é¢ */
         DBG_PRINT(".");
     }
     if (wifi_connected())
+    {
         DBG_PRINTF("\n[WiFi] Connected! IP=%s\n", WiFi.localIP().toString().c_str());
+        wasWifiConnected = true;    /* setup å·²è¿ä¸Š, é¿å… loop é¦–è½®é‡å¤æ‰“å° */
+    }
     else
         DBG_PRINTLN("\n[WiFi] Connect failed, will retry in loop");
 
+    /* --- é˜¶æ®µ2: æœåŠ¡å™¨è¿æ¥ä¸­ (MQTT) --- */
     if (wifi_connected())
     {
+        oled_showStartupPhase(2);
         if (onenet_connect())
         {
             delay(500);
         }
     }
+
+    /* --- é˜¶æ®µ3: èŠ‚ç‚¹æ‰«æä¸­ (LoRa) --- */
+    oled_showStartupPhase(3);        /* æ‰«æç”»é¢è®¡æ—¶ä»ä¸»å¾ªç¯å¼€å§‹ */
     DBG_PRINTLN("[Gateway] Setup done\n");
 }
 
 /* ==================== loop ==================== */
 void loop(void)
 {
-    /* ³¤°´5Ãë: ½øÈë AP+Web ÖØĞÂÅäÍø (×èÈû, ±£´æºóÖØÆô) */
+    /* é•¿æŒ‰5ç§’: è¿›å…¥ AP+Web é‡æ–°é…ç½‘ (é˜»å¡, ä¿å­˜åé‡å¯) */
     checkConfigKeyLongPress();
 
-    /* ±»¶¯ÊÂ¼ş: Êı¾İµ½´ïÁ¢¼´´¦Àí */
+    /* OLED é›†ä¸­æ˜¾ç¤ºåˆ·æ–° (éé˜»å¡) */
+    oled_refresh();
+
+    /* è¢«åŠ¨äº‹ä»¶: æ•°æ®åˆ°è¾¾ç«‹å³å¤„ç† */
     passiveEvent();
 
-    /* WiFi ¹ÜÀí */
+    /* WiFi ç®¡ç† */
     wifi_handleReconnect();
 
-    /* MQTT Á¬½Ó¹ÜÀí */
+    /* MQTT è¿æ¥ç®¡ç† */
     if (wifi_connected())
     {
         if (!(sysEventFlag & SYS_EVENT_MQTT_CONNECTED))
@@ -210,9 +266,9 @@ void loop(void)
         }
         else
         {
-            /* Ö÷¶¯ÊÂ¼ş: ¶¨Ê±ÈÎÎñ */
+            /* ä¸»åŠ¨äº‹ä»¶: å®šæ—¶ä»»åŠ¡ */
             activeEvent();
         }
     }
-    delay(1);   /* ÈÃ LoRa Èí´®ÓĞÊ±¼äÖĞ¶Ï */
+    delay(1);   /* è®© LoRa è½¯ä¸²æœ‰æ—¶é—´ä¸­æ–­ */
 }

@@ -1,40 +1,40 @@
-/* config_portal.h - AP+Web ÅäÍøÄ£¿é (Ìæ´ú²Î¿¼ÏîÄ¿ SmartConfig)
+/* config_portal.h - AP+Web é…ç½‘æ¨¡å— (æ›¿ä»£å‚è€ƒé¡¹ç›® SmartConfig)
  *
- * ¹¦ÄÜ:
- *   1. WiFi ÅäÖÃ³Ö¾Ã»¯ (LittleFS ´æ´¢ /wifi.cfg)
- *   2. ÎÞÅäÖÃÊ±×Ô¶¯½øÈëÅäÍøÄ£Ê½ (softAP + Web Ò³Ãæ)
- *   3. ³¤°´°´¼ü´¥·¢ÖØÐÂÅäÍø
- *   4. ÅäÍøÒ³ÃæÏÔÊ¾Éè±¸×´Ì¬ (½ÚµãÔÚÏß / MQTT ×´Ì¬ / WiFi ÐÅºÅ)
+ * åŠŸèƒ½:
+ *   1. WiFi é…ç½®æŒä¹…åŒ– (LittleFS å­˜å‚¨ /wifi.cfg)
+ *   2. æ— é…ç½®æ—¶è‡ªåŠ¨è¿›å…¥é…ç½‘æ¨¡å¼ (softAP + Web é¡µé¢)
+ *   3. é•¿æŒ‰æŒ‰é”®è§¦å‘é‡æ–°é…ç½‘
+ *   4. é…ç½‘é¡µé¢æ˜¾ç¤ºè®¾å¤‡çŠ¶æ€ (èŠ‚ç‚¹åœ¨çº¿ / MQTT çŠ¶æ€ / WiFi ä¿¡å·)
  */
 #ifndef CONFIG_PORTAL_H
 #define CONFIG_PORTAL_H
 
 #include <Arduino.h>
 
-/* WiFi ÅäÖÃ½á¹¹Ìå (³Ö¾Ã»¯µ½ LittleFS) */
+/* WiFi é…ç½®ç»“æž„ä½“ (æŒä¹…åŒ–åˆ° LittleFS) */
 typedef struct {
-    char ssid[33];        /* WiFi Ãû³Æ */
-    char password[65];    /* WiFi ÃÜÂë */
+    char ssid[33];        /* WiFi åç§° */
+    char password[65];    /* WiFi å¯†ç  */
 } WifiConfig_t;
 
-/* ´Ó Flash ¶ÁÈ¡ WiFi ÅäÖÃ, ·µ»Ø true=ÒÑ±£´æ¹ýÅäÖÃ */
+/* ä»Ž Flash è¯»å– WiFi é…ç½®, è¿”å›ž true=å·²ä¿å­˜è¿‡é…ç½® */
 bool loadWifiConfig(WifiConfig_t *cfg);
 
-/* ±£´æ WiFi ÅäÖÃµ½ Flash */
+/* ä¿å­˜ WiFi é…ç½®åˆ° Flash */
 void saveWifiConfig(const char *ssid, const char *password);
 
-/* ÊÇ·ñÓÐÒÑ±£´æµÄ WiFi ÅäÖÃ */
+/* æ˜¯å¦æœ‰å·²ä¿å­˜çš„ WiFi é…ç½® */
 bool hasSavedConfig(void);
 
-/* ½øÈëÅäÍøÄ£Ê½ (×èÈûÊ½):
- *   - ¿ªÆô AP ÈÈµã + DNS ½Ù³Ö
- *   - Web Ò³ÃæÉ¨Ãè WiFi + ÊäÈëÃÜÂë + ±£´æ
- *   - ±£´æ³É¹¦ºó×Ô¶¯ÖØÆô
- * ·µ»Ø: ²»»á·µ»Ø (ÄÚ²¿ÖØÆô); ½öÒì³£Ê±²Å·µ»Ø false */
+/* è¿›å…¥é…ç½‘æ¨¡å¼ (é˜»å¡žå¼):
+ *   - å¼€å¯ AP çƒ­ç‚¹ + DNS åŠ«æŒ
+ *   - Web é¡µé¢æ‰«æ WiFi + è¾“å…¥å¯†ç  + ä¿å­˜
+ *   - ä¿å­˜æˆåŠŸåŽè‡ªåŠ¨é‡å¯
+ * è¿”å›ž: ä¸ä¼šè¿”å›ž (å†…éƒ¨é‡å¯); ä»…å¼‚å¸¸æ—¶æ‰è¿”å›ž false */
 bool runConfigPortal(void);
 
-/* ³¤°´¼ì²â (ÐèÔÚÖ÷Ñ­»·Ã¿ÂÖµ÷ÓÃ):
- * °´¼ü CONFIG_KEY_PIN °´ÏÂ³ÖÐø CONFIG_KEY_LONG_PRESS_MS ºó´¥·¢ÅäÍø */
+/* é•¿æŒ‰æ£€æµ‹ (éœ€åœ¨ä¸»å¾ªçŽ¯æ¯è½®è°ƒç”¨):
+ * æŒ‰é”® CONFIG_KEY_PIN æŒ‰ä¸‹æŒç»­ CONFIG_KEY_LONG_PRESS_MS åŽè§¦å‘é…ç½‘ */
 void checkConfigKeyLongPress(void);
 
 #endif /* CONFIG_PORTAL_H */

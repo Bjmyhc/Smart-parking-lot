@@ -1,4 +1,4 @@
-﻿/* onenet_handler.h - Gateway OneNET MQTT 处理 */
+/* onenet_handler.h - Gateway OneNET MQTT 处理 */
 #ifndef ONENET_HANDLER_H
 #define ONENET_HANDLER_H
 

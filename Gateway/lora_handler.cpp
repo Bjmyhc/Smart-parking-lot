@@ -1,4 +1,4 @@
-﻿/* lora_handler.cpp - Gateway LoRa 定点传输 + 轮询调度
+/* lora_handler.cpp - Gateway LoRa 定点传输 + 轮询调度
  *
  * 数据流向:
  *   发送 (下行): [AddrH][AddrL][CH] + "AT+XXX<n>[=v]\r\n"
@@ -10,7 +10,8 @@
  *   3. 单命令最大等待 LORA_RESPONSE_TIMEOUT_MS, 超时跳过下一节点
  */
 #include "lora_handler.h"
-#include "config.h"
+#include "hw_cfg.h"       /* LoRa 串口引脚/波特率/调试串口 */
+#include "app_cfg.h"      /* 轮询范围/超时/发现间隔/DBG */
 #include "node_data.h"
 
 #if defined(ESP32)
@@ -46,6 +47,26 @@ static uint8_t  rxBuf[sizeof(LoraNodeCert_t)]; /* 最大结构体大小够放 Ce
 static uint8_t  currentNode   = LORA_POLL_FROM_NODE;   /* 当前处理节点 */
 static uint32_t cmdSentAt     = 0;                     /* 命令发出时间 */
 static bool     waitingResp   = false;                 /* 是否在等响应 */
+
+/* 未注册空槽位发现轮: 开机立即扫描一轮, 之后每 LORA_DISCOVER_INTERVAL_MS
+ * 再扫描一轮空槽位(发 AT+CER), 其余时间跳过, 避免持续等超时浪费空口 */
+static uint32_t lastDiscoverAt   = 0;
+static bool     discoveryRound   = false;
+
+/* 证书周期性校验计数: 以 nodeId 为下标, 每 LORA_CERT_VERIFY_EVERY 次
+ * 轮询到该节点夹发一次 AT+CER, 用于发现"同地址换节点" */
+static uint8_t  dataPollCnt[LORA_MAX_NODES + 1];
+
+/* 返回 true 表示本轮轮到该校验一次证书 */
+static bool shouldVerifyCert(uint8_t nodeId)
+{
+    if (++dataPollCnt[nodeId] >= LORA_CERT_VERIFY_EVERY)
+    {
+        dataPollCnt[nodeId] = 0;
+        return true;
+    }
+    return false;
+}
 
 /* ---------- 控制命令待发队列(简化: 单槽位) ----------
  * 有 OneNET 命令插入时先处理, 下一次 lora_tick 发出去 */
@@ -204,7 +225,15 @@ static void advanceNextNode(void)
 {
     currentNode++;
     if (currentNode > LORA_POLL_TO_NODE)
+    {
         currentNode = LORA_POLL_FROM_NODE;
+        /* 一轮轮询走完: 结束发现扫描轮 (若进行中) */
+        if (discoveryRound)
+        {
+            discoveryRound = false;
+            lastDiscoverAt = millis();
+        }
+    }
 }
 
 /* ==================== 公开函数 ==================== */
@@ -219,6 +248,7 @@ void lora_init(void)
     rxState = RX_WAIT_HEADER;
     currentNode = LORA_POLL_FROM_NODE;
     waitingResp = false;
+    lastDiscoverAt = millis() - LORA_DISCOVER_INTERVAL_MS;  /* 开机立即进入发现轮 */
     DBG_PRINTF("[LoRa] Serial ready (baud=%d, hw=%d, gw=0x%04X, ch=%d)\n",
                LORA_BAUD, LORA_USE_HWSERIAL, LORA_GATEWAY_ADDR, LORA_CHANNEL);
 }
@@ -235,7 +265,10 @@ bool lora_tick(void)
         {
             gotData = true;
             if (waitingResp)
+            {
                 waitingResp = false;   /* 收到响应, 本轮结束 */
+                advanceNextNode();     /* 已收到回复 → 轮到下一节点 (修复: 仅超时前移会一直卡在已在线节点) */
+            }
         }
     }
 
@@ -267,8 +300,21 @@ bool lora_tick(void)
     {
         int slot = findNode(currentNode);
         bool certOk = (slot >= 0) && (nodes[slot].certSent);
-        /* 未证书: AT+CERx, 已注册: AT+DATAx */
-        sendAT(currentNode, certOk ? "DATA" : "CER", 0, false);
+
+        /* 未注册空槽位: 只在发现轮中轮询(开机 + 每 LORA_DISCOVER_INTERVAL_MS
+         * 一轮), 其余时间直接跳过, 避免每轮等满超时才走, 浪费空口 */
+        if (!certOk && !discoveryRound &&
+            (uint32_t)(now - lastDiscoverAt) < LORA_DISCOVER_INTERVAL_MS)
+        {
+            advanceNextNode();
+            return gotData;
+        }
+        if (!certOk)
+            discoveryRound = true;   /* 进入发现轮 */
+
+        /* 未证书: AT+CERx; 已注册但到校验周期: AT+CERx 校验; 否则: AT+DATAx */
+        bool verify = certOk && shouldVerifyCert(currentNode);
+        sendAT(currentNode, (!certOk || verify) ? "CER" : "DATA", 0, false);
     }
 
     return gotData;

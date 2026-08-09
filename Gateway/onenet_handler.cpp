@@ -1,4 +1,4 @@
-﻿/* onenet_handler.cpp - Gateway OneNET MQTT 处理 (网关+子设备模式)
+/* onenet_handler.cpp - Gateway OneNET MQTT 处理 (网关+子设备模式)
  *
  * 架构(方案B, 借鉴"超子说物联网"阿里云网关参考项目):
  *   - 网关用自身身份(PGW001)连接 OneNET, 网关自身不建物模型
@@ -14,7 +14,8 @@
  *   回复: {"id":"1","code":200,"msg":"..."}
  */
 #include "onenet_handler.h"
-#include "config.h"
+#include "platform_cfg.h"  /* ONENET 服务器/产品/设备/Token/Topic */
+#include "app_cfg.h"       /* sysEventFlag/LORA_MAX_NODES/DBG */
 #include "node_data.h"
 #include "lora_handler.h"
 #include <ArduinoJson.h>
@@ -34,6 +35,10 @@
 
 static WiFiClient   wifiClient;
 static PubSubClient mqtt(wifiClient);
+
+/* 上/下行消息计数 (供 OLED Footer 显示) */
+uint32_t mqttTxCount = 0;   /* 网关发往平台的 MQTT 消息数 */
+uint32_t mqttRxCount = 0;   /* 平台下发到网关的消息数 */
 
 /* 正在代上线/代下线的节点索引 (OneNET 回复不携带身份,
  * 一次只发一条, 靠 reply 的 id 顺序对应) */
@@ -63,6 +68,7 @@ static void subLogin(uint8_t slot)
                nodes[slot].nodeId, nodes[slot].productKey,
                nodes[slot].deviceName, out.c_str());
     mqtt.publish(TOPIC_SUB_LOGIN, out.c_str());
+    mqttTxCount++;   /* 上行计数 */
 }
 
 /* 代子设备下线 */
@@ -80,6 +86,7 @@ static void subLogout(uint8_t slot)
     nodes[slot].logoutPending = false;
     DBG_PRINTF("[MQTT] SubLogout node%d: %s\n", nodes[slot].nodeId, out.c_str());
     mqtt.publish(TOPIC_SUB_LOGOUT, out.c_str());
+    mqttTxCount++;   /* 上行计数 */
 }
 
 /* 代子设备上报属性 (pack/post) */
@@ -107,6 +114,7 @@ static void subPost(uint8_t slot)
     serializeJson(doc, out);
     DBG_PRINTF("[MQTT] SubPost node%d: %s\n", nd.nodeId, out.c_str());
     mqtt.publish(TOPIC_PACK_POST, out.c_str());
+    mqttTxCount++;   /* 上行计数 */
 }
 
 /* 处理平台下行: 子设备属性设置 -> 转发 LoRa 控制命令 */
@@ -115,6 +123,7 @@ static void handleSubPropertySet(JsonDocument &doc)
     const char *msgId  = doc["id"] | "";
     JsonObject params  = doc["params"].as<JsonObject>();
     if (params.isNull()) return;
+    mqttRxCount++;   /* 下行计数 */
 
     const char *pk   = params["productID"]  | "";
     const char *dn   = params["deviceName"] | "";

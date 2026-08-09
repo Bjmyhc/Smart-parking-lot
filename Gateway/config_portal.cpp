@@ -1,20 +1,23 @@
-/* config_portal.cpp - AP+Web ÅäÍøÄ£¿éÊµÏÖ
+/* config_portal.cpp - AP+Web é…ç½‘æ¨¡å—å®ç°
  *
- * ¹¤×÷Á÷³Ì (²Î¿¼ÏîÄ¿ SmartConfig Ìæ´ú·½°¸):
- *   1. Ê×´ÎÆô¶¯: Flash ÎŞ /wifi.cfg ¡ú ×Ô¶¯½øÈëÅäÍøÄ£Ê½
- *   2. ÅäÍøÄ£Ê½: softAP("ParkingGateway_Config") + DNS ½Ù³Ö
- *      ¡ú ÊÖ»úÁ¬ÈÈµã ¡ú ä¯ÀÀÆ÷·ÃÎÊÈÎÒâÓòÃû/192.168.4.1
- *      ¡ú Ò³ÃæÏÔÊ¾É¨Ãèµ½µÄ WiFi ÁĞ±í + ÃÜÂëÊäÈë ¡ú ±£´æ
- *   3. ±£´æ³É¹¦: Ğ´Èë LittleFS ¡ú ESP.restart() ÓÃĞÂÅäÖÃÁ¬½Ó
- *   4. ÔËĞĞÖĞ: ³¤°´ CONFIG_KEY_PIN 5s ¡ú ÖØĞÂ½øÈëÅäÍøÄ£Ê½
+ * åŠŸèƒ½è¯´æ˜ (å‚è€ƒé¡¹ç›® SmartConfig çš„æ›¿ä»£):
+ *   1. é¦–æ¬¡å¯åŠ¨: Flash æ—  /wifi.cfg æ—¶ è‡ªåŠ¨è¿›å…¥é…ç½‘æ¨¡å¼
+ *   2. é…ç½‘æ¨¡å¼: softAP("ParkingGateway_Config") + DNS åŠ«æŒ
+ *      â†’ æ‰‹æœºè¿çƒ­ç‚¹ â†’ æµè§ˆå™¨æ‰“å¼€ä»»æ„ç½‘å€/192.168.4.1
+ *      â†’ é¡µé¢æ˜¾ç¤ºæ‰«æåˆ°çš„ WiFi åˆ—è¡¨ + è¾“å…¥å¯†ç  â†’ ä¿å­˜
+ *   3. ä¿å­˜æˆåŠŸ: å†™å…¥ LittleFS å ESP.restart() æ­£å¸¸è”ç½‘è¿è¡Œ
+ *   4. æ‰‹åŠ¨è§¦å‘: é•¿æŒ‰ CONFIG_KEY_PIN 5s å¯ é‡æ–°è¿›å…¥é…ç½‘æ¨¡å¼
  *
- * ×¢Òâ: Ò³ÃæÖĞµÄÖĞÎÄÈ«²¿Ê¹ÓÃ HTML ÊµÌå (&#x...;), ±£Ö¤ÎÄ¼ş´¿ ASCII,
- *       ÈÎºÎä¯ÀÀÆ÷/±àÂë»·¾³ÏÂ¶¼²»»á³öÏÖÂÒÂë¡£
+ * æ³¨æ„: é¡µé¢ä¸­çš„ä¸­æ–‡å…¨éƒ¨ä½¿ç”¨ HTML å®ä½“ (&#x...;), ä¿è¯æ–‡ä»¶çº¯ ASCII,
+ *       ä»»ä½•æµè§ˆå™¨/ç¼–ç ç¯å¢ƒä¸‹éƒ½ä¸ä¼šå‡ºç°ä¹±ç ã€‚
  */
 #include "config_portal.h"
-#include "config.h"
+#include "platform_cfg.h"  /* CONFIG_AP çƒ­ç‚¹/å¯†ç /WIFI_CFG_FILE/é•¿æŒ‰æ—¶é—´ */
+#include "hw_cfg.h"        /* CONFIG_KEY_PIN */
+#include "app_cfg.h"       /* sysEventFlag/DBG */
 #include "node_data.h"
 #include "onenet_handler.h"
+#include "gateway_oled.h"
 
 #if defined(ESP32)
   #include <WiFi.h>
@@ -29,8 +32,8 @@
 #endif
 #include <LittleFS.h>
 
-/* ==================== WiFi ÅäÖÃ³Ö¾Ã»¯ ==================== */
-#define CFG_MAGIC   0x5A  /* ÅäÖÃÎÄ¼şÓĞĞ§ĞÔ±ê¼Ç */
+/* ==================== WiFi é…ç½®æŒä¹…åŒ– ==================== */
+#define CFG_MAGIC   0x5A  /* é…ç½®æ–‡ä»¶æœ‰æ•ˆæ€§æ ‡è¯† */
 
 static void writeWifiConfigToFS(const WifiConfig_t *cfg)
 {
@@ -76,10 +79,10 @@ bool hasSavedConfig(void)
     return loadWifiConfig(&cfg);
 }
 
-/* ==================== ÅäÍø Web Ò³Ãæ ==================== */
+/* ==================== é…ç½‘ Web é¡µé¢ ==================== */
 
-/* Ö÷Ò³: WiFi ÁĞ±í + ÃÜÂë±íµ¥ + ÊµÊ±×´Ì¬Çø
- * ËùÓĞÖĞÎÄ¾ùÎª HTML ÊµÌå, ±£Ö¤ÈÎÒâ±àÂëÏÂÕı³£ÏÔÊ¾ */
+/* é¦–é¡µ: WiFi åˆ—è¡¨ + å¯†ç è¾“å…¥ + å®æ—¶çŠ¶æ€å¡
+ * é¡µé¢ä¸­çš„ä¸­æ–‡å‡ä¸º HTML å®ä½“, ä¿è¯ä»»ä½•ç¼–ç ç¯å¢ƒæ­£å¸¸æ˜¾ç¤º */
 static const char HTML_PAGE[] PROGMEM = R"rawliteral(
 <!DOCTYPE html>
 <html lang="zh-CN">
@@ -129,7 +132,7 @@ static const char HTML_PAGE[] PROGMEM = R"rawliteral(
 static MyServer server(80);
 static DNSServer dnsServer;
 
-/* É¨Ãè WiFi ²¢Éú³É select Ñ¡Ïî */
+/* æ‰«æ WiFi ç”Ÿæˆ select é€‰é¡¹ */
 static String buildWifiOptions(void)
 {
     String opt = "<option value=\"\">-- &#x8BF7;&#x9009;&#x62E9; WiFi --</option>";
@@ -138,7 +141,7 @@ static String buildWifiOptions(void)
     for (int8_t i = 0; i < n; i++)
     {
         String ssid = WiFi.SSID(i);
-        if (ssid.length() == 0) continue;   /* Ìø¹ıÒş²ØÍøÂç */
+        if (ssid.length() == 0) continue;   /* éšè—çƒ­ç‚¹è·³è¿‡ */
         int rssi = WiFi.RSSI(i);
         String bar;
         if      (rssi > -55) bar = "&#x5F3A;";
@@ -151,7 +154,7 @@ static String buildWifiOptions(void)
     return opt;
 }
 
-/* ×´Ì¬ JSON: MQTT/½Úµã/ÄÚ´æ (´¿ ASCII, ÖĞÎÄÓÃ HTML ÊµÌå) */
+/* çŠ¶æ€ JSON: MQTT/èŠ‚ç‚¹/å†…å­˜ (å…¨ ASCII, ä¸­æ–‡ç”¨ HTML å®ä½“) */
 static String buildStatusJson(void)
 {
     String nodeInfo;
@@ -174,10 +177,10 @@ static String buildStatusJson(void)
     return json;
 }
 
-/* ÅäÍøÄ£Ê½Ö÷Ñ­»· (×èÈûÊ½) */
+/* é…ç½‘æ¨¡å¼ä¸»å¾ªç¯ (é˜»å¡å¼) */
 bool runConfigPortal(void)
 {
-    /* ½øÈë AP+STA Ä£Ê½: AP ¹©ÊÖ»úÁ¬½Ó, STA ÓÃÓÚÉ¨Ãè WiFi */
+    /* å¼€å¯ AP+STA æ¨¡å¼: AP ä¾›æ‰‹æœºè¿æ¥, STA ç”¨äºæ‰«æ WiFi */
     WiFi.mode(WIFI_AP_STA);
     WiFi.softAP(CONFIG_AP_SSID, CONFIG_AP_PASSWORD);
     delay(300);
@@ -215,30 +218,31 @@ bool runConfigPortal(void)
     });
 
     server.begin();
-    dnsServer.start(53, "*", IPAddress(192, 168, 4, 1));  /* ÈÎÒâÓòÃû ¡ú ÅäÍøÒ³ */
+    dnsServer.start(53, "*", IPAddress(192, 168, 4, 1));  /* åŠ«æŒåŸŸå â†’ é¦–é¡µ */
 
     DBG_PRINTLN("[Config] Web server started, waiting for config...");
     sysEventFlag |= SYS_EVENT_CONFIG_PORTAL;
 
-    /* ×èÈûÊ½ÅäÍø: ÆÚ¼äÔİÍ£ LoRa ÂÖÑ¯ / MQTT, Ö±µ½±£´æ²¢ÖØÆô */
+    /* é˜»å¡å¼è¿è¡Œ: æœŸé—´æš‚åœ LoRa è½®è¯¢ / MQTT, ç›´åˆ°ä¿å­˜å¹¶é‡å¯ */
     while (true)
     {
         dnsServer.processNextRequest();
         server.handleClient();
+        oled_refresh();       /* é…ç½‘é¡µä¹Ÿåˆ·æ–° OLED, æ˜¾ç¤º AP å/IP */
         delay(2);
     }
 
-    /* ²»»áÖ´ĞĞµ½ÕâÀï */
+    /* ä¸ä¼šæ‰§è¡Œåˆ°è¿™é‡Œ */
     return false;
 }
 
-/* ==================== ³¤°´´¥·¢ÅäÍø ==================== */
+/* ==================== é•¿æŒ‰æ£€æµ‹ ==================== */
 void checkConfigKeyLongPress(void)
 {
     static uint32_t pressStart  = 0;
     static bool     wasPressed  = false;
 
-    bool pressed = (digitalRead(CONFIG_KEY_PIN) == LOW);  /* ÄÚ²¿ÉÏÀ­, °´ÏÂÎªµÍ */
+    bool pressed = (digitalRead(CONFIG_KEY_PIN) == LOW);  /* å†…éƒ¨ä¸Šæ‹‰, æŒ‰ä¸‹ä¸ºä½ */
     uint32_t now = millis();
 
     if (pressed && !wasPressed)

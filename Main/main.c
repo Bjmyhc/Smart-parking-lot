@@ -39,7 +39,7 @@ int main(void)
         ParkingStatus_Check();      /* 车位状态检测 */
         QMC_Task();                 /* 地磁采集 */
         LED_Task();                 /* LED控制 */
-        OLED_Task();                /* OLED显示 */
+        /* OLED_Task();  屏已移至网关集中显示, 节点改为纯采集上报(串口调试) */
         LoRa_Task();                /* LoRa通信: 响应网关轮询 + 下行命令 */
     }
 }

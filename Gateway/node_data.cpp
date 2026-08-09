@@ -1,20 +1,20 @@
-﻿/* node_data.cpp - Gateway 节点数据缓存管理 */
+/* node_data.cpp - Gateway 节点数据缓冲区实现 */
 #include "node_data.h"
-#include "config.h"
+#include "app_cfg.h"      /* LORA_MAX_NODES/sysEventFlag/DBG */
 #include <LittleFS.h>
 
 /* ==================== 证书持久化 (LittleFS) ====================
- * 每次收到节点证书后保存到 Flash, 重启后可直接加载, 无需等 LoRa 重新上报 */
+ * 每次收到节点证书后保存到 Flash, 重启后直接加载, 免等 LoRa 重新上报 */
 #define CERTS_FILE  "/certs.dat"
 
 typedef struct {
     uint8_t  nodeId;               /* 节点ID 1..N */
     char     productKey[12];       /* 子设备产品ID */
     char     deviceName[33];       /* 子设备设备名 */
-    bool     certSent;             /* 是否已收到证书 */
+    bool     certSent;             /* 是否收到过证书 */
 } PersistedCert_t;
 
-static const uint8_t CERTS_MAGIC = 0xA5;  /* 文件有效性标记 */
+static const uint8_t CERTS_MAGIC = 0xA5;  /* 文件有效性标识 */
 
 void saveCertsToLittleFS(void)
 {
@@ -23,7 +23,11 @@ void saveCertsToLittleFS(void)
     if (!f) { LittleFS.end(); return; }
 
     f.write(CERTS_MAGIC);
-    f.write(nodeCount);
+    /* 先统计实际保存条数 (只存 certSent=true 的节点) */
+    uint8_t saved = 0;
+    for (uint8_t i = 0; i < nodeCount; i++)
+        if (nodes[i].certSent) saved++;
+    f.write(saved);
     for (uint8_t i = 0; i < nodeCount; i++)
     {
         if (!nodes[i].certSent) continue;
@@ -36,7 +40,7 @@ void saveCertsToLittleFS(void)
     }
     f.close();
     LittleFS.end();
-    DBG_PRINTF("[LFS] Saved %d certs\n", nodeCount);
+    DBG_PRINTF("[LFS] Saved %d certs\n", saved);
 }
 
 void loadCertsFromLittleFS(void)
@@ -58,7 +62,7 @@ void loadCertsFromLittleFS(void)
             break;
         if (!pc.certSent) continue;
 
-        /* 注册节点并填充证书 */
+        /* 注册节点并写证书 */
         int slot = findNode(pc.nodeId);
         if (slot < 0) slot = registerNode(pc.nodeId);
         if (slot < 0) continue;
@@ -66,7 +70,7 @@ void loadCertsFromLittleFS(void)
         nodes[slot].certSent = true;
         memcpy(nodes[slot].productKey, pc.productKey, sizeof(nodes[slot].productKey));
         memcpy(nodes[slot].deviceName, pc.deviceName, sizeof(nodes[slot].deviceName));
-        nodes[slot].loginPending = true;  /* 加载后重新代上线 */
+        nodes[slot].loginPending = true;  /* 重启后需重新代上线 */
         sysEventFlag |= (1 << (pc.nodeId - 1));
         DBG_PRINTF("[LFS] Loaded cert: node%d (%s/%s)\n",
                    pc.nodeId, pc.productKey, pc.deviceName);
@@ -129,7 +133,7 @@ void updateNodeFromRaw(uint8_t nodeId, const LoraNodeData_t *raw)
     nd.online       = true;
     sysEventFlag |= (1 << (nd.nodeId - 1));   /* 同步事件标志位 */
 
-    /* 离线恢复: 若之前已上线过但掉线, 需要重新代上线 */
+    /* 离线恢复: 若之前已代上线过, 需要重新代上线 */
     if (wasOffline && nd.certSent && !nd.subLogin)
         nd.loginPending = true;
 
@@ -143,6 +147,16 @@ void updateNodeCert(uint8_t nodeId, const LoraNodeCert_t *cert)
     if (slot < 0) return;
 
     NodeData &nd = nodes[slot];
+
+    /* 记录旧证书, 用于对比 (周期校验发现同地址换节点) */
+    char oldPk[sizeof(nd.productKey)];
+    char oldDn[sizeof(nd.deviceName)];
+    memcpy(oldPk, nd.productKey, sizeof(oldPk));
+    memcpy(oldDn, nd.deviceName, sizeof(oldDn));
+    bool certChanged = nd.certSent &&
+                       ((memcmp(oldPk, cert->ProductKey, sizeof(oldPk)) != 0) ||
+                        (memcmp(oldDn, cert->DeviceName, sizeof(oldDn)) != 0));
+
     nd.certSent = true;
     nd.online   = true;
     nd.subLogin = false;          /* 证书更新后需要重新代上线 */
@@ -151,27 +165,38 @@ void updateNodeCert(uint8_t nodeId, const LoraNodeCert_t *cert)
     strncpy(nd.deviceName, cert->DeviceName, sizeof(nd.deviceName) - 1);
     nd.deviceName[sizeof(nd.deviceName) - 1] = '\0';
 
-    /* 证书有效且身份齐全才发起代上线 */
+    /* 证书有效且信息完整才允许代上线 */
     nd.loginPending = (cert->valid != 0) &&
                       (nd.productKey[0] != '\0') &&
                       (nd.deviceName[0] != '\0');
     nd.logoutPending = false;
     dataChanged = true;
 
-    /* 证书已更新 → 持久化到 Flash, 重启后无需等 LoRa 重新上报 */
+    /* 证书已更新 -> 持久化到 Flash, 重启后免 LoRa 重新上报 */
     saveCertsToLittleFS();
+
+    /* 同地址换新节点: 打印变更日志 */
+    if (certChanged)
+        DBG_PRINTF("[Node] node%d cert changed: %s/%s -> %s/%s\n",
+                   nodeId, oldPk, oldDn,
+                   cert->ProductKey, cert->DeviceName);
 }
 
 void checkNodeTimeout(void)
 {
     uint32_t now = millis();
+    /* 动态超时: 基准 + 已发现节点数 * 每节点附加耗时
+     * 节点越多轮询一圈越久, 超时自动放宽避免误判离线;
+     * 节点越少超时越短, 离线更快感知 */
+    uint32_t timeoutMs = NODE_DATA_TIMEOUT_BASE +
+                         (uint32_t)nodeCount * NODE_PER_NODE_TIMEOUT;
     for (uint8_t i = 0; i < nodeCount; i++)
     {
-        if (nodes[i].online && (now - nodes[i].lastUpdate > NODE_DATA_TIMEOUT))
+        if (nodes[i].online && (now - nodes[i].lastUpdate > timeoutMs))
         {
             nodes[i].online = false;
             sysEventFlag &= ~(1 << (nodes[i].nodeId - 1));  /* 清除事件标志位 */
-            /* 已代上线过, 需要通知平台子设备下线 */
+            /* 已代上线过, 需要通知平台子设备离线 */
             if (nodes[i].subLogin)
             {
                 nodes[i].logoutPending = true;
