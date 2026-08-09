@@ -64,7 +64,7 @@ static void subLogin(uint8_t slot)
     loginSlot    = slot;
     loginSentAt  = millis();
     awaitingLogin = true;
-    DBG_PRINTF("[MQTT] SubLogin node%d (%s/%s): %s\n",
+    DBG_PRINTF("[MQTT] 子设备上线 节点%d (%s/%s): %s\n",
                nodes[slot].nodeId, nodes[slot].productKey,
                nodes[slot].deviceName, out.c_str());
     mqtt.publish(TOPIC_SUB_LOGIN, out.c_str());
@@ -84,7 +84,7 @@ static void subLogout(uint8_t slot)
     String out;
     serializeJson(doc, out);
     nodes[slot].logoutPending = false;
-    DBG_PRINTF("[MQTT] SubLogout node%d: %s\n", nodes[slot].nodeId, out.c_str());
+    DBG_PRINTF("[MQTT] 子设备下线 节点%d: %s\n", nodes[slot].nodeId, out.c_str());
     mqtt.publish(TOPIC_SUB_LOGOUT, out.c_str());
     mqttTxCount++;   /* 上行计数 */
 }
@@ -112,7 +112,7 @@ static void subPost(uint8_t slot)
 
     String out;
     serializeJson(doc, out);
-    DBG_PRINTF("[MQTT] SubPost node%d: %s\n", nd.nodeId, out.c_str());
+    DBG_PRINTF("[MQTT] 子设备上报 节点%d: %s\n", nd.nodeId, out.c_str());
     mqtt.publish(TOPIC_PACK_POST, out.c_str());
     mqttTxCount++;   /* 上行计数 */
 }
@@ -138,7 +138,7 @@ static void handleSubPropertySet(JsonDocument &doc)
     }
     if (slot < 0)
     {
-        DBG_PRINTF("[MQTT] sub set: unknown device %s/%s\n", pk, dn);
+        DBG_PRINTF("[MQTT] 下发设置: 未知设备 %s/%s\n", pk, dn);
         onenet_replySet(msgId, 404, "device not found");
         return;
     }
@@ -158,7 +158,7 @@ static void handleSubPropertySet(JsonDocument &doc)
         {
             nodes[slot].ledEnable = (v != 0);
             lora_sendControl(nodes[slot].nodeId, "LedEnable", v);
-            DBG_PRINTF("[MQTT] node%d LedEnable=%d\n", nodes[slot].nodeId, v);
+            DBG_PRINTF("[MQTT] 节点%d LED使能=%d\n", nodes[slot].nodeId, v);
         }
     }
     onenet_replySet(msgId, 200, "success");
@@ -171,12 +171,12 @@ static void mqtt_callback(char *topic, byte *payload, unsigned int length)
     if (length >= sizeof(buf)) length = sizeof(buf) - 1;
     memcpy(buf, payload, length);
     buf[length] = '\0';
-    DBG_PRINTF("[MQTT] Recv topic=%s\n%s\n", topic, buf);
+    DBG_PRINTF("[MQTT] 收到 topic=%s\n%s\n", topic, buf);
 
     StaticJsonDocument<768> doc;
     if (deserializeJson(doc, buf))
     {
-        DBG_PRINTLN("[MQTT] JSON parse failed");
+        DBG_PRINTLN("[MQTT] JSON 解析失败");
         return;
     }
 
@@ -192,13 +192,13 @@ static void mqtt_callback(char *topic, byte *payload, unsigned int length)
             {
                 nd.subLogin      = true;
                 nd.logoutPending = false;
-                DBG_PRINTF("[MQTT] Sub node%d login OK\n", nd.nodeId);
+                DBG_PRINTF("[MQTT] 子设备%d 上线成功\n", nd.nodeId);
                 subPost(loginSlot);            /* 上线成功立即上报一次 */
             }
             else
             {
                 nd.loginPending = true;        /* 失败, 稍后重试 */
-                DBG_PRINTF("[MQTT] Sub node%d login failed code=%d\n",
+                DBG_PRINTF("[MQTT] 子设备%d 上线失败 code=%d\n",
                            nd.nodeId, code);
             }
         }
@@ -210,7 +210,7 @@ static void mqtt_callback(char *topic, byte *payload, unsigned int length)
     {
         int code = doc["code"] | -1;
         if (code != 200)
-            DBG_PRINTF("[MQTT] pack/post reply code=%d\n", code);
+            DBG_PRINTF("[MQTT] 批量上报回复 code=%d\n", code);
         /* 收到 pack/post reply 也算平台正常回复, 间接证明 MQTT 在线 */
         sysEventFlag &= ~SYS_EVENT_PING_SENT;
         return;
@@ -232,36 +232,36 @@ void onenet_init(void)
     mqtt.setCallback(mqtt_callback);
     mqtt.setBufferSize(2048);
     mqtt.setKeepAlive(60);
-    DBG_PRINTLN("[MQTT] OneNET gateway client initialized");
+    DBG_PRINTLN("[MQTT] OneNET 网关客户端已初始化");
 }
 
 bool onenet_connect(void)
 {
     if (mqtt.connected()) return true;
-    DBG_PRINTLN("[MQTT] Connecting to OneNET (gateway)...");
+    DBG_PRINTLN("[MQTT] 正在连接 OneNET (网关)...");
     bool ok = mqtt.connect(ONENET_DEVID, ONENET_PROID, ONENET_TOKEN);
     if (!ok)
     {
         /* CONNACK 错误码处理 (借鉴参考项目 wifi.c) */
         switch (mqtt.state())
         {
-            case -4: DBG_PRINTLN("[MQTT] Connection timeout, retry later");  break;
-            case -3: DBG_PRINTLN("[MQTT] Lost connection, will retry");      break;
-            case -2: DBG_PRINTLN("[MQTT] Connect failed (TCP), retry");      break;
-            case -1: DBG_PRINTLN("[MQTT] Disconnected, will retry");         break;
-            case 1:  DBG_PRINTLN("[MQTT] Rejected: unsupported protocol");   break;
-            case 2:  DBG_PRINTLN("[MQTT] Rejected: invalid client ID");      break;
-            case 3:  DBG_PRINTLN("[MQTT] Rejected: server unavailable");     break;
-            case 4:  DBG_PRINTLN("[MQTT] Rejected: bad username/password (Token?)"); break;
-            case 5:  DBG_PRINTLN("[MQTT] Rejected: unauthorized (check Token)");    break;
-            default: DBG_PRINTF("[MQTT] Connect failed, state=%d\n", mqtt.state()); break;
+            case -4: DBG_PRINTLN("[MQTT] 连接超时, 稍后重试");              break;
+            case -3: DBG_PRINTLN("[MQTT] 连接丢失, 将重试");                break;
+            case -2: DBG_PRINTLN("[MQTT] 连接失败 (TCP), 重试中");          break;
+            case -1: DBG_PRINTLN("[MQTT] 已断开, 将重试");                  break;
+            case 1:  DBG_PRINTLN("[MQTT] 拒绝: 不支持的协议版本");          break;
+            case 2:  DBG_PRINTLN("[MQTT] 拒绝: 客户端标识无效");            break;
+            case 3:  DBG_PRINTLN("[MQTT] 拒绝: 服务器不可用");              break;
+            case 4:  DBG_PRINTLN("[MQTT] 拒绝: 用户名/密码错误 (检查Token?)"); break;
+            case 5:  DBG_PRINTLN("[MQTT] 拒绝: 未授权 (检查Token)");        break;
+            default: DBG_PRINTF("[MQTT] 连接失败, state=%d\n", mqtt.state()); break;
         }
         return false;
     }
     mqtt.subscribe(TOPIC_SUB_LOGIN_REPLY);
     mqtt.subscribe(TOPIC_PACK_POST_REPLY);
     mqtt.subscribe(TOPIC_SUB_SET);
-    DBG_PRINTLN("[MQTT] Connected, subscribed sub-login/pack/set topics");
+    DBG_PRINTLN("[MQTT] 连接成功, 已订阅子设备登录/上报/设置主题");
     sysEventFlag |= SYS_EVENT_MQTT_CONNECTED;
     sysEventFlag &= ~SYS_EVENT_PING_SENT;
 
@@ -329,7 +329,7 @@ void onenet_uploadAll(void)
     {
         if (now - loginSentAt > SUB_LOGIN_TIMEOUT_MS)
         {
-            DBG_PRINTLN("[MQTT] sub login timeout, will retry");
+            DBG_PRINTLN("[MQTT] 子设备上线超时, 将重试");
             awaitingLogin = false;
             if (loginSlot < LORA_MAX_NODES)
                 nodes[loginSlot].loginPending = true;
@@ -366,5 +366,5 @@ void onenet_replySet(const char *id, int code, const char *msg)
     String output;
     serializeJson(doc, output);
     mqtt.publish(TOPIC_SUB_SET_REPLY, output.c_str());
-    DBG_PRINTF("[MQTT] Reply: %s\n", output.c_str());
+    DBG_PRINTF("[MQTT] 回复平台: %s\n", output.c_str());
 }

@@ -106,7 +106,7 @@ static void sendAT(uint8_t nodeId, const char *prefix, int value, bool hasValue)
     sendFixedFrame((uint16_t)nodeId, LORA_CHANNEL, (const uint8_t *)cmd, (uint16_t)n);
     cmdSentAt = millis();
     waitingResp = true;
-    DBG_PRINTF("[LoRa] -> node%d: %s", nodeId, cmd);
+    DBG_PRINTF("[LoRa] 发送-> 节点%d: %s", nodeId, cmd);
 }
 
 /* ---------- 处理一条完整上行帧 ---------- */
@@ -123,7 +123,7 @@ static bool handleCompleteFrame(uint8_t header)
     case LORA_FRAME_DATA:
         if (rxGot != sizeof(LoraNodeData_t))
         {
-            DBG_PRINTF("[LoRa] DATA size mismatch (%u vs %u)\n",
+            DBG_PRINTF("[LoRa] 数据长度不匹配 (%u vs %u)\n",
                        (unsigned)rxGot, (unsigned)sizeof(LoraNodeData_t));
             break;
         }
@@ -131,7 +131,7 @@ static bool handleCompleteFrame(uint8_t header)
         gotData = true;
         {
             LoraNodeData_t *d = (LoraNodeData_t *)rxBuf;
-            DBG_PRINTF("[LoRa] <- node%d DATA: ps=%d us=%d gm=%d ot=%lu led=%d le=%d\n",
+            DBG_PRINTF("[LoRa] 收到<- 节点%d 数据: 车位=%d 距离=%d 地磁=%d 时长=%lu LED=%d 使能=%d\n",
                        nodeId, d->ParkStatus, d->Ultrasonic,
                        d->GeoMagnetic, (unsigned long)d->OccupiedTime,
                        d->LED, d->LedEnable);
@@ -142,14 +142,14 @@ static bool handleCompleteFrame(uint8_t header)
     case LORA_FRAME_CERT:
         if (rxGot != sizeof(LoraNodeCert_t))
         {
-            DBG_PRINTF("[LoRa] CERT size mismatch (%u vs %u)\n",
+            DBG_PRINTF("[LoRa] 证书长度不匹配 (%u vs %u)\n",
                        (unsigned)rxGot, (unsigned)sizeof(LoraNodeCert_t));
             break;
         }
         {
             const LoraNodeCert_t *cert = (const LoraNodeCert_t *)rxBuf;
             updateNodeCert(nodeId, cert);
-            DBG_PRINTF("[LoRa] <- node%d CERT (valid=%d pk=%s dn=%s)\n",
+            DBG_PRINTF("[LoRa] 收到<- 节点%d 证书 (有效=%d 产品=%s 设备=%s)\n",
                        nodeId, cert->valid, cert->ProductKey, cert->DeviceName);
         }
         gotData = true;
@@ -157,12 +157,12 @@ static bool handleCompleteFrame(uint8_t header)
 
     case LORA_FRAME_ACK:
         rxBuf[rxGot] = '\0';
-        DBG_PRINTF("[LoRa] <- node%d ACK: %s\n", nodeId, (char *)rxBuf);
+        DBG_PRINTF("[LoRa] 收到<- 节点%d 确认: %s\n", nodeId, (char *)rxBuf);
         gotData = true;
         break;
 
     default:
-        DBG_PRINTF("[LoRa] unknown frame header 0x%02X\n", header);
+        DBG_PRINTF("[LoRa] 未知帧头 0x%02X\n", header);
         break;
     }
     return gotData;
@@ -249,7 +249,7 @@ void lora_init(void)
     currentNode = LORA_POLL_FROM_NODE;
     waitingResp = false;
     lastDiscoverAt = millis() - LORA_DISCOVER_INTERVAL_MS;  /* 开机立即进入发现轮 */
-    DBG_PRINTF("[LoRa] Serial ready (baud=%d, hw=%d, gw=0x%04X, ch=%d)\n",
+    DBG_PRINTF("[LoRa] 串口就绪 (波特率=%d, 硬串=%d, 网关=0x%04X, 信道=%d)\n",
                LORA_BAUD, LORA_USE_HWSERIAL, LORA_GATEWAY_ADDR, LORA_CHANNEL);
 }
 
@@ -280,7 +280,7 @@ bool lora_tick(void)
         pendingState = PENDING_NONE;
         cmdSentAt = now;
         waitingResp = true;
-        DBG_PRINTF("[LoRa] -> control: %s", pendingCmd);
+        DBG_PRINTF("[LoRa] 下发控制: %s", pendingCmd);
         return gotData;
     }
 
@@ -289,7 +289,7 @@ bool lora_tick(void)
     {
         if (now - cmdSentAt > LORA_RESPONSE_TIMEOUT_MS)
         {
-            DBG_PRINTF("[LoRa] node%d timeout (skip)\n", currentNode);
+            DBG_PRINTF("[LoRa] 节点%d 超时 (跳过)\n", currentNode);
             waitingResp = false;
             advanceNextNode();
         }

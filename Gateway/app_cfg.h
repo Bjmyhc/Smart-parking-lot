@@ -40,7 +40,7 @@
 
 /* ==================== OLED 显示行为 ==================== */
 #define OLED_REFRESH_MS     2000    /* 刷新周期(ms) */
-#define OLED_ANIM_MS        300     /* 重连动画刷新间隔(ms): WiFi信号条/MQTT圆圈 */
+#define OLED_ANIM_MS        450     /* 重连动画刷新间隔(ms): WiFi信号条/MQTT圆圈 */
 
 /* OLED 启动扫描节点画面 (居中显示, 初始化时展示):
  * 部分找到节点时的最短显示时间 = 预期节点数 × NODE_PER_NODE_TIMEOUT

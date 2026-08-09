@@ -1,4 +1,4 @@
-/* config_portal.cpp - AP+Web 配网模块实现
+﻿/* config_portal.cpp - AP+Web 配网模块实现
  *
  * 功能说明 (参考项目 SmartConfig 的替代):
  *   1. 首次启动: Flash 无 /wifi.cfg 时 自动进入配网模式
@@ -70,7 +70,7 @@ void saveWifiConfig(const char *ssid, const char *password)
     strncpy(cfg.ssid, ssid, sizeof(cfg.ssid) - 1);
     if (password) strncpy(cfg.password, password, sizeof(cfg.password) - 1);
     writeWifiConfigToFS(&cfg);
-    DBG_PRINTF("[Config] Saved WiFi: %s\n", cfg.ssid);
+    DBG_PRINTF("[配网] 已保存WiFi: %s\n", cfg.ssid);
 }
 
 bool hasSavedConfig(void)
@@ -184,7 +184,7 @@ bool runConfigPortal(void)
     WiFi.mode(WIFI_AP_STA);
     WiFi.softAP(CONFIG_AP_SSID, CONFIG_AP_PASSWORD);
     delay(300);
-    DBG_PRINTF("[Config] AP started: %s (192.168.4.1)\n", CONFIG_AP_SSID);
+    DBG_PRINTF("[配网] 热点已开启: %s (192.168.4.1)\n", CONFIG_AP_SSID);
 
     server.on("/", []() {
         String page = FPSTR(HTML_PAGE);
@@ -220,7 +220,7 @@ bool runConfigPortal(void)
     server.begin();
     dnsServer.start(53, "*", IPAddress(192, 168, 4, 1));  /* 劫持域名 → 首页 */
 
-    DBG_PRINTLN("[Config] Web server started, waiting for config...");
+    DBG_PRINTLN("[配网] Web服务已启动, 等待配置...");
     sysEventFlag |= SYS_EVENT_CONFIG_PORTAL;
 
     /* 阻塞式运行: 期间暂停 LoRa 轮询 / MQTT, 直到保存并重启 */
@@ -257,7 +257,7 @@ void checkConfigKeyLongPress(void)
 
     if (wasPressed && (now - pressStart >= CONFIG_KEY_LONG_PRESS_MS))
     {
-        DBG_PRINTLN("[Config] Long press detected, entering config portal");
+        DBG_PRINTLN("[配网] 检测到长按, 进入配网模式");
         runConfigPortal();
     }
 }

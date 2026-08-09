@@ -1,4 +1,4 @@
-/* node_data.cpp - Gateway 节点数据缓冲区实现 */
+﻿/* node_data.cpp - Gateway 节点数据缓冲区实现 */
 #include "node_data.h"
 #include "app_cfg.h"      /* LORA_MAX_NODES/sysEventFlag/DBG */
 #include <LittleFS.h>
@@ -40,7 +40,7 @@ void saveCertsToLittleFS(void)
     }
     f.close();
     LittleFS.end();
-    DBG_PRINTF("[LFS] Saved %d certs\n", saved);
+    DBG_PRINTF("[LFS] 已保存 %d 条证书\n", saved);
 }
 
 void loadCertsFromLittleFS(void)
@@ -72,13 +72,13 @@ void loadCertsFromLittleFS(void)
         memcpy(nodes[slot].deviceName, pc.deviceName, sizeof(nodes[slot].deviceName));
         nodes[slot].loginPending = true;  /* 重启后需重新代上线 */
         sysEventFlag |= (1 << (pc.nodeId - 1));
-        DBG_PRINTF("[LFS] Loaded cert: node%d (%s/%s)\n",
+        DBG_PRINTF("[LFS] 加载证书: 节点%d (%s/%s)\n",
                    pc.nodeId, pc.productKey, pc.deviceName);
     }
     f.close();
     LittleFS.end();
     dataChanged = true;
-    DBG_PRINTF("[LFS] Loaded %d certs from flash\n", count);
+    DBG_PRINTF("[LFS] 已从Flash加载 %d 条证书\n", count);
 }
 
 NodeData nodes[LORA_MAX_NODES];
@@ -104,7 +104,7 @@ int registerNode(uint8_t nodeId)
     nodes[slot].online     = true;
     nodes[slot].certSent   = false;
     nodeCount++;
-    DBG_PRINTF("[Node] Registered node%d (slot %d, total %d)\n",
+    DBG_PRINTF("[节点] 注册 节点%d (槽位 %d, 共 %d)\n",
                nodeId, slot, nodeCount);
     return slot;
 }
@@ -177,7 +177,7 @@ void updateNodeCert(uint8_t nodeId, const LoraNodeCert_t *cert)
 
     /* 同地址换新节点: 打印变更日志 */
     if (certChanged)
-        DBG_PRINTF("[Node] node%d cert changed: %s/%s -> %s/%s\n",
+        DBG_PRINTF("[节点] 节点%d 证书变更: %s/%s -> %s/%s\n",
                    nodeId, oldPk, oldDn,
                    cert->ProductKey, cert->DeviceName);
 }
@@ -204,7 +204,7 @@ void checkNodeTimeout(void)
             }
             nodes[i].loginPending = false;
             dataChanged = true;
-            DBG_PRINTF("[Node] Node%d offline (timeout)\n", nodes[i].nodeId);
+            DBG_PRINTF("[节点] 节点%d 离线 (超时)\n", nodes[i].nodeId);
         }
     }
 }

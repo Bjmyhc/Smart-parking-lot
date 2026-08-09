@@ -191,7 +191,7 @@ static void oled8x8Printf(int16_t x, int16_t y, uint16_t color, const char *fmt,
 
 /* ==================== 图形元素绘制 ==================== */
 
-/* 信号条: 4 根递增柱状 (2/4/6/8px), level 0..4 */
+/* 信号条: 4 根递增柱状 (2/4/6/8px), level 0..4, 每格间隔 1px */
 static void drawBars(int16_t x, int16_t y, uint8_t level, uint16_t color)
 {
     if (level > 4) level = 4;
@@ -199,26 +199,34 @@ static void drawBars(int16_t x, int16_t y, uint8_t level, uint16_t color)
     {
         uint8_t h = 2 + i * 2;
         if (i < level)
-            display.fillRect(x + i * 2, y + 8 - h, 2, h, color);
+            display.fillRect(x + i * 3, y + 8 - h, 2, h, color);
     }
 }
 
-/* 状态圆点: on=实心, off=空心 */
-static void drawStatusDot(int16_t x, int16_t y, bool on, uint16_t color)
-{
-    if (on)
-        display.fillCircle(x + 3, y + 3, 3, color);
-    else
-        display.drawCircle(x + 3, y + 3, 3, color);
-}
+/* MQTT 标志: 8x8 云朵位图 (每行高位=左, 1=白点) */
+static const uint8_t MQTT_LOGO[8] = {
+    0b00011000,   /* ...XX... */
+    0b00111100,   /* ..XXXX.. */
+    0b01111110,   /* .XXXXXX. */
+    0b11111111,   /* XXXXXXXX */
+    0b11111111,   /* XXXXXXXX */
+    0b11111111,   /* XXXXXXXX */
+    0b01111110,   /* .XXXXXX. */
+    0b00000000,   /* ........ */
+};
 
-/* 状态圆点动画: 圆环 + 亮点绕圆周转动 (MQTT 重连中) */
-static void drawStatusSpinner(int16_t x, int16_t y, uint16_t color)
+/* MQTT 状态图标绘制 (8x8 云朵):
+ *  mode 0=断开(白底黑云 反显), 1=已连(白云), 2=重连中(白云闪烁) */
+static void drawMqttLogo(int16_t x, int16_t y, uint8_t mode)
 {
-    display.drawCircle(x + 3, y + 3, 3, color);
-    static const int8_t rot[4][2] = { {3, 0}, {0, 3}, {-3, 0}, {0, -3} };
-    uint8_t p = (millis() / OLED_ANIM_MS) % 4;
-    display.drawPixel(x + 3 + rot[p][0], y + 3 + rot[p][1], color);
+    if (mode == 2 && ((millis() / OLED_ANIM_MS) & 1)) return;   /* 闪烁暗相: 不画 */
+    if (mode == 0)
+    {
+        display.fillRect(x, y, 8, 8, SSD1306_WHITE);            /* 反白底 */
+        display.drawBitmap(x, y, MQTT_LOGO, 8, 8, SSD1306_BLACK);
+    }
+    else
+        display.drawBitmap(x, y, MQTT_LOGO, 8, 8, SSD1306_WHITE);
 }
 
 /* 上箭头 ▲ */
@@ -294,20 +302,20 @@ static void drawScanScreen(void)
 {
     display.clearDisplay();
 
-    /* 与阶段1/2 风格统一: 顶部 STEP 3/3 */
-    oled8x8Print((128 - 8 * 8) / 2, 8, "STEP 3/3", SSD1306_WHITE);
+    /* 与阶段1/2 风格统一: 顶部 STEP 3/3 (三行整体垂直居中: y=20/30/40, 中心=32) */
+    oled8x8Print((128 - 8 * 8) / 2, 20, "STEP 3/3", SSD1306_WHITE);
 
     /* 标题 + 动画点 (0.4s 轮换): SCANNING NODES / . / .. / ... */
     static const char dot[4][4] = { "", ".", "..", "..." };
     uint8_t d = (millis() / 400) % 4;
     char title[24];
     snprintf(title, sizeof(title), "SCANNING NODES%s", dot[d]);
-    oled8x8Print((128 - (int16_t)strlen(title) * 8) / 2, 20, title, SSD1306_WHITE);
+    oled8x8Print((128 - (int16_t)strlen(title) * 8) / 2, 30, title, SSD1306_WHITE);
 
     /* 已发现(在线)节点数 / 预期总数, 居中显示 */
     char found[16];
     snprintf(found, sizeof(found), "FOUND: %u/%u", liveNodeCount(), scanExpected());
-    oled8x8Print((128 - (int16_t)strlen(found) * 8) / 2, 30, found, SSD1306_WHITE);
+    oled8x8Print((128 - (int16_t)strlen(found) * 8) / 2, 40, found, SSD1306_WHITE);
 
     display.display();
 }
@@ -350,7 +358,7 @@ void oled_init(void)
 
     if (!display.begin(SSD1306_SWITCHCAPVCC, OLED_I2C_ADDR))
     {
-        DBG_PRINTLN("[OLED] Init failed (no display)");
+        DBG_PRINTLN("[OLED] 初始化失败 (未检测到屏幕)");
         return;
     }
     displayReady = true;
@@ -359,7 +367,7 @@ void oled_init(void)
     scanPhase = true;
     startupPhase = 1;
     drawStartupScreen(1);
-    DBG_PRINTLN("[OLED] Init OK");
+    DBG_PRINTLN("[OLED] 屏幕初始化成功");
 }
 
 /* setup 末尾调用: 扫描画面计时从主循环开始, 避免 setup 里
@@ -389,29 +397,46 @@ static void drawHeader(void)
 {
     oled8x8Print(0, 4, ONENET_DEVID, SSD1306_WHITE);          /* 设备名 PGW001 */
 
-    /* WiFi 信号条: 已连画实际等级; 重连中逐格跳动(1→2→3→4 循环) */
+    /* WiFi 信号条: 已连画实际等级; 重连中逐格跳动(1→2→3→4 循环)
+     * 右对齐: 紧贴右侧 MQTT 云朵左侧 (信号条总宽 11px, 间隔 3px) */
     if (WiFi.status() == WL_CONNECTED)
-        drawBars(56, 4, wifiLevel(), SSD1306_WHITE);
+        drawBars(106, 4, wifiLevel(), SSD1306_WHITE);
     else
-        drawBars(56, 4, (millis() / OLED_ANIM_MS) % 4 + 1, SSD1306_WHITE);
+        drawBars(106, 4, (millis() / OLED_ANIM_MS) % 4 + 1, SSD1306_WHITE);
 
-    oled8x8Print(88, 4, "MQTT", SSD1306_WHITE);               /* MQTT 状态(右对齐) */
-
-    /* MQTT 状态点: 已连=实心; WiFi在线但MQTT重连中=转动动画; 全断=空心 */
+    /* MQTT 状态图标(最右): 已连=白云; WiFi在线但MQTT重连中=云闪烁; 全断=云反显 */
     if (sysEventFlag & SYS_EVENT_MQTT_CONNECTED)
-        drawStatusDot(120, 4, true, SSD1306_WHITE);
+        drawMqttLogo(120, 4, 1);
     else if (WiFi.status() == WL_CONNECTED)
-        drawStatusSpinner(120, 4, SSD1306_WHITE);
+        drawMqttLogo(120, 4, 2);
     else
-        drawStatusDot(120, 4, false, SSD1306_WHITE);
+        drawMqttLogo(120, 4, 0);
 }
 
-/* Footer: 上/下计数 + 页码 */
+/* Footer: 上/下每分钟消息速率 + 页码
+ * 速率 = 当前刷新间隔内的新增消息数 / 实际流逝秒数 × 60 (滑动平均)
+ * 固定 2 位 (超 99 显示 99), 保证左右对齐 */
 static void drawFooter(uint8_t page, uint8_t pages)
 {
-    /* 计数固定 2 位 (超 99 显示 99), 保证左右对齐 */
-    uint32_t tx = (mqttTxCount > 99) ? 99 : mqttTxCount;
-    uint32_t rx = (mqttRxCount > 99) ? 99 : mqttRxCount;
+    static uint32_t lastRateMs  = 0;
+    static uint32_t lastTxTotal = 0;
+    static uint32_t lastRxTotal = 0;
+    static uint32_t txPerMin    = 0;
+    static uint32_t rxPerMin    = 0;
+
+    uint32_t now = millis();
+    uint32_t dt  = now - lastRateMs;
+    if (dt >= 1000)               /* 每秒(或更长间隔)更新一次速率 */
+    {
+        txPerMin = (mqttTxCount - lastTxTotal) * 60000UL / dt;
+        rxPerMin = (mqttRxCount - lastRxTotal) * 60000UL / dt;
+        lastTxTotal = mqttTxCount;
+        lastRxTotal = mqttRxCount;
+        lastRateMs  = now;
+    }
+
+    uint32_t tx = (txPerMin > 99) ? 99 : txPerMin;
+    uint32_t rx = (rxPerMin > 99) ? 99 : rxPerMin;
 
     drawArrowUp(0, 56, SSD1306_WHITE);
     oled8x8Printf(8, 56, SSD1306_WHITE, "%02lu", tx);
@@ -522,6 +547,8 @@ void oled_refresh(void)
         }
     }
 
+    /* 运行模式主界面: WiFi 掉线时也照常显示 (Header 信号条走动画、MQTT 点空心),
+     * WiFi 重连过程状态输出到串口日志, 不占屏幕 */
     drawRuntime();
 
     /* 多节点翻页: 每 5s 翻一页 (每页4个) */

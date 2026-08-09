@@ -65,18 +65,18 @@ static void wifi_init(void)
         wifiSsid[sizeof(wifiSsid) - 1] = '\0';
         strncpy(wifiPassword, cfg.password, sizeof(wifiPassword) - 1);
         wifiPassword[sizeof(wifiPassword) - 1] = '\0';
-        DBG_PRINTF("[WiFi] Using saved config: %s\n", wifiSsid);
+        DBG_PRINTF("[WiFi] 使用已保存配置: %s\n", wifiSsid);
     }
     else
     {
         /* 首次启动无配置 → 自动进入配网模式 (保存后自动重启) */
-        DBG_PRINTLN("[WiFi] No saved config, entering config portal");
+        DBG_PRINTLN("[WiFi] 无已保存配置, 进入配网模式");
         runConfigPortal();
     }
 
     WiFi.mode(WIFI_STA);
     WiFi.setAutoReconnect(true);
-    DBG_PRINTF("[WiFi] SSID=%s\n", wifiSsid);
+    DBG_PRINTF("[WiFi] 目标WiFi: %s\n", wifiSsid);
 }
 static bool wifi_connected(void) { return WiFi.status() == WL_CONNECTED; }
 
@@ -84,17 +84,55 @@ static bool     wasWifiConnected  = false;  /* 上一次 WiFi 是否在线 (边�
 static bool     wifiBeginInFlight = false;  /* begin() 已发起, 连接过程进行中 */
 static uint32_t wifiBeginAt       = 0;      /* begin() 发起时刻 */
 
+/* WiFi 状态机上次值: 用于串口输出重连过程 (状态变化才打印一次) */
+static wl_status_t lastWifiStatus = WL_IDLE_STATUS;
+
+/* 重连过程中 WiFi.status() 变化 → 串口中文日志 (边沿检测)
+ * 注意: 只在未连接状态下调用, WL_CONNECTED 分支理论不会走到 */
+static void wifi_printStatusChange(void)
+{
+    wl_status_t st = WiFi.status();
+    if (st == lastWifiStatus) return;
+    lastWifiStatus = st;
+
+    const char *msg;
+    switch (st)
+    {
+        case WL_IDLE_STATUS:     msg = "空闲";       break;
+        case WL_NO_SSID_AVAIL:   msg = "找不到SSID";  break;
+        case WL_SCAN_COMPLETED:  msg = "扫描完成";    break;
+        case WL_CONNECTED:       msg = "获取IP中..."; break;
+        case WL_CONNECT_FAILED:  msg = "连接失败";    break;
+        case WL_CONNECTION_LOST: msg = "连接丢失";    break;
+        case WL_DISCONNECTED:    msg = "已断开";      break;
+        default:                 msg = "未知状态";    break;
+    }
+    DBG_PRINTF("[WiFi] 重连过程: %s\n", msg);
+}
+
 static void wifi_handleReconnect(void)
 {
     if (wifi_connected())
     {
+        /* 已连上但 DHCP 还没拿到 IP: 串口展示 GET IP 阶段 */
+        if (WiFi.localIP() == (uint32_t)0)
+        {
+            if (lastWifiStatus != WL_CONNECTED)
+            {
+                lastWifiStatus = WL_CONNECTED;
+                DBG_PRINTLN("[WiFi] 重连过程: 获取IP中...");
+            }
+        }
         /* 从断线恢复: 打印重连成功日志 (首次连接已在 setup 打印) */
-        if (!wasWifiConnected)
-            DBG_PRINTF("[WiFi] Reconnected! IP=%s\n", WiFi.localIP().toString().c_str());
+        else if (!wasWifiConnected)
+        {
+            DBG_PRINTF("[WiFi] 重连成功! IP=%s\n", WiFi.localIP().toString().c_str());
+        }
         wasWifiConnected  = true;
         wifiBeginInFlight = false;
         return;
     }
+    wifi_printStatusChange();   /* 未连接: 状态变化打到串口 */
     uint32_t now = millis();
 
     /* WiFi 断线瞬间: MQTT 连接必然失效, 立即清除连接标志.
@@ -105,7 +143,7 @@ static void wifi_handleReconnect(void)
      *       mqtt.loop() 检测慢的边缘场景. */
     if (wasWifiConnected && (sysEventFlag & SYS_EVENT_MQTT_CONNECTED))
     {
-        DBG_PRINTLN("[WiFi] Lost connection, MQTT flag cleared");
+        DBG_PRINTLN("[WiFi] 连接丢失, 已清除MQTT标志");
         onenet_disconnect();
     }
     wasWifiConnected = false;
@@ -125,7 +163,7 @@ static void wifi_handleReconnect(void)
 
     wifiBeginInFlight = true;
     wifiBeginAt       = now;
-    DBG_PRINTLN("[WiFi] Disconnected, force begin()");
+    DBG_PRINTLN("[WiFi] 断开, 强制重连 begin()");
     WiFi.disconnect();
     WiFi.begin(wifiSsid, wifiPassword);
 }
@@ -141,7 +179,7 @@ static void activeEvent(void)
         if (sysEventFlag & SYS_EVENT_PING_SENT)
         {
             /* 上次 PING 没收到 PINGRESP → MQTT 掉线 */
-            DBG_PRINTLN("[MQTT] PING timeout, disconnecting");
+            DBG_PRINTLN("[MQTT] 心跳超时, 断开连接");
             onenet_disconnect();
             sysEventFlag &= ~(SYS_EVENT_MQTT_CONNECTED | SYS_EVENT_PING_SENT);
         }
@@ -149,7 +187,7 @@ static void activeEvent(void)
         {
             onenet_ping();
             sysEventFlag |= SYS_EVENT_PING_SENT;
-            DBG_PRINTLN("[MQTT] PING sent");
+            DBG_PRINTLN("[MQTT] 心跳已发送");
         }
         lastPingReq = now;
     }
@@ -188,7 +226,7 @@ void setup(void)
     DEBUG_SERIAL.begin(DEBUG_BAUD);
     delay(200);
     DBG_PRINTLN("\n=============================");
-    DBG_PRINTLN(" Smart Parking Gateway v2.0 ");
+    DBG_PRINTLN(" 智能停车场网关 v2.0    ");
     DBG_PRINTLN(" LoRa 定点 + 二进制 + 轮询 ");
     DBG_PRINTLN("=============================");
 
@@ -208,15 +246,16 @@ void setup(void)
     {
         delay(500);
         oled_refresh();              /* 刷新"网络连接中"画面 */
+        wifi_printStatusChange();    /* 首次连接过程状态打到串口 */
         DBG_PRINT(".");
     }
     if (wifi_connected())
     {
-        DBG_PRINTF("\n[WiFi] Connected! IP=%s\n", WiFi.localIP().toString().c_str());
+        DBG_PRINTF("\n[WiFi] 连接成功! IP=%s\n", WiFi.localIP().toString().c_str());
         wasWifiConnected = true;    /* setup 已连上, 避免 loop 首轮重复打印 */
     }
     else
-        DBG_PRINTLN("\n[WiFi] Connect failed, will retry in loop");
+        DBG_PRINTLN("\n[WiFi] 连接失败, 将在主循环重试");
 
     /* --- 阶段2: 服务器连接中 (MQTT) --- */
     if (wifi_connected())
@@ -230,7 +269,7 @@ void setup(void)
 
     /* --- 阶段3: 节点扫描中 (LoRa) --- */
     oled_showStartupPhase(3);        /* 扫描画面计时从主循环开始 */
-    DBG_PRINTLN("[Gateway] Setup done\n");
+    DBG_PRINTLN("[网关] 初始化完成\n");
 }
 
 /* ==================== loop ==================== */
