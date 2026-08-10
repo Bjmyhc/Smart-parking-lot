@@ -68,6 +68,7 @@ void loadCertsFromLittleFS(void)
         if (slot < 0) continue;
 
         nodes[slot].certSent = true;
+        nodes[slot].online   = false;    /* 存证不代在线, 等收到 LoRa 应答才改 true */
         memcpy(nodes[slot].productKey, pc.productKey, sizeof(nodes[slot].productKey));
         memcpy(nodes[slot].deviceName, pc.deviceName, sizeof(nodes[slot].deviceName));
         nodes[slot].loginPending = true;  /* 重启后需重新代上线 */
@@ -157,9 +158,10 @@ void updateNodeCert(uint8_t nodeId, const LoraNodeCert_t *cert)
                        ((memcmp(oldPk, cert->ProductKey, sizeof(oldPk)) != 0) ||
                         (memcmp(oldDn, cert->DeviceName, sizeof(oldDn)) != 0));
 
-    nd.certSent = true;
-    nd.online   = true;
-    nd.subLogin = false;          /* 证书更新后需要重新代上线 */
+    nd.certSent   = true;
+    nd.online     = true;
+    nd.lastUpdate = millis();     /* 收到证书也算一次 LoRa 活性确认, 防止被超时误判离线 */
+    nd.subLogin   = false;        /* 证书更新后需要重新代上线 */
     strncpy(nd.productKey, cert->ProductKey, sizeof(nd.productKey) - 1);
     nd.productKey[sizeof(nd.productKey) - 1] = '\0';
     strncpy(nd.deviceName, cert->DeviceName, sizeof(nd.deviceName) - 1);

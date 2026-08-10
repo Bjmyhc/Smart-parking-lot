@@ -21,6 +21,9 @@ bool lora_tick(void);
  * 说明: 网关在当前轮询周期结束后插入, 下一条发 AT+<property><nodeId>=<value> */
 void lora_sendControl(uint8_t nodeId, const char *property, int value);
 
+/* 手动触发节点发现: 从头扫描所有节点 */
+void lora_triggerDiscovery(void);
+
 /* 获取 LoRa 串口引用(调试) */
 Stream &lora_getSerial(void);
 

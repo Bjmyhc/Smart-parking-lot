@@ -211,8 +211,6 @@ static void mqtt_callback(char *topic, byte *payload, unsigned int length)
         int code = doc["code"] | -1;
         if (code != 200)
             DBG_PRINTF("[MQTT] 批量上报回复 code=%d\n", code);
-        /* 收到 pack/post reply 也算平台正常回复, 间接证明 MQTT 在线 */
-        sysEventFlag &= ~SYS_EVENT_PING_SENT;
         return;
     }
 
@@ -263,16 +261,18 @@ bool onenet_connect(void)
     mqtt.subscribe(TOPIC_SUB_SET);
     DBG_PRINTLN("[MQTT] 连接成功, 已订阅子设备登录/上报/设置主题");
     sysEventFlag |= SYS_EVENT_MQTT_CONNECTED;
-    sysEventFlag &= ~SYS_EVENT_PING_SENT;
 
-    /* MQTT 重连后平台会话重置, 已注册节点全部需要重新代上线 */
+    /* MQTT 重连后平台会话重置, 已注册节点全部需要重新代上线;
+     * 同时统一先代下线一遍: 清掉平台可能残留的"子设备在线"标记,
+     * 防止网关重启/断线期间出现过期伪在线 (离线节点后续不会被上线) */
     awaitingLogin = false;
     for (uint8_t i = 0; i < nodeCount; i++)
     {
         if (nodes[i].certSent)
         {
-            nodes[i].subLogin     = false;
-            nodes[i].loginPending = true;
+            nodes[i].subLogin       = false;
+            nodes[i].loginPending   = true;
+            nodes[i].logoutPending  = true;   /* 统一先下架, 等 PING 通再上线 */
         }
     }
     return true;
@@ -281,26 +281,18 @@ bool onenet_connect(void)
 void onenet_disconnect(void)
 {
     mqtt.disconnect();
-    sysEventFlag &= ~(SYS_EVENT_MQTT_CONNECTED | SYS_EVENT_PING_SENT);
-}
-
-/* 发送 MQTT PINGREQ 心跳包, 返回 true 表示发送成功
- * 注: 兼容旧版 PubSubClient(<2.8 没有 mqtt.ping()),
- *     手动组 PINGREQ 包 (0xC0 0x00) 经 write() 直接发出 */
-bool onenet_ping(void)
-{
-    if (!mqtt.connected()) return false;
-    return (mqtt.write(0xC0) && mqtt.write(0x00));
+    sysEventFlag &= ~SYS_EVENT_MQTT_CONNECTED;
 }
 
 void onenet_loop(void)
 {
     mqtt.loop();
 
-    /* 同步标志位: 如果 mqtt 掉线了, 清除连接标志 */
+    /* 同步标志位: 如果 mqtt 掉线了, 清除连接标志 (统一走收口函数).
+     * 底层断线(TCP RST/keepalive 超时)由 PubSubClient 检测并断开 */
     if (!mqtt.connected() && (sysEventFlag & SYS_EVENT_MQTT_CONNECTED))
     {
-        sysEventFlag &= ~(SYS_EVENT_MQTT_CONNECTED | SYS_EVENT_PING_SENT);
+        onenet_disconnect();
     }
 }
 
@@ -337,10 +329,11 @@ void onenet_uploadAll(void)
         return;
     }
 
-    /* 3. 处理待代上线 (一次一条) */
+    /* 3. 处理待代上线 (一次一条; 仅"确认存活"的节点才上线,
+     *    离线节点不上线, 平台在线列表始终与真实状态一致) */
     for (i = 0; i < nodeCount; i++)
     {
-        if (nodes[i].loginPending)
+        if (nodes[i].loginPending && nodes[i].online)
         {
             subLogin(i);
             return;

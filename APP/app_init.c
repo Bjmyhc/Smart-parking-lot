@@ -14,7 +14,6 @@
 #include "bsp_led.h"
 #include "bsp_usart.h"
 #include "bsp_ultrasonic.h"
-#include "bsp_oled.h"
 #include "bsp_qmc5883p.h"
 #include "lora_node.h"
 #include "app_global.h"
@@ -31,7 +30,6 @@ void BSP_Init(void)
     US_Init();
     SysTick_Init();
     Usart_Init();
-    /* OLED_Init();  屏已移至网关集中显示, 节点不再使用 OLED */
     QMC5883P_Init(&qmc5883p, QMC5883P_MODE_CONTINUOUS, QMC5883P_ODR_100HZ, QMC5883P_RNG_8G);
     LoRa_Node_Init();
     Usart_Printf(USART_DEBUG, "All Bsp Init OK!\n");

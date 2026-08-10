@@ -9,7 +9,6 @@
  * 日期: 2026-07-25
  ****************************************************************************/
 
-#include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
 #include "stm32f10x.h"
@@ -17,7 +16,6 @@
 #include "bsp_led.h"
 #include "bsp_usart.h"
 #include "bsp_ultrasonic.h"
-#include "bsp_oled.h"
 #include "bsp_qmc5883p.h"
 #include "lora_node.h"
 #include "app_global.h"
@@ -28,7 +26,6 @@
 #define US_UPDATE_INTERVAL      100     /* 超声波采样周期(ms) */
 #define QMC_UPDATE_INTERVAL     100     /* 地磁采样周期(ms) */
 #define PARK_CHECK_INTERVAL     200     /* 车位状态检测周期(ms) */
-#define OLED_UPDATE_INTERVAL    250     /* OLED刷新周期(ms) */
 
 /* -------- 传感器参数 -------- */
 /* 超声波 */
@@ -240,48 +237,6 @@ void LED_Task(void)
 }
 
 /****************************************************************************
- * 函数名: OLED_Task
- * 功能:   OLED屏幕显示任务
- * 参数:   无
- * 返回:   无
- * 说明:   定时刷新, 每次更新OLED显示内容
- *         显示WiFi连接状态与车位状态信息
- ****************************************************************************/
-void OLED_Task(void)
-{
-    static uint32_t lastUpdateTick = 0;
-
-    if (Get_Tick() - lastUpdateTick >= OLED_UPDATE_INTERVAL)
-    {
-        if (LoRa_Node_IsOnline())
-            OLED_ShowCH(0, 0, (u8 *)"LoRa已连接");
-        else
-            OLED_ShowCH(0, 0, (u8 *)"LoRa未连接");
-
-        OLED_Printf(0, 2, "地磁: %d", MagCarPresent);
-        OLED_Printf(0, 4, "距离: %.3d cm", Distance);
-        OLED_ShowCH(0, 6, (u8 *)"状态: ");
-        switch (ParkStatus)
-        {
-            case PARK_IDLE:
-                OLED_Printf(48, 6, "空闲     ");
-                break;
-            case PARK_OCCUPIED:
-                OLED_Printf(48, 6, "有车 %3ds", OccupiedTime);
-                break;
-            case PARK_ZOMBIE:
-                OLED_Printf(48, 6, "僵尸车   ");
-                break;
-            default:
-                OLED_Printf(48, 6, "未知     ");
-                break;
-        }
-
-        lastUpdateTick = Get_Tick();
-    }
-}
-
-/****************************************************************************
  * 函数名: PackNodeData
  * 功能:   打包节点传感器数据到结构体(替代原 GenerateParkingData)
  * 参数:   无
@@ -341,6 +296,11 @@ static void LoRa_CmdCallback(const char *cmd, const char *value)
             Usart_Printf(USART_DEBUG, "LEDEnable set to: %d\r\n", LEDEnable);
         }
         LoRa_Node_SendAck("AT+LedEnable");
+    }
+    /* 网关心跳查询: AT+PING -> 回复 PONG */
+    else if (strcmp(cmd, "AT+PING") == 0)
+    {
+        LoRa_Node_SendAck("PONG");
     }
     else
     {

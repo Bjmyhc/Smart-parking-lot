@@ -1,4 +1,4 @@
-﻿/*
+/*
  * 智能停车场 - ESP8266/ESP32 网关主程序 v2
  *
  * 架构(方案A: 定点传输 + 二进制帧 + 网关轮询):
@@ -45,7 +45,6 @@ uint32_t sysEventFlag = 0;          /* 系统事件标志位 */
 static uint32_t lastUpload    = 0;
 static uint32_t lastWifiRetry = 0;
 static uint32_t lastMqttRetry = 0;
-static uint32_t lastPingReq   = 0;
 
 /* 当前使用的 WiFi 配置 (默认取 config.h 宏, 有存档则覆盖) */
 static char wifiSsid[33]     = WIFI_SSID;
@@ -173,26 +172,12 @@ static void activeEvent(void)
 {
     uint32_t now = millis();
 
-    /* 1. 每 60s: MQTT PING 心跳 (借鉴参考项目 PING_SENT 标志位) */
-    if ((sysEventFlag & SYS_EVENT_MQTT_CONNECTED) && (now - lastPingReq >= PING_INTERVAL))
-    {
-        if (sysEventFlag & SYS_EVENT_PING_SENT)
-        {
-            /* 上次 PING 没收到 PINGRESP → MQTT 掉线 */
-            DBG_PRINTLN("[MQTT] 心跳超时, 断开连接");
-            onenet_disconnect();
-            sysEventFlag &= ~(SYS_EVENT_MQTT_CONNECTED | SYS_EVENT_PING_SENT);
-        }
-        else
-        {
-            onenet_ping();
-            sysEventFlag |= SYS_EVENT_PING_SENT;
-            DBG_PRINTLN("[MQTT] 心跳已发送");
-        }
-        lastPingReq = now;
-    }
+    /* 说明: MQTT 保活不在此处处理, 由 PubSubClient keepalive 负责:
+     *   60s 无活动自动发 PINGREQ, 120s 无任何数据自动断开;
+     *   断线后 onenet_loop() 同步清除连接标志并走重连.
+     *   简化: 移除了参考项目的 PING_SENT 标志位假死检测 */
 
-    /* 2. 每 15s 或 dataChanged: 代子设备上线/下线/数据上报 */
+    /* 每 15s 或 dataChanged: 代子设备上线/下线/数据上报 */
     if (sysEventFlag & SYS_EVENT_MQTT_CONNECTED)
     {
         if (dataChanged || (now - lastUpload >= UPLOAD_INTERVAL))
@@ -235,6 +220,10 @@ void setup(void)
     resetAllNodes();
     /* 从 Flash 加载已持久化的子设备证书 (若存在) */
     loadCertsFromLittleFS();
+    /* 每次开机都对预设地址 PING 探测一轮:
+     * 证书在 Flash 与否不影响扫描本身; 有证书的节点扫描时跳过 CER(证书已有),
+     * 无证书的 PING 通后 CER 注册; 代上线由 loginPending + uploadAll 定时处理 */
+    lora_triggerDiscovery();
     onenet_init();
 
     /* --- 阶段1: 网络连接中 (WiFi) --- */
@@ -261,10 +250,7 @@ void setup(void)
     if (wifi_connected())
     {
         oled_showStartupPhase(2);
-        if (onenet_connect())
-        {
-            delay(500);
-        }
+        onenet_connect();   /* 连不上也没关系, 主循环会重试 */
     }
 
     /* --- 阶段3: 节点扫描中 (LoRa) --- */
@@ -298,7 +284,6 @@ void loop(void)
                 lastMqttRetry = now;
                 if (onenet_connect())
                 {
-                    delay(500);
                     onenet_uploadAll();
                 }
             }

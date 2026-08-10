@@ -6,7 +6,8 @@
  *      → 手机连热点 → 浏览器打开任意网址/192.168.4.1
  *      → 页面显示扫描到的 WiFi 列表 + 输入密码 → 保存
  *   3. 保存成功: 写入 LittleFS 后 ESP.restart() 正常联网运行
- *   4. 手动触发: 长按 CONFIG_KEY_PIN 5s 可 重新进入配网模式
+ *   4. 手动触发: 短按 CONFIG_KEY_PIN (<1s) 触发 LoRa 节点发现;
+ *      长按 CONFIG_KEY_PIN (3s) 重新进入配网模式
  *
  * 注意: 页面中的中文全部使用 HTML 实体 (&#x...;), 保证文件纯 ASCII,
  *       任何浏览器/编码环境下都不会出现乱码。
@@ -18,6 +19,7 @@
 #include "node_data.h"
 #include "onenet_handler.h"
 #include "gateway_oled.h"
+#include "lora_handler.h"
 
 #if defined(ESP32)
   #include <WiFi.h>
@@ -236,11 +238,12 @@ bool runConfigPortal(void)
     return false;
 }
 
-/* ==================== 长按检测 ==================== */
+/* ==================== 按键检测 (短按触发发现, 长按触发配网) ==================== */
 void checkConfigKeyLongPress(void)
 {
     static uint32_t pressStart  = 0;
     static bool     wasPressed  = false;
+    static bool     longPressTriggered = false;
 
     bool pressed = (digitalRead(CONFIG_KEY_PIN) == LOW);  /* 内部上拉, 按下为低 */
     uint32_t now = millis();
@@ -249,14 +252,28 @@ void checkConfigKeyLongPress(void)
     {
         pressStart = now;
         wasPressed = true;
+        longPressTriggered = false;
     }
-    else if (!pressed)
+    else if (!pressed && wasPressed)
     {
+        /* 释放: 判断时长 */
+        uint32_t duration = now - pressStart;
+        if (duration < 1000)
+        {
+            /* 短按 (< 1s): 触发 LoRa 节点发现 + OLED 搜索动画 */
+            if (!longPressTriggered)
+            {
+                lora_triggerDiscovery();
+                oled_startManualScan();
+            }
+        }
         wasPressed = false;
     }
 
-    if (wasPressed && (now - pressStart >= CONFIG_KEY_LONG_PRESS_MS))
+    /* 长按 (3s): 进入配网模式 */
+    if (wasPressed && !longPressTriggered && (now - pressStart >= CONFIG_KEY_LONG_PRESS_MS))
     {
+        longPressTriggered = true;
         DBG_PRINTLN("[配网] 检测到长按, 进入配网模式");
         runConfigPortal();
     }

@@ -46,7 +46,6 @@ extern uint8_t LEDEnable;
 
 /* ==================== LoRa通信 ==================== */
 
-extern uint8_t LoRaOnline;              /* LoRa在线状态: 0=离线, 1=网关已轮询到 */
 extern NodeData_t NodeDataCache;        /* 节点数据缓存(打包发送给网关) */
 
 /* 车位状态变化事件标志: 1=有状态变化待上报, 0=无

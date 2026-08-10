@@ -27,7 +27,4 @@ void onenet_uploadAll(void);
 /* 回复平台"子设备属性设置"执行结果 code:200/400 等 */
 void onenet_replySet(const char *id, int code, const char *msg);
 
-/* 发送 MQTT PINGREQ 心跳包 (用于 activeEvent 中的 PING_SENT 检测) */
-bool onenet_ping(void);
-
 #endif /* ONENET_HANDLER_H */

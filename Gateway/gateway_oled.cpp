@@ -1,4 +1,4 @@
-﻿/* gateway_oled.cpp - 网关 OLED 集中显示模块实现
+/* gateway_oled.cpp - 网关 OLED 集中显示模块实现
  *
  * 依赖库 (Arduino IDE 库管理器安装):
  *   - Adafruit SSD1306
@@ -48,6 +48,8 @@ static uint8_t  startupPhase = 0;
 /* 启动扫描节点画面: 初始化时全屏居中显示, 找到节点后自动切换到主界面 */
 static bool     scanPhase    = true;
 static uint32_t scanStartMs  = 0;
+/* 手动搜索(短按FLASH)触发: 退出条件放宽, 不因"已满节点"立即退出 */
+static bool     scanManual   = false;
 
 /* ==================== 8x8 ASCII 位图字库 ====================
  * 用法: font8x8[c - 0x20], c 为 ASCII 32..126
@@ -281,58 +283,42 @@ static uint8_t sigLevel(const NodeData &nd)
     return 1;
 }
 
-/* 当前确实在线的节点数: 只统计真正收到过 LoRa 应答的节点为"在线".
- * Flash 里存的证书只说明设备存在, 不能说明在线, 不计入统计 */
-static uint8_t liveNodeCount(void)
-{
-    uint8_t n = 0;
-    for (uint8_t i = 0; i < nodeCount; i++)
-        if (nodes[i].online) n++;
-    return n;
-}
-
 /* 预期扫描的节点数量 (轮询地址范围, 即扫描总数的上界) */
 static uint8_t scanExpected(void)
 {
     return LORA_POLL_TO_NODE - LORA_POLL_FROM_NODE + 1;
 }
 
-/* 启动扫描节点画面: 全屏居中, 动画圆点 + 已发现节点数 + 提示 */
+/* 启动搜索节点画面: 全屏居中, 动画圆点 + 已发现节点数 + 提示 */
 static void drawScanScreen(void)
 {
     display.clearDisplay();
 
-    /* 与阶段1/2 风格统一: 顶部 STEP 3/3 (三行整体垂直居中: y=20/30/40, 中心=32) */
-    oled8x8Print((128 - 8 * 8) / 2, 20, "STEP 3/3", SSD1306_WHITE);
-
-    /* 标题 + 动画点 (0.4s 轮换): SCANNING NODES / . / .. / ... */
+    /* 标题 + 动画点 (0.4s 轮换): SEARCHING NODES / . / .. / ... */
     static const char dot[4][4] = { "", ".", "..", "..." };
     uint8_t d = (millis() / 400) % 4;
     char title[24];
-    snprintf(title, sizeof(title), "SCANNING NODES%s", dot[d]);
-    oled8x8Print((128 - (int16_t)strlen(title) * 8) / 2, 30, title, SSD1306_WHITE);
+    snprintf(title, sizeof(title), "SEARCHING NODES%s", dot[d]);
+    oled8x8Print((128 - (int16_t)strlen(title) * 8) / 2, 24, title, SSD1306_WHITE);
 
-    /* 已发现(在线)节点数 / 预期总数, 居中显示 */
+    /* 已发现节点数 / 预期总数, 居中显示 (搜索模式注册即计入,
+     * 用 nodeCount 而非"在线数", 避免证书注册后因未收数据被超时判离线的假象) */
     char found[16];
-    snprintf(found, sizeof(found), "FOUND: %u/%u", liveNodeCount(), scanExpected());
+    snprintf(found, sizeof(found), "FOUND: %u/%u", nodeCount, scanExpected());
     oled8x8Print((128 - (int16_t)strlen(found) * 8) / 2, 40, found, SSD1306_WHITE);
 
     display.display();
 }
 
-/* startup screen: centered "STEP x/3" + description
- * phase 1=network(wifi) 2=server(mqtt); phase 3 uses drawScanScreen() */
+/* startup screen: 单行垂直居中显示连接阶段 (无 STEP 序号)
+ * phase 1=wifi 2=server(mqtt); phase 3 uses drawScanScreen() */
 static void drawStartupScreen(uint8_t phase)
 {
     display.clearDisplay();
 
-    char title[16];
-    snprintf(title, sizeof(title), "STEP %u/3", phase);
-    oled8x8Print((128 - (int16_t)strlen(title) * 8) / 2, 18, title, SSD1306_WHITE);
-
-    static const char *desc[2] = { "NETWORK CONNECT", "SERVER CONNECT" };
+    static const char *desc[2] = { "WIFI CONNECTING", "SERVER CONNECTING" };
     const char *d = (phase >= 1 && phase <= 2) ? desc[phase - 1] : "";
-    oled8x8Print((128 - (int16_t)strlen(d) * 8) / 2, 30, d, SSD1306_WHITE);
+    oled8x8Print((128 - (int16_t)strlen(d) * 8) / 2, 28, d, SSD1306_WHITE);
 
     display.display();
 }
@@ -376,6 +362,17 @@ void oled_scanStart(void)
 {
     scanStartMs = millis();
     scanPhase   = true;
+    scanManual  = false;
+}
+
+/* 手动搜索 (短按 FLASH): 显示搜索节点动画.
+ * 与开机扫描不同: 不因"已满节点"立即退出, 至少展示一轮最短时长再回主界面 */
+void oled_startManualScan(void)
+{
+    scanStartMs  = millis();
+    scanPhase    = true;
+    scanManual   = true;
+    startupPhase = 0;   /* 离开启动屏状态, 结束后回运行主界面 */
 }
 
 /* 配网模式显示: AP 名 + IP */
@@ -523,21 +520,24 @@ void oled_refresh(void)
     }
 
     /* 扫描节点画面: 全屏居中显示, 满足任一条件自动切换到主界面:
-     *  a) 已发现(在线)节点数达到预期范围上限
-     *  b) 至少发现 1 个节点且已显示时长 >= 预期节点数×NODE_PER_NODE_TIMEOUT
-     *  c) 一个都没找到, OLED_SCAN_MAX_MS 兜底退出 */
+     *  a) 开机扫描: 已发现节点数达到预期上限立即退出
+     *  b) 至少显示一轮最短时长 (开机部分找到 / 手动搜索短按)
+     *  c) OLED_SCAN_MAX_MS 兜底退出 */
     if (scanPhase)
     {
-        uint8_t found    = liveNodeCount();
+        uint8_t found    = nodeCount;
         uint32_t elapsed = now - scanStartMs;
-        /* 最短显示时长 = 每节点耗时 × 预期节点数, 与节点超时口径统一
-         * (默认 NODE_PER_NODE_TIMEOUT, 只约束"部分找到"的停留时间) */
+        /* 最短显示时长 = 每节点耗时 × 预期节点数, 与节点超时口径统一 */
         uint32_t minMs   = (uint32_t)scanExpected() * NODE_PER_NODE_TIMEOUT;
-        if (found >= scanExpected() ||
-            (found > 0 && elapsed >= minMs) ||
-            elapsed >= OLED_SCAN_MAX_MS)
+        /* 手动搜索(短按): 不因"已满节点"立即退出, 至少展示一轮最短时长,
+         * 让用户能看到搜索动画在跑; 开机搜索: 全找到立即退出 */
+        bool done = scanManual ? (elapsed >= minMs)
+                               : (found >= scanExpected() ||
+                                  (found > 0 && elapsed >= minMs));
+        if (done || elapsed >= OLED_SCAN_MAX_MS)
         {
-            scanPhase = false;
+            scanPhase    = false;
+            scanManual   = false;
             startupPhase = 0;   /* scan done, enter main UI */
         }
         else

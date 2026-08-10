@@ -23,6 +23,10 @@ void oled_showStartupPhase(uint8_t phase);
 /* setup 末尾调用: 开启启动扫描节点画面并开始计时 (主循环起算) */
 void oled_scanStart(void);
 
+/* 手动搜索 (短按 FLASH) 时调用: 显示搜索节点动画.
+ * 与开机扫描不同: 不因"已满节点"立即退出, 至少展示一轮最短时长再回主界面 */
+void oled_startManualScan(void);
+
 /* 周期刷新显示 (内部计时, 非阻塞) */
 void oled_refresh(void);
 
