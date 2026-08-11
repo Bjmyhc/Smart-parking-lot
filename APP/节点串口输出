@@ -1,0 +1,20 @@
+[2026-08-11 12:36:28.660]# RECV ASCII>
+LoRa: Send ACK (PONG)
+
+[2026-08-11 12:36:31.786]# RECV ASCII>
+LoRa: Send data (park=0, us=5, mag=0)
+
+[2026-08-11 12:36:31.894]# RECV ASCII>
+LoRa: Send data (park=0, us=5, mag=0)
+
+[2026-08-11 12:36:32.003]# RECV ASCII>
+LoRa: Send data (park=0, us=5, mag=0)
+
+[2026-08-11 12:36:32.125]# RECV ASCII>
+LoRa: Send data (park=0, us=5, mag=0)
+
+[2026-08-11 12:36:32.233]# RECV ASCII>
+LoRa: Send data (park=0, us=5, mag=0)
+
+[2026-08-11 12:36:32.341]# RECV ASCII>
+LoRa: Send data (park=0, us=5, mag=0)

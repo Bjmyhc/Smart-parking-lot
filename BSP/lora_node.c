@@ -197,15 +197,20 @@ void LoRa_Node_SendData(const NodeData_t *data)
 
 void LoRa_Node_SendAck(const char *cmd)
 {
-    uint8_t buf[1 + 64];
+    uint8_t buf[1 + 64 + 2];
     uint16_t cmdLen = strlen(cmd);
 
-    /* 帧格式: 地址头 + [帧头字节][命令字符串], 一次发送(见 SendCert 注释) */
+    /* 帧格式: 地址头 + [帧头字节][命令字符串], 一次发送(见 SendCert 注释)
+     * 注意: ACK 字符串末尾必须补 \r\n 行结束符, 网关按 \r 分帧;
+     *       缺 \r\n 会导致网关把多个 ACK 攒成一帧(攒满缓冲才截断),
+     *       出现 PONG 堆积几十秒才一次性收到的假象 */
     if (cmdLen > 64)
         cmdLen = 64;
     buf[0] = LORA_FRAME_ACK;
     memcpy(buf + 1, cmd, cmdLen);
-    LoRa_SendFrame(LORA_GATEWAY_ADDR, LORA_CHANNEL, buf, 1 + cmdLen);
+    buf[1 + cmdLen]     = '\r';
+    buf[1 + cmdLen + 1] = '\n';
+    LoRa_SendFrame(LORA_GATEWAY_ADDR, LORA_CHANNEL, buf, 1 + cmdLen + 2);
 
     Usart_Printf(USART_DEBUG, "LoRa: Send ACK (%s)\r\n", cmd);
 }

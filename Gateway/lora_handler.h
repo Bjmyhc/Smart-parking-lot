@@ -24,6 +24,10 @@ void lora_sendControl(uint8_t nodeId, const char *property, int value);
 /* 手动触发节点发现: 从头扫描所有节点 */
 void lora_triggerDiscovery(void);
 
+/* 查询是否正处于节点发现扫描中 (discoveryMode 置位期间返回 true,
+ * 供 OLED 扫描画面判断"扫描是否真实结束"以决定退出时机) */
+bool lora_discoveryActive(void);
+
 /* 获取 LoRa 串口引用(调试) */
 Stream &lora_getSerial(void);
 

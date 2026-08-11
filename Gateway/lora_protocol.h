@@ -66,11 +66,12 @@ typedef struct LORA_PACKED {
 
 /* ============ 下行命令格式 ============
  * 网关使用定点传输(目标节点地址) 发送 ASCII 命令:
- *   AT+CER<node>\r\n            查询节点<node>证书
- *   AT+DATA<node>\r\n           查询节点<node>数据
- *   AT+LedEnable<node>=<v>\r\n  设置节点<node>LedEnable, v=0/1
+ *   AT+CER\r\n            查询节点证书
+ *   AT+DATA\r\n           查询节点数据
+ *   AT+PING\r\n           探测节点是否在线
+ *   AT+LedEnable=<v>\r\n  设置节点LedEnable, v=0/1
  *
- * 注意: <node>是十进制节点ID(如 1 2 3), 与地址相同
+ * 注意: 命令名不携带节点号, 节点身份由定点传输帧头[AddrH][AddrL]区分
  */
 
 /* 命令最大长度(含\r\n) */

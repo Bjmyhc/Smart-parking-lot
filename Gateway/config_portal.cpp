@@ -245,8 +245,26 @@ void checkConfigKeyLongPress(void)
     static bool     wasPressed  = false;
     static bool     longPressTriggered = false;
 
-    bool pressed = (digitalRead(CONFIG_KEY_PIN) == LOW);  /* 内部上拉, 按下为低 */
+    /* 软件消抖: 原始电平连续稳定 CONFIG_KEY_DEBOUNCE_MS 才更新消抖结果,
+     * 避免机械按键按下/松开瞬间的电平抖动造成误触发或漏触发 */
+    static bool     debounced    = false;   /* 消抖后状态 (按下为 true) */
+    static bool     lastRaw      = true;    /* 上次原始电平 (未按下为 true) */
+    static uint32_t rawChangeAt  = 0;       /* 原始电平最近一次变化时刻 */
+
+    bool raw = (digitalRead(CONFIG_KEY_PIN) == LOW);  /* 内部上拉, 按下为低 */
     uint32_t now = millis();
+
+    if (raw != lastRaw)
+    {
+        lastRaw     = raw;
+        rawChangeAt = now;
+    }
+    else if (now - rawChangeAt >= CONFIG_KEY_DEBOUNCE_MS)
+    {
+        debounced = raw;   /* 电平已稳定, 更新消抖结果 */
+    }
+
+    bool pressed = debounced;
 
     if (pressed && !wasPressed)
     {
@@ -258,9 +276,9 @@ void checkConfigKeyLongPress(void)
     {
         /* 释放: 判断时长 */
         uint32_t duration = now - pressStart;
-        if (duration < 1000)
+        if (duration < CONFIG_KEY_SHORT_PRESS_MS)
         {
-            /* 短按 (< 1s): 触发 LoRa 节点发现 + OLED 搜索动画 */
+            /* 短按 (3s 内松手): 触发 LoRa 节点发现 + OLED 搜索动画 */
             if (!longPressTriggered)
             {
                 lora_triggerDiscovery();
@@ -270,7 +288,7 @@ void checkConfigKeyLongPress(void)
         wasPressed = false;
     }
 
-    /* 长按 (3s): 进入配网模式 */
+    /* 长按 (5s): 进入配网模式 */
     if (wasPressed && !longPressTriggered && (now - pressStart >= CONFIG_KEY_LONG_PRESS_MS))
     {
         longPressTriggered = true;

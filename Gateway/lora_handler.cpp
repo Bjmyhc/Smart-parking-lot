@@ -60,12 +60,31 @@ static uint8_t  pollPhase     = 0;
  * 扫完一轮自动恢复 false, 平时只轮询已注册节点 */
 static bool     discoveryMode = false;
 
+/* 搜索模式当前地址已 PING 尝试次数 (LoRa 首帧易丢, 超时重试, 总次数见
+ * DISCOVER_PING_ATTEMPTS: 3 = 首次 + 2 次重试; 达到上限仍不通则跳过) */
+static uint8_t  discoverPingAttempts = 0;
+
+/* 正常轮询周期计时: 本轮(所有节点扫一遍)起始时间戳.
+ * 回绕到起始地址时记下, 下一轮必须等满 LORA_POLL_ROUND_MS 才发首条,
+ * 防止节点响应快导致连发占满空口 (搜索模式不节流, 见 lora_tick) */
+static uint32_t roundStartAt = 0;
+
 /* PING 短超时 (快速探测, 不阻塞) */
 #define PING_TIMEOUT_MS         500
 
 /* 证书周期性校验计数: 以 nodeId 为下标, 每 LORA_CERT_VERIFY_EVERY 次
  * 轮询到该节点夹发一次 AT+CER, 用于发现"同地址换节点" */
 static uint8_t  dataPollCnt[LORA_MAX_NODES + 1];
+
+/* 离线节点探测退避 (正常轮询对已注册离线节点的 PING 探测):
+ * 离线 PING 每超时一次, offlineStage 档位+1(封顶), 下次探测间隔查表
+ * OFFLINE_BACKOFF_MS 逐档拉大: 2s→5s→10s→20s→30s→60s;
+ * offlineProbeAt = 下次允许探测时刻, 未到则跳过;
+ * 收到任何有效帧(数据/证书/PONG)即证明节点存活, 重置档位立即恢复快节奏 */
+static const uint32_t OFFLINE_BACKOFF_MS[OFFLINE_BACKOFF_STAGES] =
+    { 2000, 5000, 10000, 20000, 30000, 60000 };
+static uint8_t  offlineStage[LORA_MAX_NODES + 1];
+static uint32_t offlineProbeAt[LORA_MAX_NODES + 1];
 
 /* 返回 true 表示本轮轮到该校验一次证书 */
 static bool shouldVerifyCert(uint8_t nodeId)
@@ -101,16 +120,16 @@ static void sendFixedFrame(uint16_t dstAddr, uint8_t ch,
     if (len > 0) loraSerial.write(data, len);
 }
 
-/* 把 "AT+<prefix><nodeId>\r\n" 或 "AT+<prefix><nodeId>=<value>\r\n"
- * 发到指定节点 */
+/* 把 "AT+<prefix>\r\n" 或 "AT+<prefix>=<value>\r\n" 发到指定节点
+ * 节点身份由定点传输帧头 [AddrH][AddrL] 区分, 命令名不携带节点号 */
 static void sendAT(uint8_t nodeId, const char *prefix, int value, bool hasValue)
 {
     char cmd[LORA_CMD_MAX_LEN];
     int n;
     if (hasValue)
-        n = snprintf(cmd, sizeof(cmd), "AT+%s%d=%d\r\n", prefix, nodeId, value);
+        n = snprintf(cmd, sizeof(cmd), "AT+%s=%d\r\n", prefix, value);
     else
-        n = snprintf(cmd, sizeof(cmd), "AT+%s%d\r\n", prefix, nodeId);
+        n = snprintf(cmd, sizeof(cmd), "AT+%s\r\n", prefix);
     if (n <= 0) return;
 
     sendFixedFrame((uint16_t)nodeId, LORA_CHANNEL, (const uint8_t *)cmd, (uint16_t)n);
@@ -190,6 +209,14 @@ static bool handleCompleteFrame(uint8_t header)
         DBG_PRINTF("[LoRa] 未知帧头 0x%02X\n", header);
         break;
     }
+
+    /* 收到任何有效帧即确认节点存活: 重置离线探测退避,
+     * 使其立即恢复正常快节奏(否则离线档位会一直压制探测间隔) */
+    if (gotData && nodeId <= LORA_MAX_NODES)
+    {
+        offlineStage[nodeId]   = 0;
+        offlineProbeAt[nodeId] = 0;
+    }
     return gotData;
 }
 
@@ -248,10 +275,14 @@ static bool feedRx(uint8_t c)
 /* ---------- 选下一个要轮询的节点 ---------- */
 static void advanceNextNode(void)
 {
+    discoverPingAttempts = 0;   /* 换地址时重置搜索 PING 尝试计数 */
+    pollPhase       = 0;   /* 换地址时复位轮询阶段, 防止 PONG 已收(阶段2)
+                            * 被下一个节点继承, 跳过 PING 直接发 CER/DATA */
     currentNode++;
     if (currentNode > LORA_POLL_TO_NODE)
     {
         currentNode = LORA_POLL_FROM_NODE;
+        roundStartAt = millis();   /* 新一轮开始计时 (正常轮询节流) */
         /* 一轮地址扫完: 自动退出搜索模式, 恢复只轮询已注册节点 */
         if (discoveryMode)
         {
@@ -274,6 +305,7 @@ void lora_init(void)
     currentNode = LORA_POLL_FROM_NODE;
     waitingResp = false;
     pollPhase   = 0;
+    roundStartAt = 0;   /* 启动即视为新一轮开始, 首轮立即轮询 */
     DBG_PRINTF("[LoRa] 串口就绪 (波特率=%d, 硬串=%d, 网关=0x%04X, 信道=%d)\n",
                LORA_BAUD, LORA_USE_HWSERIAL, LORA_GATEWAY_ADDR, LORA_CHANNEL);
 }
@@ -327,9 +359,40 @@ bool lora_tick(void)
     {
         if (now - cmdSentAt > respTimeout)
         {
+            /* 搜索模式 PING 超时: LoRa 首帧易丢, 同地址重试再放弃;
+             * 尝试计数未达总次数上限(含首次, 见 DISCOVER_PING_ATTEMPTS)就重发;
+             * 非搜索模式(掉线恢复探测)保持单次, 下一轮再查 */
+            if (discoveryMode && pollPhase == 1 &&
+                discoverPingAttempts < DISCOVER_PING_ATTEMPTS - 1)
+            {
+                discoverPingAttempts++;
+                char cmd[LORA_CMD_MAX_LEN];
+                int n = snprintf(cmd, sizeof(cmd), "AT+PING\r\n");
+                if (n > 0)
+                    sendFixedFrame((uint16_t)currentNode, LORA_CHANNEL,
+                                   (const uint8_t *)cmd, (uint16_t)n);
+                (void)n;
+                cmdSentAt = now;
+                waitingResp = true;
+                respTimeout = PING_TIMEOUT_MS;
+                pollPhase   = 1;
+                DBG_PRINTF("[LoRa] PING-> 节点%d (尝试%d/%d)\n",
+                           currentNode, discoverPingAttempts, DISCOVER_PING_ATTEMPTS);
+                return gotData;
+            }
             DBG_PRINTF("[LoRa] 节点%d 超时 (跳过)\n", currentNode);
+            /* 正常模式离线节点 PING 超时: 离线探测退避档位+1, 拉长下次
+             * 探测间隔; 搜索模式 / 在线节点 DATA 超时不做退避 */
+            if (!discoveryMode && pollPhase == 1)
+            {
+                if (offlineStage[currentNode] < OFFLINE_BACKOFF_STAGES - 1)
+                    offlineStage[currentNode]++;
+                offlineProbeAt[currentNode] =
+                    millis() + OFFLINE_BACKOFF_MS[offlineStage[currentNode]];
+            }
             waitingResp = false;
             pollPhase   = 0;     /* 超时 → 重置阶段, 正常前移 */
+            discoverPingAttempts = 0;
             advanceNextNode();
         }
         return gotData;   /* 等当前响应, 暂不发下一条 */
@@ -337,6 +400,16 @@ bool lora_tick(void)
 
     /* --- 4. 发下一条轮询命令 --- */
     {
+        /* 正常轮询节流: 本轮(回绕起算)未满 LORA_POLL_ROUND_MS 就不发下一条,
+         * 防止节点响应快导致连发占满 LoRa 空口(半双工共享信道易撞包).
+         * 搜索模式不节流(探测节奏由 PING 超时自然控制);
+         * pollPhase==2 是 PING 流程延续(PONG 已收待发真实命令), 也不拦 */
+        if (!discoveryMode && pollPhase == 0 &&
+            (now - roundStartAt < LORA_POLL_ROUND_MS))
+        {
+            return gotData;
+        }
+
         int slot = findNode(currentNode);
         bool certOk = (slot >= 0) && (nodes[slot].certSent);
         bool online = (slot >= 0) && (nodes[slot].online);
@@ -397,7 +470,14 @@ bool lora_tick(void)
         }
         else
         {
-            /* 正常模式离线节点: 先 PING 确认在线 */
+            /* 正常模式离线节点: 先 PING 确认在线;
+             * 离线退避: 未到下次探测时刻(offlineProbeAt)直接跳过,
+             * 离线越久探测间隔越稀疏, 避免长期离线节点拖慢轮询一圈 */
+            if (now < offlineProbeAt[currentNode])
+            {
+                advanceNextNode();
+                return gotData;
+            }
             char cmd[LORA_CMD_MAX_LEN];
             int n = snprintf(cmd, sizeof(cmd), "AT+PING\r\n");
             if (n > 0)
@@ -421,16 +501,22 @@ void lora_triggerDiscovery(void)
     currentNode = LORA_POLL_FROM_NODE;
     waitingResp = false;
     pollPhase   = 0;
+    discoverPingAttempts = 0;   /* 重新触发扫描时清零尝试计数 */
     discoveryMode = true;
     DBG_PRINTLN("[LoRa] 手动触发节点发现 (全量扫描)");
 }
 
+bool lora_discoveryActive(void)
+{
+    return discoveryMode;
+}
+
 void lora_sendControl(uint8_t nodeId, const char *property, int value)
 {
-    /* 组装 AT+<property><nodeId>=<value>\r\n  (注意原节点端匹配 "AT+<property>") */
+    /* 组装 AT+<property>=<value>\r\n
+     * 节点端回调按纯名称匹配 (如 "AT+LedEnable"), 节点地址靠定点传输[AddrH][AddrL]区分,
+     * 命令名不包含 nodeId */
     int n = snprintf(pendingCmd, sizeof(pendingCmd), "AT+%s=%d\r\n", property, value);
-    /* 说明: 节点端回调目前只识别 property=="LedEnable" 等纯名称匹配,
-     *       节点地址靠定点传输[AddrH][AddrL]区分, 命令名不包含nodeId */
     (void)n;
     pendingNode  = nodeId;
     pendingState = PENDING_SEND;

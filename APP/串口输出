@@ -1,98 +1,0 @@
-
-[2026-08-08 23:34:31.707]# RECV ASCII>
-rl l恟$鈔?l?b|帎抮b?b騨nlnnbbp?blrlp騨?l?bn鈔??b尿nn'l?l`?nnl`nr帓抧bl抈p騨r?bbn鈔b尿nn'l`?nnl`nr帓抧b抈r拻nb抈?$rl`鼈n抈
-[2026-08-08 23:34:31.769]# RECV ASCII>
-?俷?r愹n|?l?l`bbrl鈔B俷l`?rl膌?
-[2026-08-08 23:34:32.004]# RECV ASCII>
-Q觋觋觋觋觋觋觋觋觋觋觋觋觋觋j
- Smart Parking Gateway v2.0 
- LoRa 瀹氱偣 + 浜岃繘鍒?+ 杞 
-=============================
-[LoRa] Serial ready (baud=9600, hw=0, gw=0x0000, ch=23)
-[MQTT] OneNET client initialized
-
-[2026-08-08 23:34:32.098]# RECV ASCII>
-[WiFi] SSID=Guo
-
-[2026-08-08 23:34:32.591]# RECV ASCII>
-.
-[2026-08-08 23:34:33.102]# RECV ASCII>
-.
-[2026-08-08 23:34:33.599]# RECV ASCII>
-.
-[2026-08-08 23:34:34.094]# RECV ASCII>
-.
-[2026-08-08 23:34:34.601]# RECV ASCII>
-.
-[2026-08-08 23:34:35.827]# RECV ASCII>
-.
-[2026-08-08 23:34:36.321]# RECV ASCII>
-.
-[2026-08-08 23:34:36.817]# RECV ASCII>
-.
-[2026-08-08 23:34:37.330]# RECV ASCII>
-.
-[2026-08-08 23:34:37.824]# RECV ASCII>
-.
-[2026-08-08 23:34:38.319]# RECV ASCII>
-.
-[2026-08-08 23:34:38.830]# RECV ASCII>
-.
-[2026-08-08 23:34:39.327]# RECV ASCII>
-.
-[2026-08-08 23:34:39.825]# RECV ASCII>
-.
-[WiFi] Connected! IP=192.168.10.23
-[MQTT] Connecting to OneNET...
-
-[2026-08-08 23:34:39.918]# RECV ASCII>
-[MQTT] Connected, subscribed: $sys/9YIs0S7V11/PGW001/thing/property/set
-
-[2026-08-08 23:34:40.445]# RECV ASCII>
-[Gateway] Setup done
-
-[LoRa] -> node1: AT+CER1
-
-[2026-08-08 23:34:43.454]# RECV ASCII>
-[LoRa] node1 timeout (skip)
-[LoRa] -> node2: AT+CER2
-
-[2026-08-08 23:34:46.458]# RECV ASCII>
-[LoRa] node2 timeout (skip)
-[LoRa] -> node3: AT+CER3
-
-[2026-08-08 23:34:46.705]# RECV ASCII>
-[MQTT] Publish: {"id":"15000","params":{}}
-[MQTT] Data uploaded!
-
-[2026-08-08 23:34:49.481]# RECV ASCII>
-[LoRa] node3 timeout (skip)
-[LoRa] -> node4: AT+CER4
-
-[2026-08-08 23:34:52.490]# RECV ASCII>
-[LoRa] node4 timeout (skip)
-[LoRa] -> node5: AT+CER5
-
-[2026-08-08 23:34:55.517]# RECV ASCII>
-[LoRa] node5 timeout (skip)
-[LoRa] -> node6: AT+CER6
-
-[2026-08-08 23:34:58.532]# RECV ASCII>
-[LoRa] node6 timeout (skip)
-[LoRa] -> node7: AT+CER7
-
-[2026-08-08 23:35:01.547]# RECV ASCII>
-[LoRa] node7 timeout (skip)
-[LoRa] -> node8: AT+CER8
-
-[2026-08-08 23:35:01.701]# RECV ASCII>
-[MQTT] Publish: {"id":"30000","params":{}}
-[MQTT] Data uploaded!
-
-[2026-08-08 23:35:04.562]# RECV ASCII>
-[LoRa] node8 timeout (skip)
-[LoRa] -> node9: AT+CER9
-
-[2026-08-08 23:35:07.579]# RECV ASCII>
-[LoRa] node9 timeout (skip)
-[LoRa] -> node10: AT+CER10

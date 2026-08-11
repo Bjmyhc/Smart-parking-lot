@@ -436,16 +436,6 @@
           <GroupName>BSP</GroupName>
           <Files>
             <File>
-              <FileName>bsp_timer.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\BSP\bsp_timer.c</FilePath>
-            </File>
-            <File>
-              <FileName>bsp_timer.h</FileName>
-              <FileType>5</FileType>
-              <FilePath>..\..\BSP\bsp_timer.h</FilePath>
-            </File>
-            <File>
               <FileName>bsp_usart.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\..\BSP\bsp_usart.c</FilePath>
@@ -474,16 +464,6 @@
               <FileName>bsp_delay.h</FileName>
               <FileType>5</FileType>
               <FilePath>..\..\BSP\bsp_delay.h</FilePath>
-            </File>
-            <File>
-              <FileName>bsp_adc.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\BSP\bsp_adc.c</FilePath>
-            </File>
-            <File>
-              <FileName>bsp_adc.h</FileName>
-              <FileType>5</FileType>
-              <FilePath>..\..\BSP\bsp_adc.h</FilePath>
             </File>
             <File>
               <FileName>bsp_ultrasonic.c</FileName>

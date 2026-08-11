@@ -50,7 +50,14 @@
 /* ==================== AP+Web 配网配置 ==================== */
 #define CONFIG_AP_SSID      "ParkingGateway_Config"  /* 配网热点名 */
 #define CONFIG_AP_PASSWORD  "12345678"               /* 配网热点密码(需8位以上) */
-#define CONFIG_KEY_LONG_PRESS_MS  3000               /* 长按触发配网(ms) */
+/* 按键时长划分:
+ *   松手时长 < SHORT_PRESS_MS            → 短按(触发 LoRa 节点发现)
+ *   按住时间 >= LONG_PRESS_MS            → 长按(进入配网模式)
+ * 两者之间(3000~5000ms)为死区: 不触发任何动作
+ * DEBOUNCE_MS 为软件消抖: 电平连续稳定该时长才确认状态变化 */
+#define CONFIG_KEY_SHORT_PRESS_MS   3000            /* 短按阈值(ms) */
+#define CONFIG_KEY_LONG_PRESS_MS    5000            /* 长按触发配网(ms) */
+#define CONFIG_KEY_DEBOUNCE_MS      30              /* 按键消抖(ms) */
 #define WIFI_CFG_FILE       "/wifi.cfg"              /* WiFi 配置存储文件 */
 /* 配网按键引脚(CONFIG_KEY_PIN)在 hw_cfg.h 中按平台定义 */
 

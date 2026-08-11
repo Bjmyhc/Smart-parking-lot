@@ -22,6 +22,7 @@
 #include "hw_cfg.h"        /* OLED 引脚/I2C 地址 */
 #include "app_cfg.h"       /* OLED_REFRESH_MS/SCAN_MAX_MS/sysEventFlag/DBG */
 #include "node_data.h"
+#include "lora_handler.h"  /* lora_discoveryActive(): 判断扫描是否真实结束 */
 #if defined(ESP32)
   #include <WiFi.h>
 #else
@@ -48,8 +49,6 @@ static uint8_t  startupPhase = 0;
 /* 启动扫描节点画面: 初始化时全屏居中显示, 找到节点后自动切换到主界面 */
 static bool     scanPhase    = true;
 static uint32_t scanStartMs  = 0;
-/* 手动搜索(短按FLASH)触发: 退出条件放宽, 不因"已满节点"立即退出 */
-static bool     scanManual   = false;
 
 /* ==================== 8x8 ASCII 位图字库 ====================
  * 用法: font8x8[c - 0x20], c 为 ASCII 32..126
@@ -283,10 +282,15 @@ static uint8_t sigLevel(const NodeData &nd)
     return 1;
 }
 
-/* 预期扫描的节点数量 (轮询地址范围, 即扫描总数的上界) */
-static uint8_t scanExpected(void)
+/* 当前确认存活的节点数 (online=true):
+ * FOUND 显示的是"这次搜索真正确认存活(收到 PONG/数据/证书)"的节点,
+ * 而不是 Flash 里有多少证书, 避免节点未插电仍显示已找到的假象 */
+static uint8_t scanFound(void)
 {
-    return LORA_POLL_TO_NODE - LORA_POLL_FROM_NODE + 1;
+    uint8_t n = 0;
+    for (uint8_t i = 0; i < nodeCount; i++)
+        if (nodes[i].online) n++;
+    return n;
 }
 
 /* 启动搜索节点画面: 全屏居中, 动画圆点 + 已发现节点数 + 提示 */
@@ -301,10 +305,9 @@ static void drawScanScreen(void)
     snprintf(title, sizeof(title), "SEARCHING NODES%s", dot[d]);
     oled8x8Print((128 - (int16_t)strlen(title) * 8) / 2, 24, title, SSD1306_WHITE);
 
-    /* 已发现节点数 / 预期总数, 居中显示 (搜索模式注册即计入,
-     * 用 nodeCount 而非"在线数", 避免证书注册后因未收数据被超时判离线的假象) */
+    /* 已确认存活节点数, 居中显示 (不显示扫描范围分母) */
     char found[16];
-    snprintf(found, sizeof(found), "FOUND: %u/%u", nodeCount, scanExpected());
+    snprintf(found, sizeof(found), "FOUND: %u", scanFound());
     oled8x8Print((128 - (int16_t)strlen(found) * 8) / 2, 40, found, SSD1306_WHITE);
 
     display.display();
@@ -330,6 +333,9 @@ void oled_showStartupPhase(uint8_t phase)
     if (phase == 3)
     {
         oled_scanStart();
+        /* 立即画出第一帧扫描画面: 否则进入主循环后可能因刷新间隔
+         * 被跳过, 出现"SERVER CONNECTING 直接跳主界面"看不到第三屏 */
+        drawScanScreen();
     }
     else
     {
@@ -362,16 +368,14 @@ void oled_scanStart(void)
 {
     scanStartMs = millis();
     scanPhase   = true;
-    scanManual  = false;
 }
 
 /* 手动搜索 (短按 FLASH): 显示搜索节点动画.
- * 与开机扫描不同: 不因"已满节点"立即退出, 至少展示一轮最短时长再回主界面 */
+ * 与开机扫描共用同一套退出条件 (扫描结束 + 展示满最短时长) */
 void oled_startManualScan(void)
 {
     scanStartMs  = millis();
     scanPhase    = true;
-    scanManual   = true;
     startupPhase = 0;   /* 离开启动屏状态, 结束后回运行主界面 */
 }
 
@@ -496,10 +500,13 @@ void oled_refresh(void)
     if (!displayReady) return;
 
     uint32_t now = millis();
-    /* 重连动画加速: WiFi 或 MQTT 处于重连中时, 用 OLED_ANIM_MS 快速刷新,
-     * 让信号条逐格跳动 / 圆圈转动流畅显示; 全部在线才恢复 2s 慢刷 */
+    /* 刷新间隔: 扫描画面(第三屏)或重连动画时用快档 0.45s,
+     * 保证 FOUND 数字/动画点实时更新; 全部在线才恢复 2s 慢刷.
+     * 注意: 扫描画面若按 2s 慢刷, 会因搜索 1.6s 就结束而只画到
+     * 第一帧(0/2), 数字没机会更新就被退出逻辑跳走 */
     uint32_t interval = OLED_REFRESH_MS;
-    if (WiFi.status() != WL_CONNECTED ||
+    if (scanPhase ||
+        WiFi.status() != WL_CONNECTED ||
         !(sysEventFlag & SYS_EVENT_MQTT_CONNECTED))
         interval = OLED_ANIM_MS;
     if (now - lastRefresh < interval) return;
@@ -519,25 +526,17 @@ void oled_refresh(void)
         return;
     }
 
-    /* 扫描节点画面: 全屏居中显示, 满足任一条件自动切换到主界面:
-     *  a) 开机扫描: 已发现节点数达到预期上限立即退出
-     *  b) 至少显示一轮最短时长 (开机部分找到 / 手动搜索短按)
-     *  c) OLED_SCAN_MAX_MS 兜底退出 */
+    /* 扫描节点画面: 全屏居中显示, 满足条件后自动切换到主界面:
+     *  a) 扫描真实结束 (discoveryMode 清除, 扫完一轮)
+     *  b) 且已展示满 OLED_SCAN_MIN_MS (最短展示时长, 保证用户看清第三屏)
+     *  c) OLED_SCAN_MAX_MS 兜底退出 (保险, 正常情况下扫描一轮必会结束) */
     if (scanPhase)
     {
-        uint8_t found    = nodeCount;
         uint32_t elapsed = now - scanStartMs;
-        /* 最短显示时长 = 每节点耗时 × 预期节点数, 与节点超时口径统一 */
-        uint32_t minMs   = (uint32_t)scanExpected() * NODE_PER_NODE_TIMEOUT;
-        /* 手动搜索(短按): 不因"已满节点"立即退出, 至少展示一轮最短时长,
-         * 让用户能看到搜索动画在跑; 开机搜索: 全找到立即退出 */
-        bool done = scanManual ? (elapsed >= minMs)
-                               : (found >= scanExpected() ||
-                                  (found > 0 && elapsed >= minMs));
+        bool done = !lora_discoveryActive() && (elapsed >= OLED_SCAN_MIN_MS);
         if (done || elapsed >= OLED_SCAN_MAX_MS)
         {
             scanPhase    = false;
-            scanManual   = false;
             startupPhase = 0;   /* scan done, enter main UI */
         }
         else

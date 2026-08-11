@@ -79,7 +79,7 @@ typedef struct {
 
 /* ==================== 命令回调 ==================== */
 /* 网关下行命令回调函数类型
- * cmd:  命令名称(如 "AT+DATA1", "AT+CER1", "AT+LedEnable")
+ * cmd:  命令名称(如 "AT+DATA", "AT+CER", "AT+LedEnable")
  * value: 命令参数值(如 "0", "1", 无参数时为NULL) */
 typedef void (*LoRaCmdCallback)(const char *cmd, const char *value);
 
@@ -115,7 +115,7 @@ void LoRa_Node_SendAck(const char *cmd);
  * 轮询接收网关命令(非阻塞)
  * cb: 命令回调函数, 收到命令时调用
  * 返回值: 1=收到并处理了命令, 0=无命令
- * 说明: 网关通过定点传输发送 AT 命令(如 "AT+DATA1\r\n"),
+ * 说明: 网关通过定点传输发送 AT 命令(如 "AT+DATA\r\n"),
  *       节点解析后回调, 回调中可调用 SendData/SendCert 发送响应
  ****************************************************************************/
 uint8_t LoRa_Node_Poll(LoRaCmdCallback cb);

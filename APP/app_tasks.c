@@ -257,7 +257,7 @@ static void PackNodeData(void)
 /****************************************************************************
  * 函数名: LoRa_CmdCallback
  * 功能:   LoRa 下行命令回调函数
- * 参数:   cmd - 命令名称 (如 "AT+DATA1", "AT+CER1", "AT+LedEnable")
+ * 参数:   cmd - 命令名称 (如 "AT+DATA", "AT+CER", "AT+LedEnable")
  *         value - 命令参数值 (如 "0", "1", 无参数时为NULL)
  * 返回:   无
  * 说明:   网关通过 LoRa 定点传输发送 AT 命令轮询节点,
@@ -265,18 +265,18 @@ static void PackNodeData(void)
  ****************************************************************************/
 static void LoRa_CmdCallback(const char *cmd, const char *value)
 {
-    /* 注意: 命令名带节点编号(如 AT+DATA1 / AT+CER2),
-     *       但定点传输已经保证"本节点只会收到发给自己的命令"(地址区分),
-     *       因此只用前缀匹配即可, 不用再检查数字后缀 */
+    /* 注意: 命令名不携带节点编号(定点传输已按地址区分目标),
+     *       因此只用前缀匹配命令名即可, 无需校验数字后缀
+     */
 
-    /* 网关查询数据: AT+DATA<N>  -> 发送传感器数据 */
+    /* 网关查询数据: AT+DATA -> 发送传感器数据 */
     if (strncmp(cmd, "AT+DATA", 7) == 0)
     {
         PackNodeData();
         LoRa_Node_SendData(&NodeDataCache);
         StatusChanged = 0;
     }
-    /* 网关查询证书: AT+CER<N>   -> 发送节点证书(含 OneNET 子设备身份) */
+    /* 网关查询证书: AT+CER -> 发送节点证书(含 OneNET 子设备身份) */
     else if (strncmp(cmd, "AT+CER", 6) == 0)
     {
         NodeCert_t cert;
@@ -314,8 +314,8 @@ static void LoRa_CmdCallback(const char *cmd, const char *value)
  * 参数:   无
  * 返回:   无
  * 说明:   轮询接收网关命令并响应, 采用网关轮询模式:
- *         - 网关定时发送 AT+DATA1 查询数据 → 节点回传 NodeData
- *         - 网关首次发送 AT+CER1 查询证书 → 节点回传证书
+ *         - 网关定时发送 AT+DATA 查询数据 → 节点回传 NodeData
+ *         - 网关首次发送 AT+CER 查询证书 → 节点回传证书
  *         - 网关转发平台命令 AT+LedEnable=0 → 节点执行并确认
  *         节点不主动发送, 避免多节点 LoRa 碰撞
  ****************************************************************************/

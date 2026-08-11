@@ -1,0 +1,30 @@
+12:40:02.862 -> [WiFi] 重连过程: 已断开
+12:40:03.015 -> ......[WiFi] 重连过程: 获取IP中...
+12:40:06.828 -> .
+12:40:06.828 -> [WiFi] 连接成功! IP=192.168.10.23
+12:40:06.828 -> [MQTT] 正在连接 OneNET (网关)...
+12:40:07.005 -> [MQTT] 连接成功, 已订阅子设备登录/上报/设置主题
+12:40:07.045 -> [网关] 初始化完成
+12:40:07.045 -> 
+12:40:07.091 -> [LoRa] PING-> 节点1
+12:40:07.091 -> [MQTT] 子设备下线 节点1: {"id":"5136","version":"1.0","params":{"productID":"04kjwU9TC7","deviceName":"Park001"}}
+12:40:07.133 -> [LoRa] 收到<- 节点1 确认: PONG
+12:40:07.168 -> [LoRa] PING-> 节点2
+12:40:07.677 -> [LoRa] PING-> 节点2 (重试1/3)
+12:40:08.171 -> [LoRa] PING-> 节点2 (重试2/3)
+12:40:08.654 -> [LoRa] 节点2 超时 (跳过)
+12:40:08.655 -> [LoRa] 节点发现扫描完成, 恢复正常轮询
+12:40:08.655 -> [LoRa] 发送-> 节点1: AT+DATA
+12:40:08.775 -> [LoRa] 收到<- 节点1 数据: 车位=0 距离=5 地磁=0 时长=0 LED=0 使能=1
+12:40:08.775 -> [MQTT] 子设备上线 节点1 (04kjwU9TC7/Park001): {"id":"6839","version":"1.0","params":{"productID":"04kjwU9TC7","deviceName":"Park001"}}
+12:40:08.775 -> [LoRa] 发送-> 节点1: AT+DATA
+12:40:08.807 -> [MQTT] 收到 topic=$sys/9YIs0S7V11/PGW001/thing/sub/login/reply
+12:40:08.840 -> {"id":"6839","code":200,"msg":"success"}
+12:40:08.840 -> [MQTT] 子设备1 上线成功
+12:40:08.840 -> [MQTT] 子设备上报 节点1: {"id":"6896","version":"1.0","params":[{"identity":{"productID":"04kjwU9TC7","deviceName":"Park001"},"properties":{"ParkStatus":{"value":0},"Ultrasonic":{"value":5},"GeoMagnetic":{"value":0},"OccupiedTime":{"value":0},"LED":{"value":false},"LedEnable":{"value":true}}}]}
+12:40:08.874 -> [LoRa] 收到<- 节点1 数据: 车位=0 距离=5 地磁=0 时长=0 LED=0 使能=1
+12:40:08.912 -> [LoRa] 发送-> 节点1: AT+DATA
+12:40:08.912 -> [MQTT] 收到 topic=$sys/9YIs0S7V11/PGW001/thing/pack/post/reply
+12:40:08.912 -> {"id":"6896","code":200,"msg":"success"}
+12:40:08.997 -> [LoRa] 收到<- 节点1 数据: 车位=0 距离=5 地磁=0 时长=0 LED=0 使能=1
+12:40:08.997 -> [LoRa] 发送-> 节点1: AT+DATA
