@@ -141,7 +141,7 @@ void QMC_Task(void)
         }
         else
         {
-            Usart_Printf(USART_DEBUG, "QMC: Update FAIL!\r\n");
+            Usart_Printf(USART_DEBUG, "[QMC][ERR] 地磁更新失败\r\n");
         }
 
         lastUpdateTick = Get_Tick();
@@ -265,6 +265,12 @@ static void PackNodeData(void)
  ****************************************************************************/
 static void LoRa_CmdCallback(const char *cmd, const char *value)
 {
+    /* 打印收到的网关命令(带参数), 与发送打印成对, 一问一答清晰 */
+    if (value != NULL)
+        Usart_Printf(USART_DEBUG, "[LoRa] 收到<- 网关 命令: %s=%s\r\n", cmd, value);
+    else
+        Usart_Printf(USART_DEBUG, "[LoRa] 收到<- 网关 命令: %s\r\n", cmd);
+
     /* 注意: 命令名不携带节点编号(定点传输已按地址区分目标),
      *       因此只用前缀匹配命令名即可, 无需校验数字后缀
      */
@@ -293,7 +299,7 @@ static void LoRa_CmdCallback(const char *cmd, const char *value)
         {
             LEDEnable = (uint8_t)atoi(value);
             StatusChanged = 1;
-            Usart_Printf(USART_DEBUG, "LEDEnable set to: %d\r\n", LEDEnable);
+            Usart_Printf(USART_DEBUG, "[CTRL] LED 使能 -> %d\r\n", LEDEnable);
         }
         LoRa_Node_SendAck("AT+LedEnable");
     }
@@ -304,7 +310,7 @@ static void LoRa_CmdCallback(const char *cmd, const char *value)
     }
     else
     {
-        Usart_Printf(USART_DEBUG, "LoRa: unknown cmd: %s\r\n", cmd);
+        Usart_Printf(USART_DEBUG, "[LoRa][ERR] 未知命令: %s\r\n", cmd);
     }
 }
 

@@ -25,11 +25,19 @@
 #include "app_global.h"
 #include "app_init.h"
 #include "app_tasks.h"
+#include "bsp_usart.h"
+
+/* 固件版本: 节点端 LoRa 网关方案 (v2.1) */
+#define NODE_FW_VERSION     "v2.1"
 
 int main(void)
 {
     /* 初始化所有板级外设(含LoRa模块) */
     BSP_Init();
+
+    /* 上电横幅: 区分当前烧录的是节点端/网关端固件 */
+    Usart_Printf(USART_DEBUG,
+        "\r\n[SYS] ========== 智能停车场节点 %s ==========\r\n", NODE_FW_VERSION);
 
     /* 主循环 - 时间戳非阻塞架构 */
     while (1)

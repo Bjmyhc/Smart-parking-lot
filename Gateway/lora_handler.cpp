@@ -78,11 +78,11 @@ static uint8_t  dataPollCnt[LORA_MAX_NODES + 1];
 
 /* 离线节点探测退避 (正常轮询对已注册离线节点的 PING 探测):
  * 离线 PING 每超时一次, offlineStage 档位+1(封顶), 下次探测间隔查表
- * OFFLINE_BACKOFF_MS 逐档拉大: 2s→5s→10s→20s→30s→60s;
+ * OFFLINE_BACKOFF_MS 按指数退避逐档翻倍: 2s→4s→8s→16s→32s→64s;
  * offlineProbeAt = 下次允许探测时刻, 未到则跳过;
  * 收到任何有效帧(数据/证书/PONG)即证明节点存活, 重置档位立即恢复快节奏 */
 static const uint32_t OFFLINE_BACKOFF_MS[OFFLINE_BACKOFF_STAGES] =
-    { 2000, 5000, 10000, 20000, 30000, 60000 };
+    { 2000, 4000, 8000, 16000, 32000, 64000 };
 static uint8_t  offlineStage[LORA_MAX_NODES + 1];
 static uint32_t offlineProbeAt[LORA_MAX_NODES + 1];
 

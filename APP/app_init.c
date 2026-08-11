@@ -32,5 +32,5 @@ void BSP_Init(void)
     Usart_Init();
     QMC5883P_Init(&qmc5883p, QMC5883P_MODE_CONTINUOUS, QMC5883P_ODR_100HZ, QMC5883P_RNG_8G);
     LoRa_Node_Init();
-    Usart_Printf(USART_DEBUG, "All Bsp Init OK!\n");
+    Usart_Printf(USART_DEBUG, "[SYS] 板级初始化完成\r\n");
 }

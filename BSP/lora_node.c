@@ -162,8 +162,8 @@ void LoRa_Node_Init(void)
     s_online = 0;
     s_rxLen = 0;
 
-    Usart_Printf(USART_DEBUG, "LoRa Node Init OK (addr=0x%04X, ch=%d)\r\n",
-                 LORA_NODE_ADDR, LORA_CHANNEL);
+    Usart_Printf(USART_DEBUG, "[LoRa] 初始化完成: 地址=0x%04X 信道=%d 波特率=%d\r\n",
+                 LORA_NODE_ADDR, LORA_CHANNEL, LORA_BAUD);
 }
 
 void LoRa_Node_SendCert(const NodeCert_t *cert)
@@ -177,7 +177,8 @@ void LoRa_Node_SendCert(const NodeCert_t *cert)
     memcpy(buf + 1, cert, sizeof(NodeCert_t));
     LoRa_SendFrame(LORA_GATEWAY_ADDR, LORA_CHANNEL, buf, sizeof(buf));
 
-    Usart_Printf(USART_DEBUG, "LoRa: Send cert\r\n");
+    Usart_Printf(USART_DEBUG, "[LoRa] 发送-> 网关 证书: 产品=%s 设备=%s valid=%d\r\n",
+                 cert->ProductKey, cert->DeviceName, cert->valid);
 }
 
 void LoRa_Node_SendData(const NodeData_t *data)
@@ -191,8 +192,9 @@ void LoRa_Node_SendData(const NodeData_t *data)
 
     s_online = 1;   /* 标记在线 */
 
-    Usart_Printf(USART_DEBUG, "LoRa: Send data (park=%d, us=%d, mag=%d)\r\n",
-                 data->ParkStatus, data->Ultrasonic, data->GeoMagnetic);
+    Usart_Printf(USART_DEBUG, "[LoRa] 发送-> 网关 数据: 车位=%d 距离=%dcm 地磁=%d 时长=%lus LED=%d 使能=%d\r\n",
+                 data->ParkStatus, data->Ultrasonic, data->GeoMagnetic,
+                 (unsigned long)data->OccupiedTime, data->LED, data->LedEnable);
 }
 
 void LoRa_Node_SendAck(const char *cmd)
@@ -212,7 +214,7 @@ void LoRa_Node_SendAck(const char *cmd)
     buf[1 + cmdLen + 1] = '\n';
     LoRa_SendFrame(LORA_GATEWAY_ADDR, LORA_CHANNEL, buf, 1 + cmdLen + 2);
 
-    Usart_Printf(USART_DEBUG, "LoRa: Send ACK (%s)\r\n", cmd);
+    Usart_Printf(USART_DEBUG, "[LoRa] 发送-> 网关 确认: %s\r\n", cmd);
 }
 
 uint8_t LoRa_Node_Poll(LoRaCmdCallback cb)
