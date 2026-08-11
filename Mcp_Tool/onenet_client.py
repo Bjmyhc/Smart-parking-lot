@@ -1,0 +1,137 @@
+"""
+OneNET 云平台 HTTP API 封装
+===========================
+提供停车场项目的设备属性查询/设置能力, 供 MCP 工具调用.
+
+接口(与 web前端 app.js 保持一致):
+  - GET  https://iot-api.heclouds.com/thingmodel/query-device-property
+        ?product_id=<产品ID>&device_name=<设备名>
+        header: authorization=<token>
+        返回设备最新属性快照
+  - POST https://iot-api.heclouds.com/thingmodel/set-device-property
+        body: {product_id, device_name, params}
+        设置设备属性(如 LedEnable)
+
+鉴权:
+  token 在 OneNET 控制台 -> 设备详情 -> 鉴权信息/APIKey 中生成,
+  格式形如:
+    version=2018-10-31&res=products%2F<产品ID>%2Fdevices%2F<设备名>&et=<过期时间>&method=md5&sign=<签名>
+"""
+
+import requests
+
+API_BASE = "https://iot-api.heclouds.com"
+
+# 物模型属性中文说明(仅用于展示, 与平台物模型标识符保持一致)
+PROPERTY_LABELS = {
+    "ParkStatus":   "车位状态",
+    "GeoMagnetic":  "地磁检测",
+    "Ultrasonic":   "超声波距离",
+    "OccupiedTime": "占用时长",
+    "LED":          "LED当前状态",
+    "LedEnable":    "LED使能",
+}
+
+# 车位状态数值 -> 中文
+PARK_STATUS_TEXT = {
+    0: "空闲",
+    1: "有车",
+    2: "疑似僵尸车",
+}
+
+
+def extract_value(v):
+    """取属性值: 兼容 {value: xxx} 包装对象与裸值两种格式"""
+    if isinstance(v, dict) and "value" in v:
+        return v["value"]
+    return v
+
+
+class OneNetClient:
+    """单个 OneNET 设备的查询/控制客户端"""
+
+    def __init__(self, product_id, device_name, token, timeout=10):
+        self.product_id = product_id
+        self.device_name = device_name
+        self.token = token
+        self.timeout = timeout
+        self.headers = {"authorization": token}
+
+    def query_property(self):
+        """查询设备最新属性快照, 返回 {标识符: 值} 字典"""
+        url = f"{API_BASE}/thingmodel/query-device-property"
+        params = {"product_id": self.product_id, "device_name": self.device_name}
+        resp = requests.get(url, params=params, headers=self.headers,
+                            timeout=self.timeout)
+        resp.raise_for_status()
+        return self._parse_props(resp.json())
+
+    def set_property(self, params):
+        """设置设备属性, 返回平台响应 JSON (code=200/0 表示成功)"""
+        url = f"{API_BASE}/thingmodel/set-device-property"
+        payload = {
+            "product_id": self.product_id,
+            "device_name": self.device_name,
+            "params": params,
+        }
+        resp = requests.post(url, json=payload, headers=self.headers,
+                             timeout=self.timeout)
+        resp.raise_for_status()
+        return resp.json()
+
+    @staticmethod
+    def _parse_props(data):
+        """兼容 web前端 的多种响应结构, 统一成 {标识符: 值} 字典"""
+        container = data.get("data", data) if isinstance(data, dict) else data
+
+        items = None
+        if isinstance(container, list):
+            items = container
+        elif isinstance(container, dict):
+            for key in ("items", "properties"):
+                if isinstance(container.get(key), list):
+                    items = container[key]
+                    break
+            if items is None and isinstance(data, dict):
+                for key in ("items", "properties"):
+                    if isinstance(data.get(key), list):
+                        items = data[key]
+                        break
+
+        props = {}
+        if items is not None:
+            for item in items:
+                if isinstance(item, dict) and "identifier" in item:
+                    props[item["identifier"]] = extract_value(item.get("value"))
+        elif isinstance(container, dict):
+            for key, val in container.items():
+                if key in ("items", "properties"):
+                    continue
+                props[key] = extract_value(val)
+        return props
+
+    @staticmethod
+    def format_props(props):
+        """把属性字典格式化成人类可读文本(给 LLM/语音助手看)"""
+        lines = []
+        for identifier, value in props.items():
+            label = PROPERTY_LABELS.get(identifier, identifier)
+            if identifier == "ParkStatus":
+                try:
+                    value = PARK_STATUS_TEXT.get(int(value), value)
+                except (TypeError, ValueError):
+                    pass
+            elif identifier == "OccupiedTime":
+                try:
+                    value = f"{int(value)}秒"
+                except (TypeError, ValueError):
+                    pass
+            elif identifier in ("LED", "LedEnable"):
+                value = "开" if value in (True, 1, "true", "1") else "关"
+            elif identifier == "Ultrasonic":
+                try:
+                    value = f"{int(value)}cm"
+                except (TypeError, ValueError):
+                    pass
+            lines.append(f"{label}={value}")
+        return ", ".join(lines) if lines else "无属性数据"

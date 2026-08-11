@@ -1,0 +1,18 @@
+{
+  "nodes": [
+    {
+      "name": "Park001",
+      "product_id": "04kjwU9TC7",
+      "device_name": "Park001",
+      "token": "version=2018-10-31&res=products%2F04kjwU9TC7%2Fdevices%2FPark001&et=1815919855&method=md5&sign=<请替换成Park001设备的token>"
+    },
+    {
+      "name": "Park002",
+      "product_id": "04kjwU9TC7",
+      "device_name": "Park002",
+      "token": "version=2018-10-31&res=products%2F04kjwU9TC7%2Fdevices%2FPark002&et=1815919855&method=md5&sign=<请替换成Park002设备的token>"
+    }
+  ],
+  "query_timeout": 10,
+  "command_timeout": 20
+}

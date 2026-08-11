@@ -49,3 +49,17 @@ Thumbs.db
 # ============================================
 Main/device_config.h
 Node/Main/device_config.h
+Gateway/platform_cfg.h
+
+# ============================================
+# MCP 工具配置(含 OneNET 设备 token, 不入库)
+# ============================================
+Mcp_Tool/config.json
+
+# ============================================
+# Keil 编译输出 HTML 报告 & Python 缓存
+# ============================================
+Node/Output/output.htm
+Node/Output/output.build_log.htm
+__pycache__/
+*.pyc
