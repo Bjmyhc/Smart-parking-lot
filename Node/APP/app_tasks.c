@@ -11,6 +11,7 @@
 
 #include <string.h>
 #include <stdlib.h>
+#include <stdio.h>
 #include "stm32f10x.h"
 #include "bsp_delay.h"
 #include "bsp_led.h"
@@ -19,6 +20,7 @@
 #include "bsp_qmc5883p.h"
 #include "lora_node.h"
 #include "app_global.h"
+#include "stm32f10x_flash.h"
 
 /* ==================== 宏定义 ==================== */
 
@@ -38,6 +40,12 @@
 
 /* -------- 车位状态判定阈值 -------- */
 #define DIST_THRESHOLD_CM       10      /* 超声波判断有车的距离阈值(cm) */
+
+/* -------- OTA 升级 -------- */
+#define APP_VERSION             0x0201  /* 当前固件版本: V2.1 */
+#define OTA_FLAG_ADDR           0x0800FC00  /* 升级标志页地址 */
+#define OTA_FLAG_GO             0xA5A5A5A5  /* 需要升级 */
+#define OTA_FLAG_DONE           0x00000000  /* 升级完成 */
 
 /* ==================== 全局变量定义 ==================== */
 
@@ -307,6 +315,40 @@ static void LoRa_CmdCallback(const char *cmd, const char *value)
     else if (strcmp(cmd, "AT+PING") == 0)
     {
         LoRa_Node_SendAck("PONG");
+    }
+    /* 网关触发 OTA 升级: AT+OTA=start,V<x> 或 AT+OTA
+     * 触发后: 写升级标志 → 复位 → BootLoader 接收固件 */
+    else if (strcmp(cmd, "AT+OTA") == 0)
+    {
+        uint16_t targetVer = 0;
+        char *pVer = NULL;
+
+        /* 尝试解析版本号: AT+OTA=start,V1.2 */
+        if (value != NULL && (pVer = strstr(value, "V")) != NULL)
+        {
+            int maj = 0, min = 0;
+            if (sscanf(pVer + 1, "%d.%d", &maj, &min) == 2)
+                targetVer = (uint16_t)((maj << 8) | min);
+        }
+
+        /* 版本校验: 目标版本 > 当前版本 或 未指定版本时强制升级 */
+        if (targetVer == 0 || targetVer > APP_VERSION)
+        {
+            FLASH_Unlock();
+            FLASH_ErasePage(OTA_FLAG_ADDR);
+            FLASH_ProgramHalfWord(OTA_FLAG_ADDR, (uint16_t)(OTA_FLAG_GO & 0xFFFF));
+            FLASH_ProgramHalfWord(OTA_FLAG_ADDR + 2, (uint16_t)((OTA_FLAG_GO >> 16) & 0xFFFF));
+            FLASH_Lock();
+
+            Usart_Printf(USART_DEBUG, "[OTA] 升级标志已写入, 即将复位...\r\n");
+            DelayXms(200);
+            NVIC_SystemReset();
+        }
+        else
+        {
+            LoRa_Node_SendAck("AT+OTA:version_ok");
+            Usart_Printf(USART_DEBUG, "[OTA] 版本已最新(%04X), 跳过升级\r\n", APP_VERSION);
+        }
     }
     else
     {

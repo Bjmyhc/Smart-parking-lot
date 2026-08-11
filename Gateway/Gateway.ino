@@ -36,6 +36,7 @@
 #include "node_data.h"
 #include "lora_handler.h"
 #include "onenet_handler.h"
+#include "ota_handler.h"            /* OTA 升级 */
 #include "config_portal.h"
 #include "gateway_oled.h"
 
@@ -216,6 +217,7 @@ void setup(void)
     DBG_PRINTLN("=============================");
 
     oled_init();                       /* OLED 先初始化 (启动阶段画面) */
+    ota_init();                        /* OTA 处理器初始化 */
     lora_init();
     resetAllNodes();
     /* 从 Flash 加载已持久化的子设备证书 (若存在) */
@@ -269,6 +271,44 @@ void loop(void)
 
     /* 被动事件: 数据到达立即处理 */
     passiveEvent();
+
+    /* OTA 状态机: 固件下载 + LoRa 分包发送 */
+    ota_tick();
+
+    /* 串口 OTA 触发命令: OTA <nodeId> <url> <version>
+     * 例如: OTA 1 http://example.com/firmware.bin V2.2
+     * 测试时通过串口发送 */
+    static String otaCmdBuf;
+    while (DEBUG_SERIAL.available())
+    {
+        char ch = (char)DEBUG_SERIAL.read();
+        if (ch == '\n' || ch == '\r')
+        {
+            if (otaCmdBuf.length() > 0)
+            {
+                if (otaCmdBuf.startsWith("OTA "))
+                {
+                    int firstSpace = otaCmdBuf.indexOf(' ', 4);
+                    int secondSpace = otaCmdBuf.indexOf(' ', firstSpace + 1);
+                    if (firstSpace > 0 && secondSpace > 0)
+                    {
+                        uint8_t nodeId = (uint8_t)otaCmdBuf.substring(4, firstSpace).toInt();
+                        String url = otaCmdBuf.substring(firstSpace + 1, secondSpace);
+                        String ver = otaCmdBuf.substring(secondSpace + 1);
+                        ver.trim();
+                        DBG_PRINTF("[SYS] 触发OTA: 节点%d, URL=%s, 版本=%s\n",
+                                   nodeId, url.c_str(), ver.c_str());
+                        ota_start(nodeId, url.c_str(), ver.c_str());
+                    }
+                    else
+                        DBG_PRINTLN("[SYS] OTA格式: OTA <nodeId> <url> <version>");
+                }
+                otaCmdBuf = "";
+            }
+        }
+        else
+            otaCmdBuf += ch;
+    }
 
     /* WiFi 管理 */
     wifi_handleReconnect();

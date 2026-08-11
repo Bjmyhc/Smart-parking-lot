@@ -16,6 +16,7 @@
 #include "hw_cfg.h"       /* LoRa 串口引脚/波特率/调试串口 */
 #include "app_cfg.h"      /* 轮询范围/超时/发现间隔/DBG */
 #include "node_data.h"
+#include "ota_handler.h"  /* OTA 响应字节转发 */
 
 #if defined(ESP32)
   #include <HardwareSerial.h>
@@ -228,6 +229,12 @@ static bool feedRx(uint8_t c)
     switch (rxState)
     {
     case RX_WAIT_HEADER:
+        /* OTA 响应字节 (ACK/NAK/CAN): 直接转发给 OTA 处理器, 不进入帧状态机 */
+        if (c == OTA_ACK || c == OTA_NAK || c == OTA_CAN)
+        {
+            ota_feedByte(c);
+            break;
+        }
         if (c == LORA_FRAME_CERT || c == LORA_FRAME_DATA || c == LORA_FRAME_ACK
          || c == LORA_FRAME_OTA_OK || c == LORA_FRAME_OTA_RETRY)
         {

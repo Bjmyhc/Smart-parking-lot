@@ -67,6 +67,11 @@ static void WDG_Feed(void)
 
 int main(void)
 {
+    /* 设置向量表偏移: OTA 后 APP 从 0x08002000 启动,
+     * BootLoader 跳转过来后必须先设 VTOR, 否则中断向量指向 Boot 区
+     * 注意: 普通烧录(A区直跑)时 VTOR 默认 0x08000000, 设了也兼容 */
+    SCB->VTOR = FLASH_BASE | 0x2000;
+
     /* 初始化所有板级外设(含LoRa模块) */
     BSP_Init();
 

@@ -244,14 +244,27 @@ OTA 流程(目标节点addr, 固件buf, len):
 
 ## 9. 实施步骤（按依赖顺序）
 
-1. **打包工具**：Python 脚本给 app.bin 拼 12B 文件头 + 算 CRC32（复用 Tool 目录）
-2. **BootLoader 工程**（新建 Keil 工程）：跳转 + Flash 擦写 + LoRa 分包接收 + CRC16/32 + 标志页
-3. **APP 工程改造**：IROM1 偏移 + VTOR + 升级触发指令 + bin 输出（编译产物不提交 git）
-4. **单板验证**：烧 Boot + 旧 APP → 手动触发升级 → 跳转成功
-5. **网关端**：HTTP 下载 + 分包下发 + 重试/超时 + OTA 期间暂停轮询
-6. **平台接入**：OneNET 固件管理或文件管理上传固件，网关触发下载
-7. **端到端测试**：平台下发 → LoRa 升级 → 跳转 → 新版本上报
-8. **异常测试**：断点续传、坏固件、中途断电、超时中止
+1. **打包工具**：Python 脚本给 app.bin 拼 12B 文件头 + 算 CRC32（`Tool/fw_pack.py`）?
+2. **BootLoader 工程**：跳转 + Flash 擦写 + LoRa 分包接收 + CRC16/32 + 标志页 ?
+   - 源文件：`Node/BootLoader/main.c` + `boot.h` + `boot_cfg.h` ?
+   - Keil 工程：`Node/BootLoader/Project/RVMDK（uv5）/Boot.uvprojx` ?
+   - IROM: `0x08000000,0x2000`, IRAM: `0x20000000,0x5000` ?
+3. **APP 工程改造**：IROM1 偏移 + VTOR + 升级触发指令 + bin 输出 ?
+   - `Node/Main/main.c`: `SCB->VTOR = FLASH_BASE | 0x2000` ?
+   - `Node/APP/app_tasks.c`: `AT+OTA` 命令处理，写标志 → 复位 ?
+   - Keil 工程：IROM `0x08002000,0xDC00`，AfterBuild 生成 app.bin ?
+4. **单板验证**：烧 Boot + 旧 APP → 手动触发升级 → 跳转成功 ?（待测试）
+5. **网关端**：HTTP 下载 + 分包下发 + 重试/超时 + 串口触发 ?
+   - `Gateway/ota_handler.h` + `ota_handler.cpp`：状态机驱动 ?
+   - `Gateway/lora_protocol.h`：OTA 协议常量 ?
+   - `Gateway/lora_handler.cpp`：OTA 响应字节转发 ?
+   - `Gateway/Gateway.ino`：`ota_init()` + `ota_tick()` + 串口触发命令 ?
+   - 触发方式：串口 `OTA <nodeId> <url> <version>` ?
+6. **平台接入**：OneNET 固件管理或文件管理上传固件，网关触发下载 ?（待开发）
+7. **端到端测试**：平台下发 → LoRa 升级 → 跳转 → 新版本上报 ?（待测试）
+8. **异常测试**：断点续传、坏固件、中途断电、超时中止 ?（待测试）
+
+> ? 已完成 | ? 待测试/待开发
 
 ---
 

@@ -70,12 +70,41 @@ typedef struct LORA_PACKED {
  *   AT+DATA\r\n           查询节点数据
  *   AT+PING\r\n           探测节点是否在线
  *   AT+LedEnable=<v>\r\n  设置节点LedEnable, v=0/1
+ *   AT+OTA=start,V<m>.<n>\r\n  触发节点OTA升级
  *
  * 注意: 命令名不携带节点号, 节点身份由定点传输帧头[AddrH][AddrL]区分
  */
 
 /* 命令最大长度(含\r\n) */
-#define LORA_CMD_MAX_LEN       48
+#define LORA_CMD_MAX_LEN       64
+
+/* ============ OTA 升级协议 (Xmodem 风格) ============ */
+
+/* Xmodem 控制字符 (与节点端 BootLoader 一致) */
+#define OTA_SOH                 0x02    /* 数据包开始 */
+#define OTA_ACK                 0x03    /* 确认 */
+#define OTA_NAK                 0x15    /* 否定 */
+#define OTA_EOT                 0x04    /* 传输结束 */
+#define OTA_CAN                 0x18    /* 取消 */
+
+/* 数据包大小 */
+#define OTA_PACKET_DATA_SIZE    128
+
+/* 超时(毫秒) */
+#define OTA_PACKET_TIMEOUT_MS   2000    /* 每包等待节点回复 */
+#define OTA_TOTAL_TIMEOUT_MS    180000  /* 总超时(3分钟) */
+
+/* 每包最大重试次数 */
+#define OTA_MAX_RETRY           3
+
+/* 节点复位等待时间(ms): 发送 AT+OTA 后, 节点复位进 BootLoader 需要时间 */
+#define OTA_NODE_RESET_WAIT_MS  5000
+
+/* 固件文件头(12字节, 与 Tool/fw_pack.py 一致, 与 BootLoader 端 boot_cfg.h 一致) */
+#define OTA_FW_MAGIC            0xA55A
+
+/* OTA 固件临时文件路径 (LittleFS) */
+#define OTA_FW_FILE             "/ota_firmware.bin"
 
 #ifdef __cplusplus
 }
