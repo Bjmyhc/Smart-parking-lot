@@ -28,7 +28,7 @@ STM32节点(超声波+地磁+LoRa) <-LoRa定点-> ESP8266网关 <-MQTT-> OneNET�
 | 目录 | 说明 |
 |------|------|
 | `Gateway/` | ESP8266 网关程序（Arduino，LoRa 轮询 + OneNET MQTT） |
-| `APP/` `BSP/` `Main/` | STM32 节点程序（Keil MDK，传感器 + LoRa 通信） |
+| `Node/` | STM32 节点工程（APP/BSP/Libraries/Main/Project，Keil MDK） |
 | `web前端/` | Web 监控页面（实时数据 + 远程控制） |
 | `Doc/` | 项目说明 / 系统设计 / 开发文档 |
 | `Tool/` | GBK 中文还原脚本等开发工具 |
