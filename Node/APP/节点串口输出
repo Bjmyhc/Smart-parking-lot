@@ -1,20 +1,476 @@
-[2026-08-11 12:36:28.660]# RECV ASCII>
-LoRa: Send ACK (PONG)
 
-[2026-08-11 12:36:31.786]# RECV ASCII>
-LoRa: Send data (park=0, us=5, mag=0)
+[2026-08-12 17:40:26.700]# RECV ASCII>
 
-[2026-08-11 12:36:31.894]# RECV ASCII>
-LoRa: Send data (park=0, us=5, mag=0)
+[BOOT] BootLoader v1.0 启动
+[BOOT] SysTick OK
+[BOOT] USART2 OK
+[BOOT] IWDG OK
+[BOOT] Key OK
+[BOOT] 初始化完成
 
-[2026-08-11 12:36:32.003]# RECV ASCII>
-LoRa: Send data (park=0, us=5, mag=0)
+[2026-08-12 17:40:28.697]# RECV ASCII>
+[BOOT] 等待超时, 跳转 APP...
 
-[2026-08-11 12:36:32.125]# RECV ASCII>
-LoRa: Send data (park=0, us=5, mag=0)
+[2026-08-12 17:40:28.837]# RECV ASCII>
+QMC5883P Init OK!
+[LoRa] 初始化完成: 地址=0x0001 信道=0 波特率=9600
+[SYS] 板级初始化完成
 
-[2026-08-11 12:36:32.233]# RECV ASCII>
-LoRa: Send data (park=0, us=5, mag=0)
+[SYS] ========== 智能停车场节点 v2.1 ==========
 
-[2026-08-11 12:36:32.341]# RECV ASCII>
-LoRa: Send data (park=0, us=5, mag=0)
+[2026-08-12 17:40:38.754]# RECV ASCII>
+[WDG] 喂狗正常, 运行 10 秒
+
+[2026-08-12 17:40:48.763]# RECV ASCII>
+[WDG] 喂狗正常, 运行 20 秒
+
+[2026-08-12 17:40:57.755]# RECV ASCII>
+AT+PING[0D][0A][LoRa] 收到原始命令: AT+PING
+[LoRa] 收到<- 网关 命令: AT+PING
+[LoRa] 发送-> 网关 确认: PONG
+
+[2026-08-12 17:40:58.761]# RECV ASCII>
+[WDG] 喂狗正常, 运行 30 秒
+
+[2026-08-12 17:41:01.380]# RECV ASCII>
+AT+DATA[0D][0A][LoRa] 收到原始命令: AT+DATA
+[LoRa] 收到<- 网关 命令: AT+DATA
+[LoRa] 发送-> 网关 数据: 车位=0 距离=6cm 地磁=0 时长=0s LED=0 使能=1
+
+[2026-08-12 17:41:03.482]# RECV ASCII>
+AT+DATA[0D][0A][LoRa] 收到原始命令: AT+DATA
+[LoRa] 收到<- 网关 命令: AT+DATA
+[LoRa] 发送-> 网关 数据: 车位=0 距离=6cm 地磁=0 时长=0s LED=0 使能=1
+
+[2026-08-12 17:41:05.611]# RECV ASCII>
+AT+DATA[0D][0A][LoRa] 收到原始命令: AT+DATA
+[LoRa] 收到<- 网关 命令: AT+DATA
+[LoRa] 发送-> 网关 数据: 车位=0 距离=6cm 地磁=0 时长=0s LED=0 使能=1
+
+[2026-08-12 17:41:07.732]# RECV ASCII>
+AT+DATA[0D][0A][LoRa] 收到原始命令: AT+DATA
+[LoRa] 收到<- 网关 命令: AT+DATA
+[LoRa] 发送-> 网关 数据: 车位=0 距离=6cm 地磁=0 时长=0s LED=0 使能=1
+
+[2026-08-12 17:41:08.757]# RECV ASCII>
+[WDG] 喂狗正常, 运行 40 秒
+
+[2026-08-12 17:41:09.839]# RECV ASCII>
+AT+DATA[0D][0A][LoRa] 收到原始命令: AT+DATA
+[LoRa] 收到<- 网关 命令: AT+DATA
+[LoRa] 发送-> 网关 数据: 车位=0 距离=6cm 地磁=0 时长=0s LED=0 使能=1
+
+[2026-08-12 17:41:11.972]# RECV ASCII>
+AT+DATA[0D][0A][LoRa] 收到原始命令: AT+DATA
+[LoRa] 收到<- 网关 命令: AT+DATA
+[LoRa] 发送-> 网关 数据: 车位=0 距离=6cm 地磁=0 时长=0s LED=0 使能=1
+
+[2026-08-12 17:41:14.090]# RECV ASCII>
+AT+DATA[0D][0A][LoRa] 收到原始命令: AT+DATA
+[LoRa] 收到<- 网关 命令: AT+DATA
+[LoRa] 发送-> 网关 数据: 车位=0 距离=6cm 地磁=0 时长=0s LED=0 使能=1
+
+[2026-08-12 17:41:16.207]# RECV ASCII>
+AT+DATA[0D][0A][LoRa] 收到原始命令: AT+DATA
+[LoRa] 收到<- 网关 命令: AT+DATA
+[LoRa] 发送-> 网关 数据: 车位=0 距离=6cm 地磁=0 时长=0s LED=0 使能=1
+
+[2026-08-12 17:41:18.321]# RECV ASCII>
+AT+DATA[0D][0A][LoRa] 收到原始命令: AT+DATA
+[LoRa] 收到<- 网关 命令: AT+DATA
+[LoRa] 发送-> 网关 数据: 车位=0 距离=6cm 地磁=0 时长=0s LED=0 使能=1
+
+[2026-08-12 17:41:18.754]# RECV ASCII>
+[WDG] 喂狗正常, 运行 50 秒
+
+[2026-08-12 17:41:20.452]# RECV ASCII>
+AT+DATA[0D][0A][LoRa] 收到原始命令: AT+DATA
+[LoRa] 收到<- 网关 命令: AT+DATA
+[LoRa] 发送-> 网关 数据: 车位=0 距离=6cm 地磁=0 时长=0s LED=0 使能=1
+
+[2026-08-12 17:41:22.558]# RECV ASCII>
+AT+DATA[0D][0A][LoRa] 收到原始命令: AT+DATA
+[LoRa] 收到<- 网关 命令: AT+DATA
+[LoRa] 发送-> 网关 数据: 车位=0 距离=6cm 地磁=0 时长=0s LED=0 使能=1
+
+[2026-08-12 17:41:24.694]# RECV ASCII>
+AT+DATA[0D][0A][LoRa] 收到原始命令: AT+DATA
+[LoRa] 收到<- 网关 命令: AT+DATA
+[LoRa] 发送-> 网关 数据: 车位=0 距离=6cm 地磁=0 时长=0s LED=0 使能=1
+
+[2026-08-12 17:41:26.812]# RECV ASCII>
+AT+DATA[0D][0A][LoRa] 收到原始命令: AT+DATA
+[LoRa] 收到<- 网关 命令: AT+DATA
+[LoRa] 发送-> 网关 数据: 车位=0 距离=6cm 地磁=0 时长=0s LED=0 使能=1
+
+[2026-08-12 17:41:28.764]# RECV ASCII>
+[WDG] 喂狗正常, 运行 60 秒
+
+[2026-08-12 17:41:28.934]# RECV ASCII>
+AT+DATA[0D][0A][LoRa] 收到原始命令: AT+DATA
+[LoRa] 收到<- 网关 命令: AT+DATA
+[LoRa] 发送-> 网关 数据: 车位=0 距离=6cm 地磁=0 时长=0s LED=0 使能=1
+
+[2026-08-12 17:41:31.040]# RECV ASCII>
+AT+DATA[0D][0A][LoRa] 收到原始命令: AT+DATA
+[LoRa] 收到<- 网关 命令: AT+DATA
+[LoRa] 发送-> 网关 数据: 车位=0 距离=6cm 地磁=0 时长=0s LED=0 使能=1
+
+[2026-08-12 17:41:33.166]# RECV ASCII>
+AT+DATA[0D][0A][LoRa] 收到原始命令: AT+DATA
+[LoRa] 收到<- 网关 命令: AT+DATA
+[LoRa] 发送-> 网关 数据: 车位=0 距离=6cm 地磁=0 时长=0s LED=0 使能=1
+
+[2026-08-12 17:41:35.290]# RECV ASCII>
+AT+DATA[0D][0A][LoRa] 收到原始命令: AT+DATA
+[LoRa] 收到<- 网关 命令: AT+DATA
+[LoRa] 发送-> 网关 数据: 车位=0 距离=6cm 地磁=0 时长=0s LED=0 使能=1
+
+[2026-08-12 17:41:37.404]# RECV ASCII>
+AT+DATA[0D][0A][LoRa] 收到原始命令: AT+DATA
+[LoRa] 收到<- 网关 命令: AT+DATA
+[LoRa] 发送-> 网关 数据: 车位=0 距离=6cm 地磁=0 时长=0s LED=0 使能=1
+
+[2026-08-12 17:41:38.764]# RECV ASCII>
+[WDG] 喂狗正常, 运行 70 秒
+
+[2026-08-12 17:41:39.526]# RECV ASCII>
+AT+DATA[0D][0A][LoRa] 收到原始命令: AT+DATA
+[LoRa] 收到<- 网关 命令: AT+DATA
+[LoRa] 发送-> 网关 数据: 车位=0 距离=6cm 地磁=0 时长=0s LED=0 使能=1
+
+[2026-08-12 17:41:41.657]# RECV ASCII>
+AT+DATA[0D][0A][LoRa] 收到原始命令: AT+DATA
+[LoRa] 收到<- 网关 命令: AT+DATA
+[LoRa] 发送-> 网关 数据: 车位=0 距离=6cm 地磁=0 时长=0s LED=0 使能=1
+
+[2026-08-12 17:41:43.776]# RECV ASCII>
+AT+DATA[0D][0A][LoRa] 收到原始命令: AT+DATA
+[LoRa] 收到<- 网关 命令: AT+DATA
+[LoRa] 发送-> 网关 数据: 车位=0 距离=6cm 地磁=0 时长=0s LED=0 使能=1
+
+[2026-08-12 17:41:45.894]# RECV ASCII>
+AT+DATA[0D][0A][LoRa] 收到原始命令: AT+DATA
+[LoRa] 收到<- 网关 命令: AT+DATA
+[LoRa] 发送-> 网关 数据: 车位=0 距离=6cm 地磁=0 时长=0s LED=0 使能=1
+
+[2026-08-12 17:41:48.029]# RECV ASCII>
+AT+DATA[0D][0A][LoRa] 收到原始命令: AT+DATA
+[LoRa] 收到<- 网关 命令: AT+DATA
+[LoRa] 发送-> 网关 数据: 车位=0 距离=6cm 地磁=0 时长=0s LED=0 使能=1
+
+[2026-08-12 17:41:48.770]# RECV ASCII>
+[WDG] 喂狗正常, 运行 80 秒
+
+[2026-08-12 17:41:50.146]# RECV ASCII>
+AT+DATA[0D][0A][LoRa] 收到原始命令: AT+DATA
+[LoRa] 收到<- 网关 命令: AT+DATA
+[LoRa] 发送-> 网关 数据: 车位=0 距离=6cm 地磁=0 时长=0s LED=0 使能=1
+
+[2026-08-12 17:41:52.270]# RECV ASCII>
+AT+DATA[0D][0A][LoRa] 收到原始命令: AT+DATA
+[LoRa] 收到<- 网关 命令: AT+DATA
+[LoRa] 发送-> 网关 数据: 车位=0 距离=6cm 地磁=0 时长=0s LED=0 使能=1
+
+[2026-08-12 17:41:54.367]# RECV ASCII>
+AT+DATA[0D][0A][LoRa] 收到原始命令: AT+DATA
+[LoRa] 收到<- 网关 命令: AT+DATA
+[LoRa] 发送-> 网关 数据: 车位=0 距离=6cm 地磁=0 时长=0s LED=0 使能=1
+
+[2026-08-12 17:41:56.493]# RECV ASCII>
+AT+DATA[0D][0A][LoRa] 收到原始命令: AT+DATA
+[LoRa] 收到<- 网关 命令: AT+DATA
+[LoRa] 发送-> 网关 数据: 车位=0 距离=6cm 地磁=0 时长=0s LED=0 使能=1
+
+[2026-08-12 17:41:58.617]# RECV ASCII>
+AT+DATA[0D][0A][LoRa] 收到原始命令: AT+DATA
+[LoRa] 收到<- 网关 命令: AT+DATA
+[LoRa] 发送-> 网关 数据: 车位=0 距离=6cm 地磁=0 时长=0s LED=0 使能=1
+
+[2026-08-12 17:41:58.771]# RECV ASCII>
+[WDG] 喂狗正常, 运行 90 秒
+
+[2026-08-12 17:42:00.729]# RECV ASCII>
+AT+DATA[0D][0A][LoRa] 收到原始命令: AT+DATA
+[LoRa] 收到<- 网关 命令: AT+DATA
+[LoRa] 发送-> 网关 数据: 车位=0 距离=6cm 地磁=0 时长=0s LED=0 使能=1
+
+[2026-08-12 17:42:02.853]# RECV ASCII>
+AT+DATA[0D][0A][LoRa] 收到原始命令: AT+DATA
+[LoRa] 收到<- 网关 命令: AT+DATA
+[LoRa] 发送-> 网关 数据: 车位=0 距离=6cm 地磁=0 时长=0s LED=0 使能=1
+
+[2026-08-12 17:42:04.989]# RECV ASCII>
+AT+DATA[0D][0A][LoRa] 收到原始命令: AT+DATA
+[LoRa] 收到<- 网关 命令: AT+DATA
+[LoRa] 发送-> 网关 数据: 车位=0 距离=6cm 地磁=0 时长=0s LED=0 使能=1
+
+[2026-08-12 17:42:07.089]# RECV ASCII>
+AT+DATA[0D][0A][LoRa] 收到原始命令: AT+DATA
+[LoRa] 收到<- 网关 命令: AT+DATA
+[LoRa] 发送-> 网关 数据: 车位=0 距离=6cm 地磁=0 时长=0s LED=0 使能=1
+
+[2026-08-12 17:42:08.767]# RECV ASCII>
+[WDG] 喂狗正常, 运行 100 秒
+
+[2026-08-12 17:42:09.218]# RECV ASCII>
+AT+DATA[0D][0A][LoRa] 收到原始命令: AT+DATA
+[LoRa] 收到<- 网关 命令: AT+DATA
+[LoRa] 发送-> 网关 数据: 车位=0 距离=6cm 地磁=0 时长=0s LED=0 使能=1
+
+[2026-08-12 17:42:11.339]# RECV ASCII>
+AT+DATA[0D][0A][LoRa] 收到原始命令: AT+DATA
+[LoRa] 收到<- 网关 命令: AT+DATA
+[LoRa] 发送-> 网关 数据: 车位=0 距离=6cm 地磁=0 时长=0s LED=0 使能=1
+
+[2026-08-12 17:42:13.454]# RECV ASCII>
+AT+DATA[0D][0A][LoRa] 收到原始命令: AT+DATA
+[LoRa] 收到<- 网关 命令: AT+DATA
+[LoRa] 发送-> 网关 数据: 车位=0 距离=6cm 地磁=0 时长=0s LED=0 使能=1
+
+[2026-08-12 17:42:15.578]# RECV ASCII>
+AT+DATA[0D][0A][LoRa] 收到原始命令: AT+DATA
+[LoRa] 收到<- 网关 命令: AT+DATA
+[LoRa] 发送-> 网关 数据: 车位=0 距离=6cm 地磁=0 时长=0s LED=0 使能=1
+
+[2026-08-12 17:42:17.707]# RECV ASCII>
+AT+DATA[0D][0A][LoRa] 收到原始命令: AT+DATA
+[LoRa] 收到<- 网关 命令: AT+DATA
+[LoRa] 发送-> 网关 数据: 车位=0 距离=6cm 地磁=0 时长=0s LED=0 使能=1
+
+[2026-08-12 17:42:18.758]# RECV ASCII>
+[WDG] 喂狗正常, 运行 110 秒
+
+[2026-08-12 17:42:19.820]# RECV ASCII>
+AT+DATA[0D][0A][LoRa] 收到原始命令: AT+DATA
+[LoRa] 收到<- 网关 命令: AT+DATA
+[LoRa] 发送-> 网关 数据: 车位=0 距离=6cm 地磁=0 时长=0s LED=0 使能=1
+
+[2026-08-12 17:42:21.939]# RECV ASCII>
+AT+DATA[0D][0A][LoRa] 收到原始命令: AT+DATA
+[LoRa] 收到<- 网关 命令: AT+DATA
+[LoRa] 发送-> 网关 数据: 车位=0 距离=6cm 地磁=0 时长=0s LED=0 使能=1
+
+[2026-08-12 17:42:24.062]# RECV ASCII>
+AT+DATA[0D][0A][LoRa] 收到原始命令: AT+DATA
+[LoRa] 收到<- 网关 命令: AT+DATA
+[LoRa] 发送-> 网关 数据: 车位=0 距离=18cm 地磁=0 时长=0s LED=0 使能=1
+
+[2026-08-12 17:42:26.181]# RECV ASCII>
+AT+DATA[0D][0A][LoRa] 收到原始命令: AT+DATA
+[LoRa] 收到<- 网关 命令: AT+DATA
+[LoRa] 发送-> 网关 数据: 车位=0 距离=6cm 地磁=0 时长=0s LED=0 使能=1
+
+[2026-08-12 17:42:28.300]# RECV ASCII>
+AT+DATA[0D][0A][LoRa] 收到原始命令: AT+DATA
+[LoRa] 收到<- 网关 命令: AT+DATA
+[LoRa] 发送-> 网关 数据: 车位=0 距离=6cm 地磁=0 时长=0s LED=0 使能=1
+
+[2026-08-12 17:42:28.766]# RECV ASCII>
+[WDG] 喂狗正常, 运行 120 秒
+
+[2026-08-12 17:42:30.423]# RECV ASCII>
+AT+DATA[0D][0A][LoRa] 收到原始命令: AT+DATA
+[LoRa] 收到<- 网关 命令: AT+DATA
+[LoRa] 发送-> 网关 数据: 车位=0 距离=6cm 地磁=0 时长=0s LED=0 使能=1
+
+[2026-08-12 17:42:32.545]# RECV ASCII>
+AT+DATA[0D][0A][LoRa] 收到原始命令: AT+DATA
+[LoRa] 收到<- 网关 命令: AT+DATA
+[LoRa] 发送-> 网关 数据: 车位=0 距离=6cm 地磁=0 时长=0s LED=0 使能=1
+
+[2026-08-12 17:42:34.656]# RECV ASCII>
+AT+DATA[0D][0A][LoRa] 收到原始命令: AT+DATA
+[LoRa] 收到<- 网关 命令: AT+DATA
+[LoRa] 发送-> 网关 数据: 车位=0 距离=6cm 地磁=0 时长=0s LED=0 使能=1
+
+[2026-08-12 17:42:36.781]# RECV ASCII>
+AT+DATA[0D][0A][LoRa] 收到原始命令: AT+DATA
+[LoRa] 收到<- 网关 命令: AT+DATA
+[LoRa] 发送-> 网关 数据: 车位=0 距离=6cm 地磁=0 时长=0s LED=0 使能=1
+
+[2026-08-12 17:42:38.765]# RECV ASCII>
+[WDG] 喂狗正常, 运行 130 秒
+
+[2026-08-12 17:42:38.904]# RECV ASCII>
+AT+DATA[0D][0A][LoRa] 收到原始命令: AT+DATA
+[LoRa] 收到<- 网关 命令: AT+DATA
+[LoRa] 发送-> 网关 数据: 车位=0 距离=6cm 地磁=0 时长=0s LED=0 使能=1
+
+[2026-08-12 17:42:41.028]# RECV ASCII>
+AT+DATA[0D][0A][LoRa] 收到原始命令: AT+DATA
+[LoRa] 收到<- 网关 命令: AT+DATA
+[LoRa] 发送-> 网关 数据: 车位=0 距离=6cm 地磁=0 时长=0s LED=0 使能=1
+
+[2026-08-12 17:42:43.156]# RECV ASCII>
+AT+DATA[0D][0A][LoRa] 收到原始命令: AT+DATA
+[LoRa] 收到<- 网关 命令: AT+DATA
+[LoRa] 发送-> 网关 数据: 车位=0 距离=6cm 地磁=0 时长=0s LED=0 使能=1
+
+[2026-08-12 17:42:45.232]# RECV ASCII>
+AT+CER[0D][0A][LoRa] 收到原始命令: AT+CER
+[LoRa] 收到<- 网关 命令: AT+CER
+
+[2026-08-12 17:42:45.339]# RECV ASCII>
+[LoRa] 发送-> 网关 证书: 产品=04kjwU9TC7 设备=Park001 valid=1
+
+[2026-08-12 17:42:47.626]# RECV ASCII>
+AT+DATA[0D][0A][LoRa] 收到原始命令: AT+DATA
+[LoRa] 收到<- 网关 命令: AT+DATA
+[LoRa] 发送-> 网关 数据: 车位=0 距离=6cm 地磁=0 时长=0s LED=0 使能=1
+
+[2026-08-12 17:42:48.771]# RECV ASCII>
+[WDG] 喂狗正常, 运行 140 秒
+
+[2026-08-12 17:42:51.524]# RECV ASCII>
+AT+DATA[0D][0A][LoRa] 收到原始命令: AT+DATA
+[LoRa] 收到<- 网关 命令: AT+DATA
+[LoRa] 发送-> 网关 数据: 车位=0 距离=6cm 地磁=0 时长=0s LED=0 使能=1
+
+[2026-08-12 17:42:52.097]# RECV ASCII>
+AT+OTA=start,v2.3_test[0D][0A][LoRa] 收到原始命令: AT+OTA=start,v2.3_test
+[LoRa] 收到<- 网关 命令: AT+OTA=start,v2.3_test
+[OTA] 升级标志已写入, 即将复位...
+
+[2026-08-12 17:42:52.345]# RECV ASCII>
+
+[BOOT] BootLoader v1.0 启动
+[BOOT] SysTick OK
+[BOOT] USART2 OK
+[BOOT] IWDG OK
+[BOOT] Key OK
+[BOOT] 初始化完成
+[BOOT] OTA 标志检测到, 进入接收模式
+[BOOT] 开始接收固件, 擦除APP区...
+
+[2026-08-12 17:42:53.538]# RECV ASCII>
+[BOOT] APP区擦除完成, 等待数据包...
+
+[2026-08-12 17:42:57.385]# RECV ASCII>
+[BOOT] 固件头: ver=0x203 len=22564 crc32=0x32DE4290
+[BOOT] 收包 #1, 已写 116B
+
+[2026-08-12 17:43:01.180]# RECV ASCII>
+[BOOT] 收包 #10, 已写 1268B
+
+[2026-08-12 17:43:05.367]# RECV ASCII>
+[BOOT] 收包 #20, 已写 2548B
+
+[2026-08-12 17:43:09.574]# RECV ASCII>
+[BOOT] 收包 #30, 已写 3828B
+
+[2026-08-12 17:43:13.778]# RECV ASCII>
+[BOOT] 收包 #40, 已写 5108B
+
+[2026-08-12 17:43:17.979]# RECV ASCII>
+[BOOT] 收包 #50, 已写 6388B
+
+[2026-08-12 17:43:22.185]# RECV ASCII>
+[BOOT] 收包 #60, 已写 7668B
+
+[2026-08-12 17:43:26.396]# RECV ASCII>
+[BOOT] 收包 #70, 已写 8948B
+
+[2026-08-12 17:43:30.599]# RECV ASCII>
+[BOOT] 收包 #80, 已写 10228B
+
+[2026-08-12 17:43:34.790]# RECV ASCII>
+[BOOT] 收包 #90, 已写 11508B
+
+[2026-08-12 17:43:38.986]# RECV ASCII>
+[BOOT] 收包 #100, 已写 12788B
+
+[2026-08-12 17:43:43.208]# RECV ASCII>
+[BOOT] 收包 #110, 已写 14068B
+
+[2026-08-12 17:43:47.400]# RECV ASCII>
+[BOOT] 收包 #120, 已写 15348B
+
+[2026-08-12 17:43:51.609]# RECV ASCII>
+[BOOT] 收包 #130, 已写 16628B
+
+[2026-08-12 17:43:55.809]# RECV ASCII>
+[BOOT] 收包 #140, 已写 17908B
+
+[2026-08-12 17:44:00.012]# RECV ASCII>
+[BOOT] 收包 #150, 已写 19188B
+
+[2026-08-12 17:44:04.213]# RECV ASCII>
+[BOOT] 收包 #160, 已写 20468B
+
+[2026-08-12 17:44:08.409]# RECV ASCII>
+[BOOT] 收包 #170, 已写 21748B
+
+[2026-08-12 17:44:11.408]# RECV ASCII>
+[BOOT] 收到EOT, 共 177 包 22644B, CRC32校验中...
+
+[2026-08-12 17:44:11.469]# RECV ASCII>
+[BOOT] CRC32校验通过! 跳转APP
+
+[2026-08-12 17:44:11.673]# RECV ASCII>
+QMC5883P Init OK!
+[LoRa] 初始化完成: 地址=0x0001 信道=0 波特率=9600
+[SYS] 板级初始化完成
+
+[SYS] ========== 智能停车场节点 v2.3 ==========
+
+[2026-08-12 17:44:13.722]# RECV ASCII>
+AT+PING[0D][0A][LoRa] 收到原始命令: AT+PING
+[LoRa] 收到<- 网关 命令: AT+PING
+[LoRa] 发送-> 网关 确认: PONG
+
+[2026-08-12 17:44:13.830]# RECV ASCII>
+AT+DATA[0D][0A][LoRa] 收到原始命令: AT+DATA
+[LoRa] 收到<- 网关 命令: AT+DATA
+[LoRa] 发送-> 网关 数据: 车位=0 距离=19cm 地磁=0 时长=0s LED=0 使能=1
+
+[2026-08-12 17:44:15.951]# RECV ASCII>
+AT+DATA[0D][0A][LoRa] 收到原始命令: AT+DATA
+[LoRa] 收到<- 网关 命令: AT+DATA
+[LoRa] 发送-> 网关 数据: 车位=0 距离=6cm 地磁=0 时长=0s LED=0 使能=1
+
+[2026-08-12 17:44:18.074]# RECV ASCII>
+AT+DATA[0D][0A][LoRa] 收到原始命令: AT+DATA
+[LoRa] 收到<- 网关 命令: AT+DATA
+[LoRa] 发送-> 网关 数据: 车位=0 距离=6cm 地磁=0 时长=0s LED=0 使能=1
+
+[2026-08-12 17:44:20.209]# RECV ASCII>
+AT+DATA[0D][0A][LoRa] 收到原始命令: AT+DATA
+[LoRa] 收到<- 网关 命令: AT+DATA
+[LoRa] 发送-> 网关 数据: 车位=0 距离=6cm 地磁=0 时长=0s LED=0 使能=1
+
+[2026-08-12 17:44:21.596]# RECV ASCII>
+[WDG] 喂狗正常, 运行 10 秒
+
+[2026-08-12 17:44:22.311]# RECV ASCII>
+AT+DATA[0D][0A][LoRa] 收到原始命令: AT+DATA
+[LoRa] 收到<- 网关 命令: AT+DATA
+[LoRa] 发送-> 网关 数据: 车位=0 距离=6cm 地磁=0 时长=0s LED=0 使能=1
+
+[2026-08-12 17:44:24.436]# RECV ASCII>
+AT+DATA[0D][0A][LoRa] 收到原始命令: AT+DATA
+[LoRa] 收到<- 网关 命令: AT+DATA
+[LoRa] 发送-> 网关 数据: 车位=0 距离=6cm 地磁=0 时长=0s LED=0 使能=1
+
+[2026-08-12 17:44:26.569]# RECV ASCII>
+AT+DATA[0D][0A][LoRa] 收到原始命令: AT+DATA
+[LoRa] 收到<- 网关 命令: AT+DATA
+[LoRa] 发送-> 网关 数据: 车位=0 距离=6cm 地磁=0 时长=0s LED=0 使能=1
+
+[2026-08-12 17:44:28.672]# RECV ASCII>
+AT+DATA[0D][0A][LoRa] 收到原始命令: AT+DATA
+[LoRa] 收到<- 网关 命令: AT+DATA
+[LoRa] 发送-> 网关 数据: 车位=0 距离=6cm 地磁=0 时长=0s LED=0 使能=1
+
+[2026-08-12 17:44:30.791]# RECV ASCII>
+AT+DATA[0D][0A][LoRa] 收到原始命令: AT+DATA
+[LoRa] 收到<- 网关 命令: AT+DATA
+[LoRa] 发送-> 网关 数据: 车位=0 距离=6cm 地磁=0 时长=0s LED=0 使能=1
+
+[2026-08-12 17:44:31.597]# RECV ASCII>
+[WDG] 喂狗正常, 运行 20 秒
+
+[2026-08-12 17:44:32.920]# RECV ASCII>
+AT+DATA[0D][0A][LoRa] 收到原始命令: AT+DATA
+[LoRa] 收到<- 网关 命令: AT+DATA
+[LoRa] 发送-> 网关 数据: 车位=0 距离=6cm 地磁=0 时长=0s LED=0 使能=1

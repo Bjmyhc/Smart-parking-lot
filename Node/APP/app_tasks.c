@@ -42,7 +42,7 @@
 #define DIST_THRESHOLD_CM       10      /* 超声波判断有车的距离阈值(cm) */
 
 /* -------- OTA 升级 -------- */
-#define APP_VERSION             0x0201  /* 当前固件版本: V2.1 */
+#include "app_version.h"    /* 版本单一源头: APP_VERSION / NODE_FW_VERSION */
 #define OTA_FLAG_ADDR           0x0800FC00  /* 升级标志页地址 */
 #define OTA_FLAG_GO             0xA5A5A5A5  /* 需要升级 */
 #define OTA_FLAG_DONE           0x00000000  /* 升级完成 */
@@ -260,6 +260,7 @@ static void PackNodeData(void)
     NodeDataCache.OccupiedTime  = OccupiedTime;
     NodeDataCache.LED           = LED_GetState() ? 1 : 0;
     NodeDataCache.LedEnable     = LEDEnable;
+    NodeDataCache.FwVersion     = APP_VERSION;   /* 固件版本, 网关据此自动更新 OTA 版本 */
 }
 
 /****************************************************************************

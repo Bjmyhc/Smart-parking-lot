@@ -60,6 +60,13 @@ typedef struct {
 /* 每包最大重试次数 */
 #define OTA_MAX_RETRY           3
 
+/* ==================== LoRa 定点地址 ==================== */
+/* 定点传输发送格式: [AddrH][AddrL][CH] + 数据
+ * Boot 回复 ACK/NAK 等必须带目标(网关)地址头, 否则 LoRa 模块
+ * 会把首个字节当地址头解析, 响应发不出去 */
+#define LORA_GATEWAY_ADDR       0x0000  /* 网关地址 */
+#define LORA_CHANNEL            0x00    /* 信道(0), DX-LR22模块: 00=433.15MHz */
+
 /* ==================== 硬件配置 ==================== */
 #define LORA_BAUD               9600
 #define WDG_TIMEOUT_MS          4000    /* 看门狗超时, 与 APP 一致 */

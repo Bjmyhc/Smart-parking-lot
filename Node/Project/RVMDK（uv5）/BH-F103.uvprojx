@@ -81,9 +81,9 @@
           </BeforeMake>
           <AfterMake>
             <RunUserProg1>1</RunUserProg1>
-            <RunUserProg2>0</RunUserProg2>
-            <UserProg1Name>fromelf --bin --output ..\..\Output\app.bin ..\..\Output\BH-F103.axf</UserProg1Name>
-            <UserProg2Name></UserProg2Name>
+            <RunUserProg2>1</RunUserProg2>
+            <UserProg1Name>fromelf --bin --output ..\..\Output\app.bin ..\..\Output\output.axf</UserProg1Name>
+            <UserProg2Name>python ..\..\..\Tool\fw_pack.py</UserProg2Name>
             <UserProg1Dos16Mode>0</UserProg1Dos16Mode>
             <UserProg2Dos16Mode>0</UserProg2Dos16Mode>
             <nStopA1X>0</nStopA1X>
@@ -249,7 +249,7 @@
               <IROM>
                 <Type>1</Type>
                 <StartAddress>0x8002000</StartAddress>
-                <Size>0xDC00</Size>
+                <Size>0xdc00</Size>
               </IROM>
               <XRAM>
                 <Type>0</Type>
@@ -273,8 +273,8 @@
               </OCR_RVCT3>
               <OCR_RVCT4>
                 <Type>1</Type>
-                <StartAddress>0x8000000</StartAddress>
-                <Size>0x10000</Size>
+                <StartAddress>0x8002000</StartAddress>
+                <Size>0xdc00</Size>
               </OCR_RVCT4>
               <OCR_RVCT5>
                 <Type>1</Type>
@@ -429,6 +429,11 @@
               <FileName>app_global.h</FileName>
               <FileType>5</FileType>
               <FilePath>..\..\App\app_global.h</FilePath>
+            </File>
+            <File>
+              <FileName>app_version.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>..\..\APP\app_version.h</FilePath>
             </File>
           </Files>
         </Group>

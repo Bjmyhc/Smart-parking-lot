@@ -1,4 +1,4 @@
-﻿/* node_data.cpp - Gateway 节点数据缓冲区实现 */
+/* node_data.cpp - Gateway 节点数据缓冲区实现 */
 #include "node_data.h"
 #include "app_cfg.h"      /* LORA_MAX_NODES/sysEventFlag/DBG */
 #include <LittleFS.h>
@@ -130,6 +130,7 @@ void updateNodeFromRaw(uint8_t nodeId, const LoraNodeData_t *raw)
     nd.occupiedTime = raw->OccupiedTime;
     nd.led          = (raw->LED != 0);
     nd.ledEnable    = (raw->LedEnable != 0);
+    nd.fwVersion    = raw->FwVersion;   /* 节点上报固件版本, OTA 检测据此自动更新 */
     nd.lastUpdate   = millis();
     nd.online       = true;
     sysEventFlag |= (1 << (nd.nodeId - 1));   /* 同步事件标志位 */

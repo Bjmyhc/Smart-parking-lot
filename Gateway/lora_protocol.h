@@ -44,7 +44,7 @@ extern "C" {
 #define LORA_PACKED
 #endif
 
-/* 节点传感器数据帧(7 字段, 共 10 字节)
+/* 节点传感器数据帧(8 字段, 共 12 字节)
  * LORA_FRAME_DATA + 下面结构体 */
 typedef struct LORA_PACKED {
     uint8_t  ParkStatus;      /* 0=空闲, 1=有车, 2=僵尸车 */
@@ -53,6 +53,7 @@ typedef struct LORA_PACKED {
     uint32_t OccupiedTime;    /* 秒, 小端 */
     uint8_t  LED;             /* 当前LED状态 0/1 */
     uint8_t  LedEnable;       /* LED使能开关 0/1 */
+    uint16_t FwVersion;       /* 节点固件版本(APP_VERSION, 如 0x0203 = v2.3) */
 } LoraNodeData_t;
 
 /* 节点证书帧(供网关代上线 OneNET)

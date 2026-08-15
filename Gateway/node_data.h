@@ -16,6 +16,7 @@ struct NodeData {
     uint32_t occupiedTime;  /* s */
     bool     led;           /* LED当前状态 */
     bool     ledEnable;     /* LED使能开关 */
+    uint16_t fwVersion;     /* 节点固件版本(0x0203 = v2.3), 节点上报帧携带 */
     uint32_t lastUpdate;    /* 最后收到数据时间(ms) */
     bool     certSent;      /* 是否已收到证书 */
     bool     online;        /* LoRa 在线/离线 */

@@ -1,22 +1,26 @@
 *** Using Compiler 'V5.06 update 5 (build 528)', folder: 'C:\Keil_v5\ARM\ARMCC\Bin'
-Build target 'Led'
+Build target 'Project'
 compiling main.c...
-compiling app_init.c...
-..\..\App\app_init.c(43): error:  #8: missing closing quote
-      OLED_ShowCH(0, 0, (u8 *)"缃戠粶杩炴帴涓?");
-..\..\App\app_init.c(46): error:  #18: expected a ")"
-      Usart_Printf(USART_DEBUG, "ESP8266 Init...\n");
-..\..\App\app_init.c: 0 warnings, 2 errors
 compiling app_tasks.c...
-..\..\App\app_tasks.c(258): error:  #8: missing closing quote
-          OLED_ShowCH(0, 0, (u8 *)"缃戠粶宸茶繛鎺?");
-..\..\App\app_tasks.c(259): error:  #18: expected a ")"
-          OLED_Printf(0, 4, "璺濈: %.3d cm", Distance);
-..\..\App\app_tasks.c(260): warning:  #870-D: invalid multibyte character sequence
-          OLED_ShowCH(0, 6, (u8 *)"鐘舵�?: ");
-..\..\App\app_tasks.c(265): warning:  #870-D: invalid multibyte character sequence
-              case PARK_ZOMBIE:   OLED_Printf(48, 6, "鍍靛案杞?   ");         break;
-..\..\App\app_tasks.c: 2 warnings, 2 errors
-"..\..\Output\output.axf" - 4 Error(s), 2 Warning(s).
-Target not created.
-Build Time Elapsed:  00:00:02
+compiling app_init.c...
+compiling lora_node.c...
+..\..\BSP\lora_node.c(28): warning:  #550-D: variable "s_lastRxTick"  was set but never used
+  static uint32_t s_lastRxTick = 0;       /* 上次接收时间 */
+..\..\BSP\lora_node.c(170): warning:  #550-D: variable "s_lastRxCount"  was set but never used
+  static uint32_t s_lastRxCount = 0;      /* 上次 ISR 接收计数(检测变化) */
+..\..\BSP\lora_node.c: 2 warnings, 0 errors
+compiling bsp_usart.c...
+compiling bsp_ultrasonic.c...
+compiling bsp_qmc5883p.c...
+linking...
+Program Size: Code=22376 RO-data=508 RW-data=128 ZI-data=1464  
+FromELF: creating hex file...
+After Build - User command #1: fromelf --bin --output ..\..\Output\app.bin ..\..\Output\output.axf
+After Build - User command #2: python ..\..\..\Tool\fw_pack.py
+[OK] G:\All_Project\Keil_Project\STM32_Project\鎴戠殑\鏅鸿兘鍋滆溅鍦篭Node\Output\app.bin -> G:\All_Project\Keil_Project\STM32_Project\鎴戠殑\鏅鸿兘鍋滆溅鍦篭Node\Output\node_v2.1.bin
+     version  : 0x0201 (2.1)
+     code len : 23012 bytes
+     crc32    : 0x9EAE89C2
+     total    : 23024 bytes
+"..\..\Output\output.axf" - 0 Error(s), 2 Warning(s).
+Build Time Elapsed:  00:00:04

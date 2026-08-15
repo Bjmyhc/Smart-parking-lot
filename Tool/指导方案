@@ -1,0 +1,253 @@
+好，我看到了完整的代码。这不是“AI废物”，而是Tkinter的`pack`布局天然缺陷——`expand=True`的控件会抢占所有空间，导致后`pack`的控件被挤出。
+
+我直接给你一套**精确到每一行的布局重构方案**，让那个AI照着改就行。
+
+---
+
+## 核心改动：用 `grid` 替代 `pack` 管理关键区域
+
+`grid` 可以通过 `weight` 分配比例，确保每个区域都有固定占比，永远不会互相挤没。
+
+---
+
+### 改动一：左侧 `log_frame` 重构（解决发送按钮被挤没）
+
+**位置**：`_build_ui` 中创建 `log_frame` 的部分
+
+**原代码**（约第 340-370 行）：
+```python
+log_frame = ttk.Frame(left_wrap)
+log_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+ttk.Label(log_frame, text="串口日志").pack(anchor=tk.W)
+
+self._build_cmd_frame(log_frame)
+self._cmd_frame.pack(fill=tk.X, side=tk.BOTTOM)
+
+log_body = ttk.Frame(log_frame)
+log_body.pack(fill=tk.BOTH, expand=True)
+```
+
+**改为**：
+```python
+log_frame = ttk.Frame(left_wrap)
+log_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+# 使用 grid 管理 log_frame 内部，3行：标题、日志体、发送栏
+log_frame.grid_rowconfigure(0, weight=0)   # 标题行，不拉伸
+log_frame.grid_rowconfigure(1, weight=1)   # 日志体，占满剩余空间
+log_frame.grid_rowconfigure(2, weight=0)   # 发送栏，不拉伸
+log_frame.grid_columnconfigure(0, weight=1)
+
+ttk.Label(log_frame, text="串口日志").grid(row=0, column=0, sticky=tk.W)
+
+log_body = ttk.Frame(log_frame)
+log_body.grid(row=1, column=0, sticky="nsew")
+
+self._build_cmd_frame(log_frame)
+self._cmd_frame.grid(row=2, column=0, sticky="ew", pady=(2, 0))
+```
+
+**同时删除**原来的 `log_body.pack()` 和 `self._cmd_frame.pack()` 调用。
+
+---
+
+### 改动二：右侧 `img_body` 重构（解决侧边控制栏被挤没）
+
+**位置**：`_build_right_pane` 中创建 `img_body` 的部分（约第 460-490 行）
+
+**原代码**：
+```python
+img_body = ttk.Frame(img_frame)
+img_body.pack(fill=tk.BOTH, expand=True)
+
+side_panel = ttk.LabelFrame(img_body, text=" 图片控制 ", ...)
+side_panel.pack(side=tk.RIGHT, fill=tk.Y, padx=(6, 0))
+
+canvas_frame = ttk.Frame(img_body)
+canvas_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+```
+
+**改为**：
+```python
+img_body = ttk.Frame(img_frame)
+img_body.pack(fill=tk.BOTH, expand=True)
+
+# 使用 grid 管理 img_body：左侧Canvas占剩余，右侧控制区固定宽度
+img_body.grid_columnconfigure(0, weight=1)   # Canvas列，占满剩余
+img_body.grid_columnconfigure(1, weight=0)   # 控制列，固定宽度
+img_body.grid_rowconfigure(0, weight=1)
+
+canvas_frame = ttk.Frame(img_body)
+canvas_frame.grid(row=0, column=0, sticky="nsew")
+
+side_panel = ttk.LabelFrame(img_body, text=" 图片控制 ", padding=(6, 6, 6, 6))
+side_panel.grid(row=0, column=1, sticky="ns", padx=(6, 0))
+```
+
+**同时删除**原来的 `side_panel.pack()` 和 `canvas_frame.pack()` 调用。
+
+---
+
+### 改动三：`_build_cmd_frame` 不再 `pack` 自己
+
+**位置**：`_build_cmd_frame` 方法中
+
+**原代码**（开头）：
+```python
+def _build_cmd_frame(self, parent):
+    self._cmd_frame = ttk.Frame(parent)
+    self._cmd_frame.pack(fill=tk.X, side=tk.BOTTOM)  # 这行要删
+```
+
+**改为**：
+```python
+def _build_cmd_frame(self, parent):
+    self._cmd_frame = ttk.Frame(parent)
+    # 不再自动 pack，由调用者用 grid 管理
+```
+
+---
+
+## 完整改动清单（给AI的精确指令）
+
+将以下三段代码**原样复制**到对应位置，替换原有代码：
+
+### 替换1：`_build_ui` 中的 `log_frame` 区域
+
+找到 `log_frame = ttk.Frame(left_wrap)` 这一行，一直往下到 `self.mid_pane.add(left_wrap, weight=2)` 之前，整段替换为：
+
+```python
+        log_frame = ttk.Frame(left_wrap)
+        log_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        # grid 布局: 标题(0) | 日志体(1) | 发送栏(2)
+        log_frame.grid_rowconfigure(0, weight=0)
+        log_frame.grid_rowconfigure(1, weight=1)
+        log_frame.grid_rowconfigure(2, weight=0)
+        log_frame.grid_columnconfigure(0, weight=1)
+
+        ttk.Label(log_frame, text="串口日志").grid(row=0, column=0, sticky=tk.W)
+
+        log_body = ttk.Frame(log_frame)
+        log_body.grid(row=1, column=0, sticky="nsew")
+
+        self._build_cmd_frame(log_frame)
+        self._cmd_frame.grid(row=2, column=0, sticky="ew", pady=(2, 0))
+
+        # 行号栏和主日志区放在 log_body 中
+        self.line_no_text = tk.Text(log_body, width=5, padx=4, pady=3,
+                                    bg="#f0f0f0", fg="#666666",
+                                    takefocus=False, borderwidth=0,
+                                    highlightthickness=0,
+                                    state=tk.DISABLED, wrap=tk.NONE,
+                                    spacing1=2, spacing2=1, spacing3=2)
+        self.line_no_text.pack(side=tk.LEFT, fill=tk.Y)
+
+        self.log_text = tk.Text(log_body, wrap=tk.WORD, state=tk.DISABLED,
+                                height=22, padx=6, pady=3,
+                                borderwidth=0, highlightthickness=1,
+                                highlightbackground="#cccccc",
+                                highlightcolor="#999999",
+                                spacing1=2, spacing2=1, spacing3=2)
+        self.log_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        self.log_text.tag_configure("ts", foreground="black")
+        self.log_text.tag_configure("msg", foreground="green")
+        self.log_text.tag_configure("sys", foreground="#0066CC")
+
+        self.log_scroll = ttk.Scrollbar(log_body, orient=tk.VERTICAL,
+                                         command=self._on_scroll)
+        self.log_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+        self.log_text.config(yscrollcommand=self._on_text_scroll)
+        self.line_no_text.config(yscrollcommand=self._on_lineno_scroll)
+```
+
+### 替换2：`_build_right_pane` 中的 `img_body` 区域
+
+找到 `img_body = ttk.Frame(img_frame)` 这一行，往下到 `right_paned.add(img_frame, weight=3)` 之前，替换为：
+
+```python
+        img_body = ttk.Frame(img_frame)
+        img_body.pack(fill=tk.BOTH, expand=True)
+
+        # grid 布局: Canvas列(1) | 控制列(0,固定宽度)
+        img_body.grid_columnconfigure(0, weight=1)
+        img_body.grid_columnconfigure(1, weight=0)
+        img_body.grid_rowconfigure(0, weight=1)
+
+        canvas_frame = ttk.Frame(img_body)
+        canvas_frame.grid(row=0, column=0, sticky="nsew")
+
+        side_panel = ttk.LabelFrame(img_body, text=" 图片控制 ", padding=(6, 6, 6, 6))
+        side_panel.grid(row=0, column=1, sticky="ns", padx=(6, 0))
+
+        self.img_canvas = tk.Canvas(canvas_frame, bg="#222222", highlightthickness=0, height=120)
+        self.img_canvas.pack(fill=tk.BOTH, expand=True)
+        self.img_canvas.bind("<Configure>", self._on_canvas_resize)
+
+        # ===== 右侧控制面板内容 =====
+        self._parse_mode_map = {"二进制帧": "bin", "Base64 行": "b64"}
+        self._parse_mode_rev = {"bin": "二进制帧", "b64": "Base64 行"}
+
+        ttk.Label(side_panel, text="解析方式:", foreground="#888").pack(anchor=tk.W)
+        self.parse_combo = ttk.Combobox(side_panel,
+                                        values=list(self._parse_mode_map.keys()),
+                                        state="readonly", width=12)
+        self.parse_combo.set(self._parse_mode_rev.get(self.parse_mode_var.get(), "二进制帧"))
+        self.parse_combo.pack(anchor=tk.W, pady=(0, 4))
+        self.parse_combo.bind("<<ComboboxSelected>>", lambda e: self._on_parse_combo_change())
+
+        ttk.Checkbutton(side_panel, text="OCR 云端转发", variable=self.comp_ocr,
+                        command=self._on_ocr_toggle).pack(anchor=tk.W, pady=(0, 8))
+
+        ttk.Separator(side_panel, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=4)
+
+        ttk.Checkbutton(side_panel, text="自动保存到文件", variable=self.comp_autosave,
+                        command=self._on_comp_simple_toggle).pack(anchor=tk.W)
+
+        ttk.Separator(side_panel, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=6)
+
+        ttk.Button(side_panel, text="打开图片目录", command=self.open_pics_dir).pack(anchor=tk.W)
+```
+
+### 替换3：`_build_cmd_frame` 方法
+
+找到 `_build_cmd_frame` 方法，替换为：
+
+```python
+    def _build_cmd_frame(self, parent):
+        self._cmd_frame = ttk.Frame(parent)
+        # 由调用者用 grid 管理，不在内部 pack
+
+        ttk.Label(self._cmd_frame, text="发送:").pack(side=tk.LEFT)
+
+        self.cmd_fmt_var = tk.StringVar(value="ascii")
+        fmt_box = ttk.Combobox(self._cmd_frame, textvariable=self.cmd_fmt_var,
+                               values=["ascii", "hex"], width=5, state="readonly")
+        fmt_box.pack(side=tk.LEFT, padx=(4, 0))
+
+        self.cmd_entry = ttk.Entry(self._cmd_frame)
+        self.cmd_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(4, 4))
+        self.cmd_entry.bind("<Return>", lambda e: self._send_cmd())
+
+        self.cmd_nl_var = tk.StringVar(value="none")
+        ttk.Combobox(self._cmd_frame, textvariable=self.cmd_nl_var,
+                     values=["none", "\\n", "\\r", "\\n\\r"], width=5, state="readonly").pack(side=tk.LEFT, padx=(0, 4))
+
+        ttk.Button(self._cmd_frame, text="发送", command=self._send_cmd).pack(side=tk.LEFT)
+```
+
+---
+
+## 验证清单
+
+修改后运行程序，检查：
+- [ ] 左侧发送按钮始终可见（在底部）
+- [ ] 右侧控制面板始终可见（在图片右侧）
+- [ ] 窗口缩放时，日志区和图片区自适应，其他控件不消失
+- [ ] 水平分隔条可拖动调整左右比例
+
+---
+
+把这三段替换给AI，告诉它“**严格按照这三段替换对应位置的代码，不要改动其他任何地方**”。如果AI还改不好，你直接把这三段代码复制进去手动替换，十分钟搞定。

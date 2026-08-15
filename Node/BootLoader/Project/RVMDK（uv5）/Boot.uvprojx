@@ -48,14 +48,14 @@
             <NotGenerated>0</NotGenerated>
             <InvalidFlash>1</InvalidFlash>
           </TargetStatus>
-          <OutputDirectory>..\..\..\..\Output\boot\</OutputDirectory>
+          <OutputDirectory>..\..\..\Output\boot\</OutputDirectory>
           <OutputName>boot</OutputName>
           <CreateExecutable>1</CreateExecutable>
           <CreateLib>0</CreateLib>
           <CreateHexFile>1</CreateHexFile>
           <DebugInformation>1</DebugInformation>
           <BrowseInformation>1</BrowseInformation>
-          <ListingPath>..\..\..\..\Listing\boot\</ListingPath>
+          <ListingPath>..\..\..\Listing\boot\</ListingPath>
           <HexFormatSelection>1</HexFormatSelection>
           <Merge32K>0</Merge32K>
           <CreateBatchFile>0</CreateBatchFile>
@@ -82,7 +82,7 @@
           <AfterMake>
             <RunUserProg1>1</RunUserProg1>
             <RunUserProg2>0</RunUserProg2>
-            <UserProg1Name>fromelf --bin --output ..\..\..\..\Output\boot\boot.bin ..\..\..\..\Output\boot\boot.axf</UserProg1Name>
+            <UserProg1Name>fromelf --bin --output ..\..\..\Output\boot\boot.bin ..\..\..\Output\boot\boot.axf</UserProg1Name>
             <UserProg2Name></UserProg2Name>
             <UserProg1Dos16Mode>0</UserProg1Dos16Mode>
             <UserProg2Dos16Mode>0</UserProg2Dos16Mode>
@@ -274,7 +274,7 @@
               <OCR_RVCT4>
                 <Type>1</Type>
                 <StartAddress>0x8000000</StartAddress>
-                <Size>0x10000</Size>
+                <Size>0x2000</Size>
               </OCR_RVCT4>
               <OCR_RVCT5>
                 <Type>1</Type>
@@ -336,7 +336,7 @@
               <MiscControls></MiscControls>
               <Define>STM32F10X_MD, USE_STDPERIPH_DRIVER</Define>
               <Undefine></Undefine>
-              <IncludePath>..\..\..\;..\..\..\..\Libraries\CMSIS;..\..\..\..\Libraries\FWlib\inc</IncludePath>
+              <IncludePath>..\..\;..\..\..\Libraries\CMSIS;..\..\..\Libraries\FWlib\inc</IncludePath>
             </VariousControls>
           </Cads>
           <Aads>
@@ -383,17 +383,17 @@
             <File>
               <FileName>main.c</FileName>
               <FileType>1</FileType>
-              <FilePath>..\..\..\main.c</FilePath>
+              <FilePath>..\..\main.c</FilePath>
             </File>
             <File>
               <FileName>boot.h</FileName>
               <FileType>5</FileType>
-              <FilePath>..\..\..\boot.h</FilePath>
+              <FilePath>..\..\boot.h</FilePath>
             </File>
             <File>
               <FileName>boot_cfg.h</FileName>
               <FileType>5</FileType>
-              <FilePath>..\..\..\boot_cfg.h</FilePath>
+              <FilePath>..\..\boot_cfg.h</FilePath>
             </File>
           </Files>
         </Group>
@@ -403,7 +403,7 @@
             <File>
               <FileName>startup_stm32f10x_md.s</FileName>
               <FileType>2</FileType>
-              <FilePath>..\..\..\..\Libraries\CMSIS\startup\startup_stm32f10x_md.s</FilePath>
+              <FilePath>..\..\..\Libraries\CMSIS\startup\startup_stm32f10x_md.s</FilePath>
             </File>
           </Files>
         </Group>
@@ -413,27 +413,27 @@
             <File>
               <FileName>core_cm3.c</FileName>
               <FileType>1</FileType>
-              <FilePath>..\..\..\..\Libraries\CMSIS\core_cm3.c</FilePath>
+              <FilePath>..\..\..\Libraries\CMSIS\core_cm3.c</FilePath>
             </File>
             <File>
               <FileName>core_cm3.h</FileName>
               <FileType>5</FileType>
-              <FilePath>..\..\..\..\Libraries\CMSIS\core_cm3.h</FilePath>
+              <FilePath>..\..\..\Libraries\CMSIS\core_cm3.h</FilePath>
             </File>
             <File>
               <FileName>stm32f10x.h</FileName>
               <FileType>5</FileType>
-              <FilePath>..\..\..\..\Libraries\CMSIS\stm32f10x.h</FilePath>
+              <FilePath>..\..\..\Libraries\CMSIS\stm32f10x.h</FilePath>
             </File>
             <File>
               <FileName>system_stm32f10x.c</FileName>
               <FileType>1</FileType>
-              <FilePath>..\..\..\..\Libraries\CMSIS\system_stm32f10x.c</FilePath>
+              <FilePath>..\..\..\Libraries\CMSIS\system_stm32f10x.c</FilePath>
             </File>
             <File>
               <FileName>system_stm32f10x.h</FileName>
               <FileType>5</FileType>
-              <FilePath>..\..\..\..\Libraries\CMSIS\system_stm32f10x.h</FilePath>
+              <FilePath>..\..\..\Libraries\CMSIS\system_stm32f10x.h</FilePath>
             </File>
           </Files>
         </Group>
@@ -443,37 +443,37 @@
             <File>
               <FileName>misc.c</FileName>
               <FileType>1</FileType>
-              <FilePath>..\..\..\..\Libraries\FWlib\src\misc.c</FilePath>
+              <FilePath>..\..\..\Libraries\FWlib\src\misc.c</FilePath>
             </File>
             <File>
               <FileName>stm32f10x_exti.c</FileName>
               <FileType>1</FileType>
-              <FilePath>..\..\..\..\Libraries\FWlib\src\stm32f10x_exti.c</FilePath>
+              <FilePath>..\..\..\Libraries\FWlib\src\stm32f10x_exti.c</FilePath>
             </File>
             <File>
               <FileName>stm32f10x_flash.c</FileName>
               <FileType>1</FileType>
-              <FilePath>..\..\..\..\Libraries\FWlib\src\stm32f10x_flash.c</FilePath>
+              <FilePath>..\..\..\Libraries\FWlib\src\stm32f10x_flash.c</FilePath>
             </File>
             <File>
               <FileName>stm32f10x_gpio.c</FileName>
               <FileType>1</FileType>
-              <FilePath>..\..\..\..\Libraries\FWlib\src\stm32f10x_gpio.c</FilePath>
+              <FilePath>..\..\..\Libraries\FWlib\src\stm32f10x_gpio.c</FilePath>
             </File>
             <File>
               <FileName>stm32f10x_iwdg.c</FileName>
               <FileType>1</FileType>
-              <FilePath>..\..\..\..\Libraries\FWlib\src\stm32f10x_iwdg.c</FilePath>
+              <FilePath>..\..\..\Libraries\FWlib\src\stm32f10x_iwdg.c</FilePath>
             </File>
             <File>
               <FileName>stm32f10x_rcc.c</FileName>
               <FileType>1</FileType>
-              <FilePath>..\..\..\..\Libraries\FWlib\src\stm32f10x_rcc.c</FilePath>
+              <FilePath>..\..\..\Libraries\FWlib\src\stm32f10x_rcc.c</FilePath>
             </File>
             <File>
               <FileName>stm32f10x_usart.c</FileName>
               <FileType>1</FileType>
-              <FilePath>..\..\..\..\Libraries\FWlib\src\stm32f10x_usart.c</FilePath>
+              <FilePath>..\..\..\Libraries\FWlib\src\stm32f10x_usart.c</FilePath>
             </File>
           </Files>
         </Group>

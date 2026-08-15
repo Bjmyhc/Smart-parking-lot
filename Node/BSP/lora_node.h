@@ -64,6 +64,7 @@ typedef struct {
     uint32_t OccupiedTime;    /* 占用时长(秒) */
     uint8_t  LED;             /* LED 当前状态 0/1 */
     uint8_t  LedEnable;       /* LED 使能 0/1 */
+    uint16_t FwVersion;       /* 固件版本(APP_VERSION, 如 0x0203 = v2.3) */
 } NodeData_t;
 #pragma pack(pop)
 

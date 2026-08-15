@@ -1,12 +1,12 @@
-/* ota_handler.cpp - Gateway OTA Éı¼¶´¦ÀíÆ÷ÊµÏÖ
+/* ota_handler.cpp - Gateway OTA å‡çº§å¤„ç†å™¨å®ç°
  *
- * ×´Ì¬»úËµÃ÷:
- *   OTA_IDLE ¡ú OTA_TRIGGER_NODE ¡ú OTA_WAIT_NODE_RESET ¡ú OTA_DOWNLOADING
- *   ¡ú OTA_SENDING ¡ú OTA_WAIT_ACK ¡ú (Ñ­»· SENDING/WAIT_ACK)
- *   ¡ú OTA_SEND_EOT ¡ú OTA_WAIT_FINAL_ACK ¡ú OTA_COMPLETE / OTA_FAILED
+ * çŠ¶æ€æœºè¯´æ˜:
+ *   OTA_IDLE â†’ OTA_TRIGGER_NODE â†’ OTA_WAIT_NODE_RESET â†’ OTA_DOWNLOADING
+ *   â†’ OTA_SENDING â†’ OTA_WAIT_ACK â†’ (å¾ªç¯ SENDING/WAIT_ACK)
+ *   â†’ OTA_SEND_EOT â†’ OTA_WAIT_FINAL_ACK â†’ OTA_COMPLETE / OTA_FAILED
  *
- * ·Ç×èÈûÉè¼Æ: Ã¿¸ö×´Ì¬Ö»ÔÚ ota_tick() ÖĞÖ´ĞĞÒ»²½, ²»×èÈûÖ÷Ñ­»·.
- * ÏÂÔØÊ¹ÓÃ HTTPClient Á÷Ê½Ğ´Èë LittleFS, ·¢ËÍÊ¹ÓÃ LoRa ´®¿ÚÖ±½Ó·¢ËÍ.
+ * éé˜»å¡è®¾è®¡: æ¯ä¸ªçŠ¶æ€åªåœ¨ ota_tick() ä¸­æ‰§è¡Œä¸€æ­¥, ä¸é˜»å¡ä¸»å¾ªç¯.
+ * ä¸‹è½½ä½¿ç”¨ HTTPClient æµå¼å†™å…¥ LittleFS, å‘é€ä½¿ç”¨ LoRa ä¸²å£ç›´æ¥å‘é€.
  */
 #include "ota_handler.h"
 #include "lora_protocol.h"
@@ -17,32 +17,32 @@
 #include <WiFiClient.h>
 #include <LittleFS.h>
 
-/* ==================== ÄÚ²¿Êı¾İ½á¹¹ ==================== */
+/* ==================== å†…éƒ¨æ•°æ®ç»“æ„ ==================== */
 
-/* ¹Ì¼şÎÄ¼şÍ· (12B, Óë Tool/fw_pack.py Ò»ÖÂ) */
+/* å›ºä»¶æ–‡ä»¶å¤´ (12B, ä¸ Tool/fw_pack.py ä¸€è‡´) */
 typedef struct __attribute__((packed)) {
     uint16_t magic;      /* OTA_FW_MAGIC (0xA55A) */
-    uint16_t version;    /* ¹Ì¼ş°æ±¾ºÅ */
-    uint32_t length;     /* ´úÂë¶Î³¤¶È(×Ö½Ú) */
-    uint32_t crc32;      /* ´úÂë¶Î CRC32 */
+    uint16_t version;    /* å›ºä»¶ç‰ˆæœ¬å· */
+    uint32_t length;     /* ä»£ç æ®µé•¿åº¦(å­—èŠ‚) */
+    uint32_t crc32;      /* ä»£ç æ®µ CRC32 */
 } FwHeader_t;
 
-/* Xmodem ·¢ËÍ»º³åÇø */
+/* Xmodem å‘é€ç¼“å†²åŒº */
 #define XM_PACKET_OVERHEAD  5       /* SOH(1) + Seq(2) + CRC(2) */
 #define XM_PACKET_TOTAL     (XM_PACKET_OVERHEAD + OTA_PACKET_DATA_SIZE)  /* 133 */
 
-/* ==================== ¾²Ì¬±äÁ¿ ==================== */
+/* ==================== é™æ€å˜é‡ ==================== */
 
-static OtaProgress_t s_progress;        /* ½ø¶ÈĞÅÏ¢ */
-static File s_fwFile;                   /* ¹Ì¼şÎÄ¼ş¾ä±ú */
-static uint16_t s_seq;                  /* µ±Ç°°üĞòºÅ (´Ó1¿ªÊ¼) */
-static uint8_t s_pktBuf[XM_PACKET_TOTAL];  /* Xmodem °ü»º³åÇø */
-static uint32_t s_stateStart;           /* µ±Ç°×´Ì¬½øÈëÊ±¼ä´Á */
-static uint32_t s_otaStart;             /* OTA¿ªÊ¼Ê±¼ä´Á */
-static uint8_t s_otaResp;               /* ÊÕµ½µÄ OTA ÏìÓ¦×Ö½Ú */
-static volatile bool s_hasResp;         /* ÊÇ·ñÒÑÊÕµ½ OTA ÏìÓ¦ */
+static OtaProgress_t s_progress;        /* è¿›åº¦ä¿¡æ¯ */
+static File s_fwFile;                   /* å›ºä»¶æ–‡ä»¶å¥æŸ„ */
+static uint16_t s_seq;                  /* å½“å‰åŒ…åºå· (ä»1å¼€å§‹) */
+static uint8_t s_pktBuf[XM_PACKET_TOTAL];  /* Xmodem åŒ…ç¼“å†²åŒº */
+static uint32_t s_stateStart;           /* å½“å‰çŠ¶æ€è¿›å…¥æ—¶é—´æˆ³ */
+static uint32_t s_otaStart;             /* OTAå¼€å§‹æ—¶é—´æˆ³ */
+static uint8_t s_otaResp;               /* æ”¶åˆ°çš„ OTA å“åº”å­—èŠ‚ */
+static volatile bool s_hasResp;         /* æ˜¯å¦å·²æ”¶åˆ° OTA å“åº” */
 
-/* CRC16 ±í (XMODEM poly 0x1021, Óë½Úµã¶ËÒ»ÖÂ) */
+/* CRC16 è¡¨ (XMODEM poly 0x1021, ä¸èŠ‚ç‚¹ç«¯ä¸€è‡´) */
 static const uint16_t s_crc16Table[256] = {
     0x0000, 0x1021, 0x2042, 0x3063, 0x4084, 0x50A5, 0x60C6, 0x70E7,
     0x8108, 0x9129, 0xA14A, 0xB16B, 0xC18C, 0xD1AD, 0xE1CE, 0xF1EF,
@@ -78,7 +78,7 @@ static const uint16_t s_crc16Table[256] = {
     0x6E17, 0x7E36, 0x4E55, 0x5E74, 0x2E93, 0x3EB2, 0x0ED1, 0x1EF0
 };
 
-/* ==================== CRC16-XMODEM (²é±í·¨) ==================== */
+/* ==================== CRC16-XMODEM (æŸ¥è¡¨æ³•) ==================== */
 static uint16_t crc16_xmodem(const uint8_t *data, uint32_t len)
 {
     uint16_t crc = 0;
@@ -87,8 +87,8 @@ static uint16_t crc16_xmodem(const uint8_t *data, uint32_t len)
     return crc;
 }
 
-/* ==================== LoRa ·¢ËÍÔ­Ê¼Êı¾İ ==================== */
-/* ÏòÄ¿±ê½Úµã·¢ËÍÔ­Ê¼×Ö½Ú (ÎŞÖ¡Í·, Ö±½Ó¶¨µã´«Êä), ÓÃÓÚ OTA Êı¾İ°ü */
+/* ==================== LoRa å‘é€åŸå§‹æ•°æ® ==================== */
+/* å‘ç›®æ ‡èŠ‚ç‚¹å‘é€åŸå§‹å­—èŠ‚ (æ— å¸§å¤´, ç›´æ¥å®šç‚¹ä¼ è¾“), ç”¨äº OTA æ•°æ®åŒ… */
 static void sendRawFrame(uint16_t dstAddr, uint8_t ch,
                          const uint8_t *data, uint16_t len)
 {
@@ -103,26 +103,26 @@ static void sendRawFrame(uint16_t dstAddr, uint8_t ch,
     if (len > 0) lora.write(data, len);
 }
 
-/* ==================== ×´Ì¬×ª»»¸¨Öú ==================== */
+/* ==================== çŠ¶æ€è½¬æ¢è¾…åŠ© ==================== */
 static void setState(OtaState_t st)
 {
     s_progress.state = st;
     s_stateStart = millis();
 }
 
-/* ==================== ÏÂÔØ¹Ì¼ş ==================== */
+/* ==================== ä¸‹è½½å›ºä»¶ ==================== */
 static bool downloadFirmware(const char *url)
 {
-    DBG_PRINTF("[OTA] ¿ªÊ¼ÏÂÔØ¹Ì¼ş: %s\n", url);
+    DBG_PRINTF("[OTA] å¼€å§‹ä¸‹è½½å›ºä»¶: %s\n", url);
 
-    /* È·±£ LittleFS ÒÑ¹ÒÔØ */
+    /* ç¡®ä¿ LittleFS å·²æŒ‚è½½ */
     if (!LittleFS.begin())
     {
-        DBG_PRINTLN("[OTA] LittleFS ¹ÒÔØÊ§°Ü");
+        DBG_PRINTLN("[OTA] LittleFS æŒ‚è½½å¤±è´¥");
         return false;
     }
 
-    /* É¾³ı¾ÉÎÄ¼ş */
+    /* åˆ é™¤æ—§æ–‡ä»¶ */
     LittleFS.remove(OTA_FW_FILE);
 
     WiFiClient wc;
@@ -134,7 +134,7 @@ static bool downloadFirmware(const char *url)
     int httpCode = http.GET();
     if (httpCode != HTTP_CODE_OK)
     {
-        DBG_PRINTF("[OTA] ÏÂÔØÊ§°Ü, HTTP %d\n", httpCode);
+        DBG_PRINTF("[OTA] ä¸‹è½½å¤±è´¥, HTTP %d\n", httpCode);
         http.end();
         return false;
     }
@@ -142,16 +142,16 @@ static bool downloadFirmware(const char *url)
     int totalSize = http.getSize();
     s_progress.totalBytes = (totalSize > 0) ? (uint32_t)totalSize : 0;
 
-    /* ´ò¿ªÎÄ¼ş×¼±¸Ğ´Èë */
+    /* æ‰“å¼€æ–‡ä»¶å‡†å¤‡å†™å…¥ */
     s_fwFile = LittleFS.open(OTA_FW_FILE, "w");
     if (!s_fwFile)
     {
-        DBG_PRINTLN("[OTA] ÎŞ·¨´´½¨¹Ì¼şÎÄ¼ş");
+        DBG_PRINTLN("[OTA] æ— æ³•åˆ›å»ºå›ºä»¶æ–‡ä»¶");
         http.end();
         return false;
     }
 
-    /* Á÷Ê½Ğ´Èë */
+    /* æµå¼å†™å…¥ */
     WiFiClient *stream = http.getStreamPtr();
     uint8_t buf[256];
     int written = 0;
@@ -166,27 +166,27 @@ static bool downloadFirmware(const char *url)
             written += len;
             s_progress.sentBytes = (uint32_t)written;
 
-            /* ½ø¶ÈÈÕÖ¾ */
+            /* è¿›åº¦æ—¥å¿— */
             if (s_progress.totalBytes > 0)
             {
                 int pct = (written * 100) / (int)s_progress.totalBytes;
                 if (pct != lastPct && (pct % 25 == 0 || pct == 100))
                 {
-                    DBG_PRINTF("[OTA] ÏÂÔØ½ø¶È: %d%% (%d/%d)\n",
+                    DBG_PRINTF("[OTA] ä¸‹è½½è¿›åº¦: %d%% (%d/%d)\n",
                                pct, written, s_progress.totalBytes);
                     lastPct = pct;
                 }
             }
         }
 
-        /* Î¹¹· (ESP8266 ÎŞÓ²¼ş¿´ÃÅ¹·, µ« yield ÔÊĞí WiFi ºóÌ¨´¦Àí) */
+        /* å–‚ç‹— (ESP8266 æ— ç¡¬ä»¶çœ‹é—¨ç‹—, ä½† yield å…è®¸ WiFi åå°å¤„ç†) */
         yield();
     }
 
     s_fwFile.close();
     http.end();
 
-    DBG_PRINTF("[OTA] ÏÂÔØÍê³É: %d ×Ö½Ú\n", written);
+    DBG_PRINTF("[OTA] ä¸‹è½½å®Œæˆ: %d å­—èŠ‚\n", written);
 
     if (written == 0)
     {
@@ -199,48 +199,62 @@ static bool downloadFirmware(const char *url)
     return true;
 }
 
-/* ==================== ·¢ËÍÒ»°ü Xmodem Êı¾İ ==================== */
+/* ==================== å‘é€ä¸€åŒ… Xmodem æ•°æ® ==================== */
 static bool sendXmodemPacket(void)
 {
     uint8_t data[OTA_PACKET_DATA_SIZE];
 
-    /* ´ÓÎÄ¼ş¶ÁÈ¡ 128 ×Ö½Ú */
+    /* ä»æ–‡ä»¶è¯»å– 128 å­—èŠ‚ */
     int bytesRead = s_fwFile.read(data, OTA_PACKET_DATA_SIZE);
     if (bytesRead <= 0)
     {
-        /* ÎÄ¼ş¶ÁÍêÁË */
+        /* æ–‡ä»¶è¯»å®Œäº† */
         return false;
     }
 
-    /* ²»×ã 128B µÄÓÃ 0x1A (Ctrl-Z) Ìî³ä (Xmodem ¹æ·¶) */
+    /* ä¸è¶³ 128B çš„ç”¨ 0x1A (Ctrl-Z) å¡«å…… (Xmodem è§„èŒƒ) */
     if (bytesRead < OTA_PACKET_DATA_SIZE)
         memset(data + bytesRead, 0x1A, OTA_PACKET_DATA_SIZE - bytesRead);
 
-    /* ¼ÆËã CRC16 */
+    /* è®¡ç®— CRC16 */
     uint16_t crc = crc16_xmodem(data, OTA_PACKET_DATA_SIZE);
 
-    /* ×é×° Xmodem °ü */
+    /* ç»„è£… Xmodem åŒ… */
     s_pktBuf[0] = OTA_SOH;                              /* SOH */
     s_pktBuf[1] = (uint8_t)(s_seq >> 8);                 /* SeqH */
     s_pktBuf[2] = (uint8_t)(s_seq & 0xFF);                /* SeqL */
-    memcpy(s_pktBuf + 3, data, OTA_PACKET_DATA_SIZE);    /* 128B Êı¾İ */
+    memcpy(s_pktBuf + 3, data, OTA_PACKET_DATA_SIZE);    /* 128B æ•°æ® */
     s_pktBuf[3 + OTA_PACKET_DATA_SIZE] = (uint8_t)(crc >> 8);     /* CRCH */
     s_pktBuf[3 + OTA_PACKET_DATA_SIZE + 1] = (uint8_t)(crc & 0xFF); /* CRCL */
 
-    /* Í¨¹ı LoRa ·¢ËÍ (¶¨µã´«Êäµ½Ä¿±ê½Úµã) */
+    /* é€šè¿‡ LoRa å‘é€ (å®šç‚¹ä¼ è¾“åˆ°ç›®æ ‡èŠ‚ç‚¹) */
     sendRawFrame((uint16_t)s_progress.nodeId, LORA_CHANNEL,
                  s_pktBuf, XM_PACKET_TOTAL);
 
     s_progress.sentBytes += (uint32_t)bytesRead;
     s_progress.retryCount = 0;
 
+    /* è¿›åº¦æ—¥å¿—: é¦–åŒ… + æ¯10åŒ…æ‰“å°ä¸€æ¬¡ */
+    {
+        uint16_t totalPkts = (uint16_t)((s_progress.totalBytes + OTA_PACKET_DATA_SIZE - 1) / OTA_PACKET_DATA_SIZE);
+        if (s_seq == 1 || (s_seq % 10) == 0)
+        {
+            int pct = (totalPkts > 0) ? (int)(s_seq * 100 / totalPkts) : 0;
+            DBG_PRINTF("[OTA] å‘åŒ… #%u/%u (%d%%) %u/%uB\n",
+                       (unsigned)s_seq, (unsigned)totalPkts, pct,
+                       (unsigned)s_progress.sentBytes,
+                       (unsigned)s_progress.totalBytes);
+        }
+    }
+
     return true;
 }
 
-/* ==================== ÎÄ¼ş¼¶¾²Ì¬±äÁ¿ ==================== */
-static char s_otaUrl[256];  /* ¹Ì¼şÏÂÔØ URL, ÓÉ ota_start ÉèÖÃ, ota_tick Ê¹ÓÃ */
+/* ==================== æ–‡ä»¶çº§é™æ€å˜é‡ ==================== */
+static char s_otaUrl[256];  /* å›ºä»¶ä¸‹è½½ URL, ç”± ota_start è®¾ç½®, ota_tick ä½¿ç”¨ */
+static bool s_fileReady = false;  /* true=å›ºä»¶å·²å°±ç»ªäº OTA_FW_FILE, è·³è¿‡ä¸‹è½½ */
 
-/* ==================== ¹«¿ªº¯Êı ==================== */
+/* ==================== å…¬å¼€å‡½æ•° ==================== */
 
 void ota_init(void)
 {
@@ -248,18 +262,18 @@ void ota_init(void)
     s_progress.state = OTA_IDLE;
     s_hasResp = false;
     s_fwFile = File();
-    DBG_PRINTLN("[OTA] ´¦ÀíÆ÷³õÊ¼»¯Íê³É");
+    DBG_PRINTLN("[OTA] å¤„ç†å™¨åˆå§‹åŒ–å®Œæˆ");
 }
 
 bool ota_start(uint8_t nodeId, const char *url, const char *version)
 {
     if (s_progress.state != OTA_IDLE)
     {
-        DBG_PRINTF("[OTA] Æô¶¯Ê§°Ü: µ±Ç°×´Ì¬=%d (Ã¦)\n", s_progress.state);
+        DBG_PRINTF("[OTA] å¯åŠ¨å¤±è´¥: å½“å‰çŠ¶æ€=%d (å¿™)\n", s_progress.state);
         return false;
     }
 
-    /* ±£´æ²ÎÊı */
+    /* ä¿å­˜å‚æ•° */
     s_progress.nodeId = nodeId;
     s_progress.totalBytes = 0;
     s_progress.sentBytes = 0;
@@ -268,7 +282,7 @@ bool ota_start(uint8_t nodeId, const char *url, const char *version)
     strncpy(s_progress.version, version ? version : "V0.0", sizeof(s_progress.version) - 1);
     s_progress.version[sizeof(s_progress.version) - 1] = '\0';
 
-    /* ±£´æ URL */
+    /* ä¿å­˜ URL */
     strncpy(s_otaUrl, url ? url : "", sizeof(s_otaUrl) - 1);
     s_otaUrl[sizeof(s_otaUrl) - 1] = '\0';
 
@@ -276,14 +290,50 @@ bool ota_start(uint8_t nodeId, const char *url, const char *version)
     s_hasResp = false;
     s_seq = 1;
 
-    DBG_PRINTF("[OTA] Æô¶¯: ½Úµã%d, °æ±¾=%s, URL=%s\n", nodeId, s_progress.version, s_otaUrl);
+    DBG_PRINTF("[OTA] å¯åŠ¨: èŠ‚ç‚¹%d, ç‰ˆæœ¬=%s, URL=%s\n", nodeId, s_progress.version, s_otaUrl);
 
-    /* ½øÈë´¥·¢½Úµã×´Ì¬ */
+    /* è¿›å…¥è§¦å‘èŠ‚ç‚¹çŠ¶æ€ */
+    s_fileReady = false;
     setState(OTA_TRIGGER_NODE);
     return true;
 }
 
-/* OTA ×´Ì¬»úÖ÷Ñ­»· */
+/* å›ºä»¶å·²ä¸‹è½½åˆ° OTA_FW_FILE, è·³è¿‡ä¸‹è½½ç›´æ¥ä¸‹å‘ */
+bool ota_startFromFile(uint8_t nodeId, const char *version)
+{
+    if (s_progress.state != OTA_IDLE)
+    {
+        DBG_PRINTF("[OTA] å¯åŠ¨å¤±è´¥: å½“å‰çŠ¶æ€=%d (å¿™)\n", s_progress.state);
+        return false;
+    }
+    if (!LittleFS.begin() || !LittleFS.exists(OTA_FW_FILE))
+    {
+        DBG_PRINTLN("[OTA] å›ºä»¶æ–‡ä»¶ä¸å­˜åœ¨");
+        return false;
+    }
+
+    s_progress.nodeId = nodeId;
+    s_progress.totalBytes = 0;
+    s_progress.sentBytes = 0;
+    s_progress.retryCount = 0;
+    s_progress.elapsedMs = 0;
+    strncpy(s_progress.version, version ? version : "V0.0",
+            sizeof(s_progress.version) - 1);
+    s_progress.version[sizeof(s_progress.version) - 1] = '\0';
+
+    s_otaUrl[0] = '\0';
+    s_otaStart = millis();
+    s_hasResp = false;
+    s_seq = 1;
+    s_fileReady = true;
+
+    DBG_PRINTF("[OTA] å¯åŠ¨(å¹³å°å›ºä»¶): èŠ‚ç‚¹%d, ç‰ˆæœ¬=%s\n",
+               nodeId, s_progress.version);
+    setState(OTA_TRIGGER_NODE);
+    return true;
+}
+
+/* OTA çŠ¶æ€æœºä¸»å¾ªç¯ */
 void ota_tick(void)
 {
     uint32_t now = millis();
@@ -292,66 +342,90 @@ void ota_tick(void)
     switch (s_progress.state)
     {
     case OTA_IDLE:
-        /* Ê²Ã´¶¼²»×ö */
+        /* ä»€ä¹ˆéƒ½ä¸åš */
         break;
 
-    /* ---------- ½×¶Î1: ´¥·¢½Úµã¸´Î»½ø BootLoader ---------- */
+    /* ---------- é˜¶æ®µ1: è§¦å‘èŠ‚ç‚¹å¤ä½è¿› BootLoader ---------- */
     case OTA_TRIGGER_NODE:
     {
-        /* Í¨¹ı LoRa ·¢ËÍ AT+OTA=start,V<m>.<n> ´¥·¢½ÚµãÉı¼¶ */
+        /* ç­‰ LoRa ä¿¡é“ç©ºé—²: ota_startFromFile é€šå¸¸åœ¨èŠ‚ç‚¹åˆšå›å¤ DATA åè¢«è°ƒç”¨,
+         * æ­¤æ—¶èŠ‚ç‚¹ LoRa æ¨¡å—å¯èƒ½è¿˜åœ¨ TX æ¨¡å¼, ç«‹å³å‘ AT+OTA ä¼šå› åŠåŒå·¥å†²çªä¸¢å¤±.
+         * ç­‰ 500ms ç¡®ä¿èŠ‚ç‚¹å›åˆ° RX æ¨¡å¼å†å‘ */
+        if (now - s_stateStart < 500)
+            break;
+
+        /* é€šè¿‡ LoRa å‘é€ AT+OTA=start,V<m>.<n> è§¦å‘èŠ‚ç‚¹å‡çº§ */
         char cmd[LORA_CMD_MAX_LEN];
         int n = snprintf(cmd, sizeof(cmd), "AT+OTA=start,%s\r\n", s_progress.version);
         if (n > 0)
         {
             sendRawFrame((uint16_t)s_progress.nodeId, LORA_CHANNEL,
                          (const uint8_t *)cmd, (uint16_t)n);
-            DBG_PRINTF("[OTA] ´¥·¢½Úµã%d: %s", s_progress.nodeId, cmd);
+            DBG_PRINTF("[OTA] è§¦å‘èŠ‚ç‚¹%d: %s", s_progress.nodeId, cmd);
         }
         setState(OTA_WAIT_NODE_RESET);
         break;
     }
 
-    /* ---------- ½×¶Î2: µÈ´ı½Úµã¸´Î»½ø BootLoader ---------- */
+    /* ---------- é˜¶æ®µ2: ç­‰å¾…èŠ‚ç‚¹å¤ä½è¿› BootLoader ---------- */
     case OTA_WAIT_NODE_RESET:
         if (now - s_stateStart >= OTA_NODE_RESET_WAIT_MS)
         {
-            DBG_PRINTLN("[OTA] ½Úµã¸´Î»µÈ´ıÍê³É, ¿ªÊ¼ÏÂÔØ¹Ì¼ş");
+            DBG_PRINTLN("[OTA] èŠ‚ç‚¹å¤ä½ç­‰å¾…å®Œæˆ, å¼€å§‹ä¸‹è½½å›ºä»¶");
             setState(OTA_DOWNLOADING);
         }
         break;
 
-    /* ---------- ½×¶Î3: ÏÂÔØ¹Ì¼şµ½ LittleFS ---------- */
+    /* ---------- é˜¶æ®µ3: ä¸‹è½½å›ºä»¶åˆ° LittleFS (å·²å°±ç»ªåˆ™è·³è¿‡) ---------- */
     case OTA_DOWNLOADING:
-        if (downloadFirmware(s_otaUrl))
+        if (s_fileReady)
         {
-            /* ´ò¿ªÎÄ¼ş×¼±¸¶ÁÈ¡ */
+            /* å¹³å° OTA: å›ºä»¶å·²ä¸‹è½½, ç›´æ¥æ‰“å¼€å‘é€ */
             s_fwFile = LittleFS.open(OTA_FW_FILE, "r");
             if (!s_fwFile)
             {
-                DBG_PRINTLN("[OTA] ÎŞ·¨´ò¿ª¹Ì¼şÎÄ¼ş");
+                DBG_PRINTLN("[OTA] æ— æ³•æ‰“å¼€å›ºä»¶æ–‡ä»¶");
                 setState(OTA_FAILED);
                 break;
             }
             s_seq = 1;
             s_progress.sentBytes = 0;
-            DBG_PRINTF("[OTA] ¹Ì¼şÎÄ¼şÒÑ´ò¿ª, ´óĞ¡=%d ×Ö½Ú, ¿ªÊ¼·Ö°ü·¢ËÍ\n",
+            s_progress.totalBytes = (uint32_t)s_fwFile.size();
+            DBG_PRINTF("[OTA] å¹³å°å›ºä»¶å·²å°±ç»ª, å¤§å°=%d å­—èŠ‚, å¼€å§‹åˆ†åŒ…å‘é€\n",
+                       s_fwFile.size());
+            setState(OTA_SENDING);
+            break;
+        }
+        if (downloadFirmware(s_otaUrl))
+        {
+            /* æ‰“å¼€æ–‡ä»¶å‡†å¤‡è¯»å– */
+            s_fwFile = LittleFS.open(OTA_FW_FILE, "r");
+            if (!s_fwFile)
+            {
+                DBG_PRINTLN("[OTA] æ— æ³•æ‰“å¼€å›ºä»¶æ–‡ä»¶");
+                setState(OTA_FAILED);
+                break;
+            }
+            s_seq = 1;
+            s_progress.sentBytes = 0;
+            DBG_PRINTF("[OTA] å›ºä»¶æ–‡ä»¶å·²æ‰“å¼€, å¤§å°=%d å­—èŠ‚, å¼€å§‹åˆ†åŒ…å‘é€\n",
                        s_fwFile.size());
             setState(OTA_SENDING);
         }
         else
         {
-            DBG_PRINTLN("[OTA] ¹Ì¼şÏÂÔØÊ§°Ü");
+            DBG_PRINTLN("[OTA] å›ºä»¶ä¸‹è½½å¤±è´¥");
             setState(OTA_FAILED);
         }
         break;
 
-    /* ---------- ½×¶Î4: ·¢ËÍ Xmodem Êı¾İ°ü ---------- */
+    /* ---------- é˜¶æ®µ4: å‘é€ Xmodem æ•°æ®åŒ… ---------- */
     case OTA_SENDING:
     {
         if (!sendXmodemPacket())
         {
-            /* ÎÄ¼ş¶ÁÈ¡Íê±Ï, ·¢ËÍ EOT */
-            DBG_PRINTF("[OTA] ËùÓĞÊı¾İ°ü·¢ËÍÍê±Ï (%u °ü), ·¢ËÍ EOT\n",
+            /* æ–‡ä»¶è¯»å–å®Œæ¯•, å‘é€ EOT */
+            DBG_PRINTF("[OTA] æ‰€æœ‰æ•°æ®åŒ…å‘é€å®Œæ¯• (%u åŒ…), å‘é€ EOT\n",
                        (unsigned)(s_seq - 1));
             setState(OTA_SEND_EOT);
             break;
@@ -362,25 +436,32 @@ void ota_tick(void)
         break;
     }
 
-    /* ---------- ½×¶Î5: µÈ´ı ACK/NAK ---------- */
+    /* ---------- é˜¶æ®µ5: ç­‰å¾… ACK/NAK ---------- */
     case OTA_WAIT_ACK:
         if (s_hasResp)
         {
             if (s_otaResp == OTA_ACK)
             {
-                /* ACK: ÏÂÒ»°ü */
+                /* ACK: ä¸‹ä¸€åŒ… */
+                uint16_t totalPkts = (uint16_t)((s_progress.totalBytes + OTA_PACKET_DATA_SIZE - 1) / OTA_PACKET_DATA_SIZE);
+                if ((s_seq % 10) == 0 || s_seq == 1)
+                {
+                    int pct = (totalPkts > 0) ? (int)(s_seq * 100 / totalPkts) : 0;
+                    DBG_PRINTF("[OTA] ACK #%u/%u (%d%%)\n",
+                               (unsigned)s_seq, (unsigned)totalPkts, pct);
+                }
                 s_seq++;
                 s_progress.retryCount = 0;
                 setState(OTA_SENDING);
             }
             else if (s_otaResp == OTA_NAK)
             {
-                /* NAK: ÖØ·¢µ±Ç°°ü */
-                DBG_PRINTF("[OTA] ½ÚµãNAK, ÖØ·¢°ü #%u\n", (unsigned)s_seq);
+                /* NAK: é‡å‘å½“å‰åŒ… */
+                DBG_PRINTF("[OTA] èŠ‚ç‚¹NAK, é‡å‘åŒ… #%u\n", (unsigned)s_seq);
                 s_progress.retryCount++;
                 if (s_progress.retryCount >= OTA_MAX_RETRY)
                 {
-                    DBG_PRINTF("[OTA] °ü #%u ÖØÊÔ´ÎÊı³¬ÏŞ\n", (unsigned)s_seq);
+                    DBG_PRINTF("[OTA] åŒ… #%u é‡è¯•æ¬¡æ•°è¶…é™\n", (unsigned)s_seq);
                     setState(OTA_FAILED);
                 }
                 else
@@ -390,19 +471,19 @@ void ota_tick(void)
             }
             else if (s_otaResp == OTA_CAN)
             {
-                DBG_PRINTLN("[OTA] ½ÚµãÈ¡Ïû´«Êä");
+                DBG_PRINTLN("[OTA] èŠ‚ç‚¹å–æ¶ˆä¼ è¾“");
                 setState(OTA_FAILED);
             }
             s_hasResp = false;
         }
         else if (now - s_stateStart >= OTA_PACKET_TIMEOUT_MS)
         {
-            /* ³¬Ê±: ÖØ·¢ */
-            DBG_PRINTF("[OTA] µÈ´ıACK³¬Ê±, ÖØ·¢°ü #%u\n", (unsigned)s_seq);
+            /* è¶…æ—¶: é‡å‘ */
+            DBG_PRINTF("[OTA] ç­‰å¾…ACKè¶…æ—¶, é‡å‘åŒ… #%u\n", (unsigned)s_seq);
             s_progress.retryCount++;
             if (s_progress.retryCount >= OTA_MAX_RETRY)
             {
-                DBG_PRINTF("[OTA] °ü #%u ÖØÊÔ´ÎÊı³¬ÏŞ\n", (unsigned)s_seq);
+                DBG_PRINTF("[OTA] åŒ… #%u é‡è¯•æ¬¡æ•°è¶…é™\n", (unsigned)s_seq);
                 setState(OTA_FAILED);
             }
             else
@@ -412,10 +493,10 @@ void ota_tick(void)
         }
         break;
 
-    /* ---------- ½×¶Î6: ÖØ·¢µ±Ç°°ü ---------- */
+    /* ---------- é˜¶æ®µ6: é‡å‘å½“å‰åŒ… ---------- */
     case OTA_RETRY_PACKET:
     {
-        /* ÖØĞÂ·¢ËÍÉÏÒ»°ü (s_pktBuf ÖĞ»¹ÓĞÊı¾İ) */
+        /* é‡æ–°å‘é€ä¸Šä¸€åŒ… (s_pktBuf ä¸­è¿˜æœ‰æ•°æ®) */
         sendRawFrame((uint16_t)s_progress.nodeId, LORA_CHANNEL,
                      s_pktBuf, XM_PACKET_TOTAL);
         s_hasResp = false;
@@ -423,63 +504,63 @@ void ota_tick(void)
         break;
     }
 
-    /* ---------- ½×¶Î7: ·¢ËÍ EOT ---------- */
+    /* ---------- é˜¶æ®µ7: å‘é€ EOT ---------- */
     case OTA_SEND_EOT:
     {
         uint8_t eot = OTA_EOT;
         sendRawFrame((uint16_t)s_progress.nodeId, LORA_CHANNEL, &eot, 1);
-        DBG_PRINTLN("[OTA] EOT ÒÑ·¢ËÍ, µÈ´ı×îÖÕÈ·ÈÏ");
+        DBG_PRINTLN("[OTA] EOT å·²å‘é€, ç­‰å¾…æœ€ç»ˆç¡®è®¤");
         s_hasResp = false;
         setState(OTA_WAIT_FINAL_ACK);
         break;
     }
 
-    /* ---------- ½×¶Î8: µÈ´ı×îÖÕ ACK (CRC32 ÑéÖ¤½á¹û) ---------- */
+    /* ---------- é˜¶æ®µ8: ç­‰å¾…æœ€ç»ˆ ACK (CRC32 éªŒè¯ç»“æœ) ---------- */
     case OTA_WAIT_FINAL_ACK:
         if (s_hasResp)
         {
             if (s_otaResp == OTA_ACK)
             {
-                DBG_PRINTLN("[OTA] Éı¼¶³É¹¦!");
+                DBG_PRINTLN("[OTA] å‡çº§æˆåŠŸ!");
                 setState(OTA_COMPLETE);
             }
             else if (s_otaResp == OTA_NAK)
             {
-                DBG_PRINTLN("[OTA] Éı¼¶Ê§°Ü (CRC32 Ğ£Ñé²»Í¨¹ı)");
+                DBG_PRINTLN("[OTA] å‡çº§å¤±è´¥ (CRC32 æ ¡éªŒä¸é€šè¿‡)");
                 setState(OTA_FAILED);
             }
             s_hasResp = false;
         }
         else if (now - s_stateStart >= OTA_PACKET_TIMEOUT_MS)
         {
-            /* ×îÖÕ ACK ³¬Ê±, Ò²ËãÍê³É(½Úµã¿ÉÄÜÒÑÌø×ª) */
-            DBG_PRINTLN("[OTA] ×îÖÕÈ·ÈÏ³¬Ê±, ÊÓÎªÍê³É");
+            /* æœ€ç»ˆ ACK è¶…æ—¶, ä¹Ÿç®—å®Œæˆ(èŠ‚ç‚¹å¯èƒ½å·²è·³è½¬) */
+            DBG_PRINTLN("[OTA] æœ€ç»ˆç¡®è®¤è¶…æ—¶, è§†ä¸ºå®Œæˆ");
             setState(OTA_COMPLETE);
         }
         break;
 
-    /* ---------- Íê³É / Ê§°Ü ---------- */
+    /* ---------- å®Œæˆ / å¤±è´¥ ---------- */
     case OTA_COMPLETE:
-        /* ÇåÀí */
+        /* æ¸…ç† */
         if (s_fwFile) s_fwFile.close();
         LittleFS.remove(OTA_FW_FILE);
-        DBG_PRINTF("[OTA] Íê³É, ºÄÊ± %lu Ãë\n",
+        DBG_PRINTF("[OTA] å®Œæˆ, è€—æ—¶ %lu ç§’\n",
                    (unsigned long)(s_progress.elapsedMs / 1000));
         s_progress.state = OTA_IDLE;
         break;
 
     case OTA_FAILED:
-        /* ÇåÀí */
+        /* æ¸…ç† */
         if (s_fwFile) s_fwFile.close();
         LittleFS.remove(OTA_FW_FILE);
-        DBG_PRINTF("[OTA] Ê§°Ü, ºÄÊ± %lu Ãë\n",
+        DBG_PRINTF("[OTA] å¤±è´¥, è€—æ—¶ %lu ç§’\n",
                    (unsigned long)(s_progress.elapsedMs / 1000));
         s_progress.state = OTA_IDLE;
         break;
     }
 }
 
-/* Î¹ OTA ÏìÓ¦×Ö½Ú (´Ó LoRa RX ×´Ì¬»úµ÷ÓÃ) */
+/* å–‚ OTA å“åº”å­—èŠ‚ (ä» LoRa RX çŠ¶æ€æœºè°ƒç”¨) */
 void ota_feedByte(uint8_t b)
 {
     if (s_progress.state == OTA_WAIT_ACK ||
@@ -509,7 +590,7 @@ void ota_cancel(void)
     {
         if (s_fwFile) s_fwFile.close();
         LittleFS.remove(OTA_FW_FILE);
-        DBG_PRINTLN("[OTA] ÒÑÈ¡Ïû");
+        DBG_PRINTLN("[OTA] å·²å–æ¶ˆ");
         s_progress.state = OTA_IDLE;
     }
 }

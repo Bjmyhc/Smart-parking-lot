@@ -25,11 +25,9 @@
 #include "app_global.h"
 #include "app_init.h"
 #include "app_tasks.h"
+#include "app_version.h"    /* 版本单一源头: NODE_FW_VERSION */
 #include "bsp_usart.h"
 #include "bsp_delay.h"
-
-/* 固件版本: 节点端 LoRa 网关方案 (v2.1) */
-#define NODE_FW_VERSION     "v2.1"
 
 /* ==================== 看门狗 ==================== */
 /* 独立看门狗 IWDG: LSI 时钟 40kHz, 64 分频 -> 625Hz(1.6ms/计数值),
@@ -72,6 +70,15 @@ int main(void)
      * 注意: 普通烧录(A区直跑)时 VTOR 默认 0x08000000, 设了也兼容 */
     SCB->VTOR = FLASH_BASE | 0x2000;
 
+    /* 恢复总中断使能: BootLoader 的 Load_APP 跳转前执行过
+     * __disable_irq(), 跳转过来时 PRIMASK 仍为关闭状态.
+     * 若不重新使能, SysTick/USART 等所有中断都不响应:
+     *   - SysTick 停走 -> Get_Tick() 停滞 -> 周期任务全部跳过
+     *   - USART2 中断不触发 -> LoRa 环形缓冲收不到字节 -> 不响应网关
+     *   表现为打印完启动横幅后无任何输出、网关搜不到节点.
+     * 直接烧录(复位启动)时 PRIMASK=0, 此调用无副作用 */
+    __enable_irq();
+
     /* 初始化所有板级外设(含LoRa模块) */
     BSP_Init();
 
@@ -85,7 +92,6 @@ int main(void)
     /* 主循环 - 时间戳非阻塞架构 */
     while (1)
     {
-		
         US_Task();                  /* 超声波采样 */
         ParkingStatus_Check();      /* 车位状态检测 */
         QMC_Task();                 /* 地磁采集 */

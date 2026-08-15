@@ -37,6 +37,7 @@
 #include "lora_handler.h"
 #include "onenet_handler.h"
 #include "ota_handler.h"            /* OTA 升级 */
+#include "onenet_ota.h"             /* OneNET 平台 OTA (fuse-ota) */
 #include "config_portal.h"
 #include "gateway_oled.h"
 
@@ -193,11 +194,16 @@ static void activeEvent(void)
 /* ==================== 被动事件: 外部数据到达, 立即处理 ==================== */
 static void passiveEvent(void)
 {
-    /* 1. LoRa 轮询 + 数据接收 (最优先, 每次循环都跑) */
+    /* 1. LoRa 轮询 + 数据接收 (最优先, 每次循环都跑)
+     * OTA 期间: lora_tick 内部已暂停发轮询/控制命令, 只收字节喂 OTA 响应 */
     lora_tick();
 
-    /* 2. 节点超时离线检测 */
-    checkNodeTimeout();
+    /* 2. 节点超时离线检测 (OTA 期间跳过: 节点在升级中不算掉线,
+     *    避免升级中途被标记离线触发 OneNET 下线上报) */
+    if (ota_getState() == OTA_IDLE)
+    {
+        checkNodeTimeout();
+    }
 
     /* 3. MQTT 保活 + 接收下行命令 */
     if (sysEventFlag & SYS_EVENT_MQTT_CONNECTED)
@@ -218,6 +224,7 @@ void setup(void)
 
     oled_init();                       /* OLED 先初始化 (启动阶段画面) */
     ota_init();                        /* OTA 处理器初始化 */
+    onenet_ota_init();                 /* OneNET 平台 OTA 客户端初始化 */
     lora_init();
     resetAllNodes();
     /* 从 Flash 加载已持久化的子设备证书 (若存在) */
@@ -274,6 +281,9 @@ void loop(void)
 
     /* OTA 状态机: 固件下载 + LoRa 分包发送 */
     ota_tick();
+
+    /* OneNET 平台 OTA: 周期检测升级任务并自动执行 */
+    onenet_ota_tick();
 
     /* 串口 OTA 触发命令: OTA <nodeId> <url> <version>
      * 例如: OTA 1 http://example.com/firmware.bin V2.2

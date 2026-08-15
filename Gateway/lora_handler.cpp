@@ -347,6 +347,15 @@ bool lora_tick(void)
         }
     }
 
+    /* --- 1.5 OTA 进行中: 只收字节(喂 OTA 响应), 暂停一切轮询/控制命令
+     * 发送. 节点正复位进 BootLoader, 不会响应 AT 命令, 此时继续发命令
+     * 只会与 OTA 数据包争抢半双工空口, 干扰升级; OTA 结束后自然恢复.
+     * 注意: 不能整体跳过本函数, 否则 OTA 的 ACK/NAK 响应也收不到了 */
+    if (ota_getState() != OTA_IDLE)
+    {
+        return gotData;
+    }
+
     /* --- 2. 处理待发控制命令 (优先于轮询, 且不等待响应不算节点轮询) --- */
     if (pendingState == PENDING_SEND && !waitingResp)
     {
