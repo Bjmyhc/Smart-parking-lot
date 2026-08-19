@@ -1,0 +1,38 @@
+# Misc
+*.class
+*.log
+.gradle/
+.build/
+
+# Flutter
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+.pub-cache/
+.pub/
+.dart_tool/
+
+# Android
+android/.gradle/
+android/local.properties
+android/.idea/
+android/**/GeneratedPluginRegistrant.*
+
+# iOS
+ios/Flutter/Flutter.framework
+ios/Flutter/Flutter.podspec
+ios/Pods/
+
+# Generated files
+lib/generated_plugin_registrant.dart
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
