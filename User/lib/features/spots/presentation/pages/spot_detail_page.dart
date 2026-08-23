@@ -1,4 +1,5 @@
-﻿import 'package:flutter/material.dart';
+import 'dart:async';
+import 'package:flutter/material.dart';
 import '../../../../shared/widgets/card_container.dart';
 import '../../../../shared/widgets/custom_app_bar.dart';
 import '../../../../shared/widgets/status_badge.dart';
@@ -24,17 +25,27 @@ class _SpotDetailPageState extends State<SpotDetailPage> {
   final ApiService _apiService = ApiService();
   late Map<String, dynamic> _deviceDetail;
   bool _isLoading = true;
+  bool _refreshing = false;
+  Timer? _refreshTimer;
 
   @override
   void initState() {
     super.initState();
     _loadDetail();
+    // 定时刷新详情数据, 保证状态实时更新
+    _refreshTimer = Timer.periodic(const Duration(seconds: 3), (_) {
+      _loadDetail(showLoading: false);
+    });
   }
 
-  Future<void> _loadDetail() async {
-    setState(() {
-      _isLoading = true;
-    });
+  Future<void> _loadDetail({bool showLoading = true}) async {
+    if (_refreshing) return;
+    _refreshing = true;
+    if (showLoading) {
+      setState(() {
+        _isLoading = true;
+      });
+    }
     try {
       final detail = await _apiService.getDeviceDetail(widget.spot.id);
       if (mounted) {
@@ -50,7 +61,16 @@ class _SpotDetailPageState extends State<SpotDetailPage> {
           _deviceDetail = {};
         });
       }
+    } finally {
+      _refreshing = false;
     }
+  }
+
+  @override
+  void dispose() {
+    _refreshTimer?.cancel();
+    _apiService.dispose();
+    super.dispose();
   }
 
   @override
@@ -60,7 +80,7 @@ class _SpotDetailPageState extends State<SpotDetailPage> {
     return Scaffold(
       backgroundColor: AppColors.background,
       appBar: CustomAppBar(
-        title: '${spot.zone}区 · ${spot.id}',
+        title: spot.id,
         showBackButton: true,
       ),
       body: _isLoading
@@ -76,7 +96,7 @@ class _SpotDetailPageState extends State<SpotDetailPage> {
                   const SizedBox(height: AppDims.gapCard),
                   _buildDeviceInfo(spot),
                   const SizedBox(height: AppDims.gapCard),
-                  _buildActionButtons(),
+                  if (!spot.isOffline) _buildActionButtons(),
                   const SizedBox(height: 100),
                 ],
               ),
@@ -85,11 +105,13 @@ class _SpotDetailPageState extends State<SpotDetailPage> {
   }
 
   Widget _buildHeader(SpotModel spot) {
-    final statusBadge = spot.isFree
-        ? StatusBadge.free()
-        : spot.isOccupied
-            ? StatusBadge.occupied()
-            : StatusBadge.zombie();
+    final statusBadge = spot.isOffline
+        ? StatusBadge.offline()
+        : spot.isFree
+            ? StatusBadge.free()
+            : spot.isOccupied
+                ? StatusBadge.occupied()
+                : StatusBadge.zombie();
 
     return CardContainer(
       child: Column(
@@ -101,7 +123,7 @@ class _SpotDetailPageState extends State<SpotDetailPage> {
                 spot.id,
                 style: const TextStyle(
                   fontSize: 24,
-                  fontWeight: FontWeight.w700,
+                  fontWeight: FontWeight.w500,
                   color: AppColors.textPrimary,
                 ),
               ),
@@ -112,34 +134,58 @@ class _SpotDetailPageState extends State<SpotDetailPage> {
           Container(
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
-              color: AppColors.primary.withOpacity(0.05),
+              color: spot.isOffline
+                  ? AppColors.textSecondary.withOpacity(0.05)
+                  : AppColors.primary.withOpacity(0.05),
               borderRadius: BorderRadius.circular(AppDims.radiusMedium),
             ),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceAround,
-              children: [
-                _buildInfoItem(
-                  icon: Icons.battery_full,
-                  label: '电量',
-                  value: '${spot.batteryLevel.round()}%',
-                  color: spot.batteryLevel > 50 ? AppColors.success : AppColors.danger,
-                ),
-                Container(width: 1, height: 40, color: AppColors.textSecondary.withOpacity(0.2)),
-                _buildInfoItem(
-                  icon: Icons.signal_cellular_alt,
-                  label: '信号',
-                  value: '${spot.signalStrength}dBm',
-                  color: AppColors.primary,
-                ),
-                Container(width: 1, height: 40, color: AppColors.textSecondary.withOpacity(0.2)),
-                _buildInfoItem(
-                  icon: Icons.timer,
-                  label: '占用时长',
-                  value: '${spot.occupiedHours}h',
-                  color: spot.isZombie ? AppColors.danger : AppColors.warning,
-                ),
-              ],
-            ),
+            child: spot.isOffline
+                ? Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      const Icon(Icons.cloud_off, color: AppColors.textSecondary, size: 28),
+                      const SizedBox(width: 12),
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            '设备已离线',
+                            style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: AppColors.textSecondary),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            '无法获取实时数据，请检查设备网络',
+                            style: TextStyle(fontSize: 12, color: AppColors.textSecondary.withOpacity(0.7)),
+                          ),
+                        ],
+                      ),
+                    ],
+                  )
+                : Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceAround,
+                    children: [
+                      _buildInfoItem(
+                        icon: Icons.battery_full,
+                        label: '电量',
+                        value: '${spot.batteryLevel.round()}%',
+                        color: spot.batteryLevel > 50 ? AppColors.success : AppColors.danger,
+                      ),
+                      Container(width: 1, height: 40, color: AppColors.textSecondary.withOpacity(0.2)),
+                      _buildInfoItem(
+                        icon: Icons.signal_cellular_alt,
+                        label: '信号',
+                        value: '${spot.signalStrength}dBm',
+                        color: AppColors.primary,
+                      ),
+                      Container(width: 1, height: 40, color: AppColors.textSecondary.withOpacity(0.2)),
+                      _buildInfoItem(
+                        icon: Icons.timer,
+                        label: '占用时长',
+                        value: '${spot.occupiedHours}h',
+                        color: spot.isZombie ? AppColors.danger : AppColors.warning,
+                      ),
+                    ],
+                  ),
           ),
         ],
       ),
@@ -179,6 +225,51 @@ class _SpotDetailPageState extends State<SpotDetailPage> {
   Widget _buildPlateInfo(SpotModel spot) {
     final plateNumber = spot.plateNumber ?? '暂无车牌信息';
     final isOccupied = spot.isOccupied || spot.isZombie;
+
+    if (spot.isOffline) {
+      return CardContainer(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              '车辆信息',
+              style: TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.w600,
+                color: AppColors.textPrimary,
+              ),
+            ),
+            const SizedBox(height: 16),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(24),
+              decoration: BoxDecoration(
+                color: AppColors.textSecondary.withOpacity(0.05),
+                borderRadius: BorderRadius.circular(AppDims.radiusMedium),
+                border: Border.all(
+                  color: AppColors.textSecondary.withOpacity(0.2),
+                ),
+              ),
+              child: Column(
+                children: [
+                  const Icon(Icons.help_outline, size: 56, color: AppColors.textSecondary),
+                  const SizedBox(height: 16),
+                  const Text(
+                    '状态未知',
+                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600, color: AppColors.textSecondary),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    '设备离线，无法获取车辆信息',
+                    style: TextStyle(fontSize: 14, color: AppColors.textSecondary.withOpacity(0.7)),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      );
+    }
 
     return CardContainer(
       child: Column(
@@ -265,9 +356,8 @@ class _SpotDetailPageState extends State<SpotDetailPage> {
           const SizedBox(height: 16),
           _buildInfoRow('设备名称', deviceName),
           _buildInfoRow('设备ID', spot.id),
-          _buildInfoRow('所属分区', '${spot.zone}区'),
           _buildInfoRow('最后更新', updatedAt),
-          _buildInfoRow('在线状态', '在线'),
+          _buildInfoRow('在线状态', spot.isOffline ? '离线' : '在线'),
         ],
       ),
     );
@@ -288,9 +378,11 @@ class _SpotDetailPageState extends State<SpotDetailPage> {
           ),
           Text(
             value,
-            style: const TextStyle(
+            style: TextStyle(
               fontSize: 14,
-              color: AppColors.textPrimary,
+              color: label == '在线状态' && value == '离线'
+                  ? AppColors.textSecondary
+                  : AppColors.textPrimary,
               fontWeight: FontWeight.w500,
             ),
           ),
@@ -313,17 +405,13 @@ class _SpotDetailPageState extends State<SpotDetailPage> {
         ),
         const SizedBox(height: 16),
         ActionButtonGroup(
-          onDispatch: () async {
-            await _apiService.dispatchAlert('');
-            _showSnackBar('已派单');
-          },
           onNotify: () async {
             await _apiService.notifyOwner('');
-            _showSnackBar('已通知车主');
+            _showSnackBar('已通知车主挪走');
           },
-          onResolve: () async {
-            await _apiService.resolveAlert('');
-            _showSnackBar('已处置');
+          onDispatch: () async {
+            await _apiService.dispatchAlert('');
+            _showSnackBar('已派单给工作人员');
           },
         ),
       ],

@@ -1,12 +1,16 @@
-﻿import 'package:flutter/material.dart';
-import 'package:fl_chart/fl_chart.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter/gestures.dart';
+import 'dart:async';
+import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../../../../shared/widgets/card_container.dart';
 import '../../../../shared/widgets/status_badge.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_dims.dart';
 import '../../../../core/models/spot_model.dart';
 import '../../../../core/models/alert_model.dart';
-import '../../../../core/services/api_service.dart';
+import '../../../../core/providers/parking_provider.dart';
 
 class OverviewPage extends StatefulWidget {
   const OverviewPage({super.key});
@@ -16,270 +20,266 @@ class OverviewPage extends StatefulWidget {
 }
 
 class _OverviewPageState extends State<OverviewPage> {
-  final ApiService _apiService = ApiService();
-  List<SpotModel> _spots = [];
-  List<AlertModel> _alerts = [];
-  bool _isLoading = true;
+  static const _allCards = ['greeting', 'quickActions', 'deviceStatus', 'stats', 'latestAlert'];
+  List<String> _cardOrder = List.from(_allCards);
 
   @override
   void initState() {
     super.initState();
-    _loadData();
+    _loadCardOrder();
   }
 
-  Future<void> _loadData() async {
-    setState(() {
-      _isLoading = true;
-    });
-    try {
-      final spots = await _apiService.getSpots();
-      final alerts = await _apiService.getAlerts();
-      if (mounted) {
-        setState(() {
-          _spots = spots;
-          _alerts = alerts;
-          _isLoading = false;
-        });
-      }
-    } catch (e) {
-      if (mounted) {
-        setState(() {
-          _isLoading = false;
-        });
-      }
+  Future<void> _loadCardOrder() async {
+    final prefs = await SharedPreferences.getInstance();
+    final saved = prefs.getStringList('overview_card_order');
+    if (saved != null && saved.length == _allCards.length && saved.toSet().containsAll(_allCards)) {
+      setState(() {
+        _cardOrder = saved;
+      });
+    }
+  }
+
+  Future<void> _saveCardOrder() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setStringList('overview_card_order', _cardOrder);
+  }
+
+  Widget _buildCardById(String id, List<SpotModel> spots, List<AlertModel> alerts) {
+    switch (id) {
+      case 'greeting':
+        return _buildGreetingCard();
+      case 'quickActions':
+        return _buildQuickActions();
+      case 'deviceStatus':
+        return _buildDeviceStatusCard(spots);
+      case 'stats':
+        return _buildStatsCard(spots);
+      case 'latestAlert':
+        return _buildLatestAlertCard(alerts);
+      default:
+        return _buildGreetingCard();
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    final provider = context.watch<ParkingProvider>();
+    final spots = provider.spots;
+    final alerts = provider.alerts;
     return Scaffold(
       backgroundColor: AppColors.background,
-      body: _isLoading
+      body: provider.isLoading && spots.isEmpty
           ? const Center(child: CircularProgressIndicator())
           : RefreshIndicator(
               color: AppColors.primary,
-              onRefresh: _loadData,
-              child: SingleChildScrollView(
-                physics: const AlwaysScrollableScrollPhysics(),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+              onRefresh: provider.refresh,
+              child: ReorderableListView(
+                padding: const EdgeInsets.fromLTRB(
+                  AppDims.paddingPage,
+                  0,
+                  AppDims.paddingPage,
+                  80,
+                ),
+                header: Column(
                   children: [
-                    _buildHeader(),
-                    Transform.translate(
-                      offset: const Offset(0, -30),
-                      child: Padding(
-                        padding: const EdgeInsets.fromLTRB(
-                          AppDims.paddingPage,
-                          0,
-                          AppDims.paddingPage,
-                          AppDims.paddingPage,
-                        ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            _buildKpiCards(),
-                            const SizedBox(height: 16),
-                            _buildOccupancyChart(),
-                            const SizedBox(height: 16),
-                            _buildLatestAlert(),
-                            const SizedBox(height: 80),
-                          ],
-                        ),
-                      ),
-                    ),
+                    _buildHeader(context),
+                    const SizedBox(height: 16),
                   ],
                 ),
+                buildDefaultDragHandles: false,
+                children: _cardOrder.map((id) {
+                  return _LongPressDraggable(
+                    key: ValueKey(id),
+                    index: _cardOrder.indexOf(id),
+                    child: _buildCardById(id, spots, alerts),
+                  );
+                }).toList(),
+                onReorderItem: (oldIndex, newIndex) {
+                  setState(() {
+                    final item = _cardOrder.removeAt(oldIndex);
+                    _cardOrder.insert(newIndex, item);
+                  });
+                  _saveCardOrder();
+                },
               ),
             ),
     );
   }
 
-  Widget _buildHeader() {
+  Widget _buildHeader(BuildContext context) {
+    return Padding(
+      padding: EdgeInsets.only(
+        top: MediaQuery.of(context).padding.top + 16,
+        left: AppDims.paddingPage,
+        right: AppDims.paddingPage,
+      ),
+      child: Row(
+        children: [
+          const Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '首页',
+                  style: TextStyle(
+                    fontSize: 28,
+                    fontWeight: FontWeight.w500,
+                    color: AppColors.textPrimary,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Container(
+            width: 40,
+            height: 40,
+            decoration: BoxDecoration(
+              color: AppColors.surface,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: const Icon(Icons.notifications_none, color: AppColors.textSecondary, size: 22),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildGreetingCard() {
     final hour = DateTime.now().hour;
     final greeting = hour < 6 ? '凌晨好' : hour < 12 ? '早上好' : hour < 18 ? '下午好' : '晚上好';
     final dateStr = '${DateTime.now().month}月${DateTime.now().day}日';
+    final weekday = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'][DateTime.now().weekday - 1];
 
-    return Stack(
-      clipBehavior: Clip.none,
-      children: [
-        Container(
-          height: 220,
-          decoration: const BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: [Color(0xFF0052D9), Color(0xFF007DFF), Color(0xFF4A9EFF)],
-            ),
-          ),
-        ),
-        Positioned(
-          top: -30,
-          right: -30,
-          child: Container(
-            width: 150,
-            height: 150,
-            decoration: BoxDecoration(
-              color: Colors.white.withOpacity(0.08),
-              shape: BoxShape.circle,
-            ),
-          ),
-        ),
-        Positioned(
-          top: 40,
-          right: 20,
-          child: Container(
-            width: 80,
-            height: 80,
-            decoration: BoxDecoration(
-              color: Colors.white.withOpacity(0.06),
-              shape: BoxShape.circle,
-            ),
-          ),
-        ),
-        Positioned(
-          top: 80,
-          left: -20,
-          child: Container(
-            width: 100,
-            height: 100,
-            decoration: BoxDecoration(
-              color: Colors.white.withOpacity(0.05),
-              shape: BoxShape.circle,
-            ),
-          ),
-        ),
-        Padding(
-          padding: EdgeInsets.only(
-            top: MediaQuery.of(context).padding.top + 16,
-            left: AppDims.paddingPage,
-            right: AppDims.paddingPage,
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text(
-                          '总览',
-                          style: TextStyle(
-                            fontSize: 28,
-                            fontWeight: FontWeight.w700,
-                            color: Colors.white,
-                          ),
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          '$greeting，管理员 · $dateStr',
-                          style: const TextStyle(
-                            fontSize: 14,
-                            color: Colors.white70,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  Container(
-                    width: 40,
-                    height: 40,
-                    decoration: BoxDecoration(
-                      color: Colors.white.withOpacity(0.2),
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: const Icon(Icons.notifications, color: Colors.white, size: 22),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 20),
-              _buildHealthRow(),
-            ],
-          ),
-        ),
-      ],
-    );
-  }
+    IconData iconData;
+    Color iconColor;
+    if (hour < 6) {
+      iconData = Icons.bedtime;
+      iconColor = AppColors.textSecondary;
+    } else if (hour < 12) {
+      iconData = Icons.wb_sunny;
+      iconColor = const Color(0xFFFFB300);
+    } else if (hour < 18) {
+      iconData = Icons.wb_cloudy;
+      iconColor = AppColors.primary;
+    } else {
+      iconData = Icons.nightlight;
+      iconColor = const Color(0xFF7C4DFF);
+    }
 
-  Widget _buildHealthRow() {
-    return Container(
-      padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
-      decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.15),
-        borderRadius: BorderRadius.circular(AppDims.radiusMedium),
-      ),
+    return CardContainer(
       child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceAround,
         children: [
-          _buildHealthItem('LoRa网关', true),
-          Container(width: 1, height: 28, color: Colors.white.withOpacity(0.3)),
-          _buildHealthItem('摄像头', true),
-          Container(width: 1, height: 28, color: Colors.white.withOpacity(0.3)),
-          _buildHealthItem('服务器', true),
+          Icon(iconData, color: iconColor, size: 28),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '$greeting，管理员',
+                  style: const TextStyle(
+                    fontSize: 17,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.textPrimary,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  '$dateStr · $weekday',
+                  style: const TextStyle(
+                    fontSize: 13,
+                    color: AppColors.textSecondary,
+                  ),
+                ),
+              ],
+            ),
+          ),
         ],
       ),
     );
   }
 
-  Widget _buildHealthItem(String label, bool isOnline) {
-    return Expanded(
+  Widget _buildQuickActions() {
+    return CardContainer(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 16),
       child: Row(
-        mainAxisAlignment: MainAxisAlignment.center,
+        mainAxisAlignment: MainAxisAlignment.spaceAround,
+        children: [
+          _buildQuickItem(Icons.warning_amber, '告警中心', AppColors.primary),
+          _buildQuickItem(Icons.local_parking, '车位管理', AppColors.primary),
+          _buildQuickItem(Icons.file_download, '数据导出', AppColors.primary),
+          _buildQuickItem(Icons.system_update, '系统状态', AppColors.primary),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildQuickItem(IconData icon, String label, Color color) {
+    return GestureDetector(
+      onTap: () {},
+      child: Column(
         children: [
           Container(
-            width: 8,
-            height: 8,
+            width: 44,
+            height: 44,
             decoration: BoxDecoration(
-              color: isOnline ? AppColors.success : AppColors.danger,
-              shape: BoxShape.circle,
+              color: color.withValues(alpha: 0.1),
+              borderRadius: BorderRadius.circular(12),
             ),
+            child: Icon(icon, color: color, size: 24),
           ),
-          const SizedBox(width: 6),
+          const SizedBox(height: 8),
           Text(
             label,
-            style: const TextStyle(fontSize: 12, color: Colors.white70),
+            style: const TextStyle(
+              fontSize: 12,
+              color: AppColors.textPrimary,
+            ),
           ),
         ],
       ),
     );
   }
 
-  Widget _buildKpiCards() {
-    final totalSpots = _spots.length;
-    final freeSpots = _spots.where((s) => s.isFree).length;
-    final occupiedSpots = _spots.where((s) => s.isOccupied).length;
-    final zombieSpots = _spots.where((s) => s.isZombie).length;
+  Widget _buildStatsCard(List<SpotModel> spots) {
+    final totalSpots = spots.length;
+    final freeSpots = spots.where((s) => s.isFree).length;
+    final occupiedSpots = spots.where((s) => s.isOccupied).length;
+    final zombieSpots = spots.where((s) => s.isZombie).length;
 
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(AppDims.radiusLarge),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.08),
-            blurRadius: 16,
-            offset: const Offset(0, 4),
-          ),
-        ],
-      ),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceAround,
+    return CardContainer(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _buildKpiItem('$totalSpots', '总车位', AppColors.primary),
-          Container(width: 1, height: 40, color: AppColors.textSecondary.withOpacity(0.15)),
-          _buildKpiItem('$freeSpots', '空闲', AppColors.success),
-          Container(width: 1, height: 40, color: AppColors.textSecondary.withOpacity(0.15)),
-          _buildKpiItem('$occupiedSpots', '占用', AppColors.warning),
-          Container(width: 1, height: 40, color: AppColors.textSecondary.withOpacity(0.15)),
-          _buildKpiItem('$zombieSpots', '僵尸车', AppColors.danger),
+          const Padding(
+            padding: EdgeInsets.only(bottom: 12),
+            child: Text(
+              '车位概览',
+              style: TextStyle(
+                fontSize: 15,
+                fontWeight: FontWeight.w600,
+                color: AppColors.textPrimary,
+              ),
+            ),
+          ),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceAround,
+            children: [
+              _buildStatItem('$totalSpots', '总车位', AppColors.textPrimary),
+              Container(width: 1, height: 40, color: AppColors.textSecondary.withValues(alpha: 0.3)),
+              _buildStatItem('$freeSpots', '空闲', AppColors.success),
+              Container(width: 1, height: 40, color: AppColors.textSecondary.withValues(alpha: 0.3)),
+              _buildStatItem('$occupiedSpots', '占用', AppColors.warning),
+              Container(width: 1, height: 40, color: AppColors.textSecondary.withValues(alpha: 0.3)),
+              _buildStatItem('$zombieSpots', '僵尸车', AppColors.danger),
+            ],
+          ),
         ],
       ),
     );
   }
 
-  Widget _buildKpiItem(String value, String label, Color color) {
+  Widget _buildStatItem(String value, String label, Color color) {
     return Expanded(
       child: GestureDetector(
         onTap: () {
@@ -311,29 +311,10 @@ class _OverviewPageState extends State<OverviewPage> {
     );
   }
 
-  Widget _buildOccupancyChart() {
-    final totalSpots = _spots.length;
-    final freeSpots = _spots.where((s) => s.isFree).length;
-    final occupiedSpots = _spots.where((s) => s.isOccupied).length;
-    final zombieSpots = _spots.where((s) => s.isZombie).length;
-
-    final freeRate = totalSpots > 0 ? (freeSpots / totalSpots) * 100 : 0.0;
-    final occupiedRate = totalSpots > 0 ? (occupiedSpots / totalSpots) * 100 : 0.0;
-    final zombieRate = totalSpots > 0 ? (zombieSpots / totalSpots) * 100 : 0.0;
-
-    String busiestZone = 'A区';
-    double busiestRate = 0;
-    for (final zone in ['A', 'B', 'C']) {
-      final zoneSpots = _spots.where((s) => s.zone == zone).toList();
-      if (zoneSpots.isNotEmpty) {
-        final zoneOccupied = zoneSpots.where((s) => s.isOccupied || s.isZombie).length;
-        final zoneRate = zoneOccupied / zoneSpots.length;
-        if (zoneRate > busiestRate) {
-          busiestRate = zoneRate;
-          busiestZone = '$zone区';
-        }
-      }
-    }
+  Widget _buildDeviceStatusCard(List<SpotModel> spots) {
+    final total = spots.length;
+    final normal = spots.where((s) => s.isFree).length;
+    final abnormal = total - normal;
 
     return CardContainer(
       child: Column(
@@ -341,8 +322,10 @@ class _OverviewPageState extends State<OverviewPage> {
         children: [
           Row(
             children: [
+              const Icon(Icons.sensors, size: 18, color: AppColors.primary),
+              const SizedBox(width: 8),
               const Text(
-                '车位实时状态',
+                '设备状态',
                 style: TextStyle(
                   fontSize: 15,
                   fontWeight: FontWeight.w600,
@@ -351,142 +334,83 @@ class _OverviewPageState extends State<OverviewPage> {
               ),
               const Spacer(),
               Text(
-                '共 $totalSpots 个',
+                '共 $total 个节点',
                 style: const TextStyle(
-                  fontSize: 13,
+                  fontSize: 12,
                   color: AppColors.textSecondary,
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 14),
           Row(
             children: [
               Expanded(
-                flex: 3,
-                child: SizedBox(
-                  height: 160,
-                  child: PieChart(
-                    PieChartData(
-                      sectionsSpace: 2,
-                      centerSpaceRadius: 45,
-                      sections: [
-                        PieChartSectionData(
+                child: Container(
+                  padding: const EdgeInsets.symmetric(vertical: 10),
+                  decoration: BoxDecoration(
+                    color: AppColors.success.withValues(alpha: 0.08),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Column(
+                    children: [
+                      Text(
+                        '$normal',
+                        style: const TextStyle(
+                          fontSize: 22,
+                          fontWeight: FontWeight.w700,
                           color: AppColors.success,
-                          value: freeRate,
-                          title: '${freeRate.toStringAsFixed(0)}%',
-                          titleStyle: const TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.w600,
-                            color: Colors.white,
-                          ),
                         ),
-                        PieChartSectionData(
-                          color: AppColors.warning,
-                          value: occupiedRate,
-                          title: '${occupiedRate.toStringAsFixed(0)}%',
-                          titleStyle: const TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.w600,
-                            color: Colors.white,
-                          ),
-                        ),
-                        PieChartSectionData(
-                          color: AppColors.danger,
-                          value: zombieRate,
-                          title: zombieRate > 0 ? '${zombieRate.toStringAsFixed(0)}%' : '',
-                          titleStyle: const TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.w600,
-                            color: Colors.white,
-                          ),
-                        ),
-                      ],
-                    ),
+                      ),
+                      const SizedBox(height: 2),
+                      const Text(
+                        '正常',
+                        style: TextStyle(fontSize: 12, color: AppColors.textSecondary),
+                      ),
+                    ],
                   ),
                 ),
               ),
-              const SizedBox(width: 16),
+              const SizedBox(width: 10),
               Expanded(
-                flex: 2,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    _buildChartLegend(AppColors.success, '空闲', freeSpots, freeRate),
-                    const SizedBox(height: 12),
-                    _buildChartLegend(AppColors.warning, '占用', occupiedSpots, occupiedRate),
-                    const SizedBox(height: 12),
-                    _buildChartLegend(AppColors.danger, '僵尸车', zombieSpots, zombieRate),
-                  ],
+                child: Container(
+                  padding: const EdgeInsets.symmetric(vertical: 10),
+                  decoration: BoxDecoration(
+                    color: abnormal > 0
+                        ? AppColors.warning.withValues(alpha: 0.08)
+                        : AppColors.textSecondary.withValues(alpha: 0.05),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Column(
+                    children: [
+                      Text(
+                        '$abnormal',
+                        style: TextStyle(
+                          fontSize: 22,
+                          fontWeight: FontWeight.w700,
+                          color: abnormal > 0
+                              ? AppColors.warning
+                              : AppColors.textSecondary,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        abnormal > 0 ? '异常' : '异常',
+                        style: const TextStyle(fontSize: 12, color: AppColors.textSecondary),
+                      ),
+                    ],
+                  ),
                 ),
               ),
             ],
-          ),
-          const SizedBox(height: 16),
-          Container(
-            padding: const EdgeInsets.all(10),
-            decoration: BoxDecoration(
-              color: AppColors.primary.withOpacity(0.05),
-              borderRadius: BorderRadius.circular(AppDims.radiusSmall),
-            ),
-            child: Row(
-              children: [
-                const Icon(Icons.location_on, size: 14, color: AppColors.primary),
-                const SizedBox(width: 4),
-                Expanded(
-                  child: Text(
-                    busiestRate > 0
-                        ? '$busiestZone最繁忙，占用率${(busiestRate * 100).toStringAsFixed(0)}%，建议引导车辆至其他区域'
-                        : '暂无占用数据',
-                    style: const TextStyle(
-                      fontSize: 12,
-                      color: AppColors.textSecondary,
-                    ),
-                  ),
-                ),
-              ],
-            ),
           ),
         ],
       ),
     );
   }
 
-  Widget _buildChartLegend(Color color, String label, int count, double rate) {
-    return Row(
-      children: [
-        Container(
-          width: 10,
-          height: 10,
-          decoration: BoxDecoration(
-            color: color,
-            borderRadius: BorderRadius.circular(3),
-          ),
-        ),
-        const SizedBox(width: 6),
-        Expanded(
-          child: Text(
-            label,
-            style: const TextStyle(
-              fontSize: 12,
-              color: AppColors.textSecondary,
-            ),
-          ),
-        ),
-        Text(
-          '$count个 · ${rate.toStringAsFixed(0)}%',
-          style: TextStyle(
-            fontSize: 12,
-            fontWeight: FontWeight.w600,
-            color: color,
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildLatestAlert() {
-    final latestAlert = _alerts.isNotEmpty ? _alerts.first : null;
+  Widget _buildLatestAlertCard(List<AlertModel> alerts) {
+    final latestAlert = alerts.isNotEmpty ? alerts.first : null;
 
     return CardContainer(
       onTap: () {
@@ -511,7 +435,7 @@ class _OverviewPageState extends State<OverviewPage> {
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                 decoration: BoxDecoration(
-                  color: AppColors.primary.withOpacity(0.1),
+                  color: AppColors.textSecondary.withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(AppDims.radiusSmall),
                 ),
                 child: const Row(
@@ -522,11 +446,11 @@ class _OverviewPageState extends State<OverviewPage> {
                       style: TextStyle(
                         fontSize: 12,
                         fontWeight: FontWeight.w600,
-                        color: AppColors.primary,
+                        color: AppColors.textSecondary,
                       ),
                     ),
                     SizedBox(width: 4),
-                    Icon(Icons.arrow_forward, size: 14, color: AppColors.primary),
+                    Icon(Icons.arrow_forward, size: 14, color: AppColors.textSecondary),
                   ],
                 ),
               ),
@@ -537,19 +461,19 @@ class _OverviewPageState extends State<OverviewPage> {
             Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: AppColors.danger.withOpacity(0.05),
+                color: AppColors.danger.withValues(alpha: 0.05),
                 borderRadius: BorderRadius.circular(AppDims.radiusMedium),
               ),
               child: Row(
                 children: [
                   Container(
-                    width: 48,
-                    height: 48,
+                    width: 44,
+                    height: 44,
                     decoration: BoxDecoration(
-                      color: AppColors.danger.withOpacity(0.1),
+                      color: AppColors.danger.withValues(alpha: 0.1),
                       borderRadius: BorderRadius.circular(AppDims.radiusSmall),
                     ),
-                    child: const Icon(Icons.directions_car, color: AppColors.danger, size: 24),
+                    child: const Icon(Icons.directions_car, color: AppColors.danger, size: 22),
                   ),
                   const SizedBox(width: 12),
                   Expanded(
@@ -590,6 +514,83 @@ class _OverviewPageState extends State<OverviewPage> {
             ),
         ],
       ),
+    );
+  }
+}
+
+class _LongPressDraggable extends StatefulWidget {
+  final int index;
+  final Widget child;
+
+  const _LongPressDraggable({
+    super.key,
+    required this.index,
+    required this.child,
+  });
+
+  @override
+  State<_LongPressDraggable> createState() => _LongPressDraggableState();
+}
+
+class _LongPressDraggableState extends State<_LongPressDraggable> {
+  static const _holdDuration = Duration(seconds: 1);
+  Timer? _vibrationTimer;
+
+  void _onPointerDown(PointerDownEvent event) {
+    _vibrationTimer?.cancel();
+    _vibrationTimer = Timer(_holdDuration, () {
+      if (mounted) {
+        HapticFeedback.mediumImpact();
+      }
+    });
+  }
+
+  void _onPointerUp(PointerUpEvent event) {
+    _vibrationTimer?.cancel();
+  }
+
+  void _onPointerCancel(PointerCancelEvent event) {
+    _vibrationTimer?.cancel();
+  }
+
+  @override
+  void dispose() {
+    _vibrationTimer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      child: Listener(
+        onPointerDown: _onPointerDown,
+        onPointerUp: _onPointerUp,
+        onPointerCancel: _onPointerCancel,
+        child: _DelayedReorderableDragStartListener(
+          index: widget.index,
+          delay: _holdDuration,
+          child: widget.child,
+        ),
+      ),
+    );
+  }
+}
+
+class _DelayedReorderableDragStartListener extends ReorderableDragStartListener {
+  const _DelayedReorderableDragStartListener({
+    required super.child,
+    required super.index,
+    this.delay = const Duration(seconds: 1),
+  });
+
+  final Duration delay;
+
+  @override
+  MultiDragGestureRecognizer createRecognizer() {
+    return DelayedMultiDragGestureRecognizer(
+      delay: delay,
+      debugOwner: this,
     );
   }
 }

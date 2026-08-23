@@ -1,12 +1,12 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
 import 'package:fl_chart/fl_chart.dart';
+import 'package:provider/provider.dart';
 import '../../../../shared/widgets/card_container.dart';
-import '../../../../shared/widgets/custom_app_bar.dart';
 import '../../../../shared/widgets/loading_indicator.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_dims.dart';
 import '../../../../core/models/stats_model.dart';
-import '../../../../core/services/api_service.dart';
+import '../../../../core/providers/parking_provider.dart';
 
 class StatsPage extends StatefulWidget {
   const StatsPage({super.key});
@@ -16,77 +16,58 @@ class StatsPage extends StatefulWidget {
 }
 
 class _StatsPageState extends State<StatsPage> {
-  final ApiService _apiService = ApiService();
-  StatsModel? _stats;
-  bool _isLoading = true;
-
-  @override
-  void initState() {
-    super.initState();
-    _loadStats();
-  }
-
-  Future<void> _loadStats() async {
-    setState(() {
-      _isLoading = true;
-    });
-    try {
-      final stats = await _apiService.getStats();
-      if (mounted) {
-        setState(() {
-          _stats = stats;
-          _isLoading = false;
-        });
-      }
-    } catch (e) {
-      if (mounted) {
-        setState(() {
-          _stats = StatsModel.empty();
-          _isLoading = false;
-        });
-      }
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
+    final provider = context.watch<ParkingProvider>();
+    final stats = provider.stats;
     return Scaffold(
       backgroundColor: AppColors.background,
-      appBar: const CustomAppBar(title: '数据复盘'),
-      body: _isLoading
+      body: provider.isLoading
           ? const LoadingIndicator(message: '加载中...')
           : RefreshIndicator(
               color: AppColors.primary,
-              onRefresh: _loadStats,
+              onRefresh: provider.refresh,
               child: SingleChildScrollView(
                 physics: const AlwaysScrollableScrollPhysics(),
-                padding: const EdgeInsets.all(AppDims.paddingPage),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text(
-                      '数据统计概览',
-                      style: TextStyle(
-                        fontSize: 20,
-                        fontWeight: FontWeight.w600,
-                        color: AppColors.textPrimary,
+                    _buildHeader(context),
+                    const SizedBox(height: 16),
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(
+                        AppDims.paddingPage,
+                        0,
+                        AppDims.paddingPage,
+                        AppDims.paddingPage,
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            '数据统计概览',
+                            style: TextStyle(
+                              fontSize: 20,
+                              fontWeight: FontWeight.w600,
+                              color: AppColors.textPrimary,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            '截至 ${_formatDate(DateTime.now())} 的统计数据',
+                            style: const TextStyle(
+                              fontSize: 14,
+                              color: AppColors.textSecondary,
+                            ),
+                          ),
+                          const SizedBox(height: 24),
+                          _buildOccupancyChart(stats),
+                          const SizedBox(height: 24),
+                          _buildWeeklyTrend(stats),
+                          const SizedBox(height: 100),
+                        ],
                       ),
                     ),
-                    const SizedBox(height: 8),
-                    Text(
-                      '截至 ${_formatDate(DateTime.now())} 的统计数据',
-                      style: const TextStyle(
-                        fontSize: 14,
-                        color: AppColors.textSecondary,
-                      ),
-                    ),
-                    const SizedBox(height: 24),
-                    _buildSummaryCards(),
-                    const SizedBox(height: 24),
-                    _buildOccupancyChart(),
-                    const SizedBox(height: 24),
-                    _buildWeeklyTrend(),
-                    const SizedBox(height: 100),
                   ],
                 ),
               ),
@@ -94,85 +75,48 @@ class _StatsPageState extends State<StatsPage> {
     );
   }
 
-  Widget _buildSummaryCards() {
-    final stats = _stats!;
-    return Row(
-      children: [
-        Expanded(
-          child: _buildStatCard(
-            title: '总车位',
-            value: '${stats.totalSpots}',
-            color: AppColors.primary,
-            icon: Icons.local_parking,
-          ),
-        ),
-        const SizedBox(width: AppDims.gapCard),
-        Expanded(
-          child: _buildStatCard(
-            title: '占用中',
-            value: '${stats.occupiedSpots}',
-            color: AppColors.warning,
-            icon: Icons.directions_car,
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildStatCard({
-    required String title,
-    required String value,
-    required Color color,
-    required IconData icon,
-  }) {
-    return CardContainer(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+  Widget _buildHeader(BuildContext context) {
+    return Padding(
+      padding: EdgeInsets.only(
+        top: MediaQuery.of(context).padding.top + 16,
+        left: AppDims.paddingPage,
+        right: AppDims.paddingPage,
+      ),
+      child: Row(
         children: [
-          Row(
-            children: [
-              Container(
-                width: 36,
-                height: 36,
-                decoration: BoxDecoration(
-                  color: color.withOpacity(0.1),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Icon(icon, color: color, size: 20),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      title,
-                      style: const TextStyle(
-                        fontSize: 14,
-                        color: AppColors.textSecondary,
-                      ),
+          const Expanded(
+            child: Padding(
+              padding: EdgeInsets.only(left: 8),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    '数据统计',
+                    style: TextStyle(
+                      fontSize: 28,
+                      fontWeight: FontWeight.w500,
+                      color: AppColors.textPrimary,
                     ),
-                    const SizedBox(height: 4),
-                    Text(
-                      value,
-                      style: TextStyle(
-                        fontSize: 24,
-                        fontWeight: FontWeight.w700,
-                        color: color,
-                      ),
-                    ),
-                  ],
-                ),
+                  ),
+                ],
               ),
-            ],
+            ),
+          ),
+          Container(
+            width: 40,
+            height: 40,
+            decoration: BoxDecoration(
+              color: AppColors.surface,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: const Icon(Icons.bar_chart, color: AppColors.textSecondary, size: 22),
           ),
         ],
       ),
     );
   }
 
-  Widget _buildOccupancyChart() {
-    final stats = _stats!;
+  Widget _buildOccupancyChart(StatsModel stats) {
     final occupancyRate = stats.occupancyRate;
     final zombieRate = stats.totalSpots > 0 
         ? stats.zombieSpots / stats.totalSpots 
@@ -308,8 +252,7 @@ class _StatsPageState extends State<StatsPage> {
     );
   }
 
-  Widget _buildWeeklyTrend() {
-    final stats = _stats!;
+  Widget _buildWeeklyTrend(StatsModel stats) {
     final trend = stats.weeklyTrend;
 
     return CardContainer(
@@ -366,6 +309,7 @@ class _StatsPageState extends State<StatsPage> {
                         bottomTitles: AxisTitles(
                           sideTitles: SideTitles(
                             showTitles: true,
+                            interval: 1,
                             getTitlesWidget: (value, meta) {
                               if (value.toInt() >= 0 && value.toInt() < trend.length) {
                                 return Padding(

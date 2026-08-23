@@ -1,10 +1,9 @@
-﻿import 'package:flutter/material.dart';
-import '../../../../shared/widgets/card_container.dart';
-import '../../../../shared/widgets/status_badge.dart';
+import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_dims.dart';
 import '../../../../core/models/spot_model.dart';
-import '../../../../core/services/api_service.dart';
+import '../../../../core/providers/parking_provider.dart';
 import 'spot_detail_page.dart';
 
 class SpotsPage extends StatefulWidget {
@@ -15,87 +14,41 @@ class SpotsPage extends StatefulWidget {
 }
 
 class _SpotsPageState extends State<SpotsPage> {
-  final ApiService _apiService = ApiService();
-  List<SpotModel> _spots = [];
-  List<SpotModel> _filteredSpots = [];
-  bool _isLoading = true;
-  String _selectedZone = 'A';
-
-  @override
-  void initState() {
-    super.initState();
-    _loadSpots();
-  }
-
-  Future<void> _loadSpots() async {
-    setState(() {
-      _isLoading = true;
-    });
-    try {
-      final spots = await _apiService.getSpots();
-      if (mounted) {
-        setState(() {
-          _spots = spots;
-          _filteredSpots = _filterSpots(spots, _selectedZone);
-          _isLoading = false;
-        });
-      }
-    } catch (e) {
-      if (mounted) {
-        setState(() {
-          _isLoading = false;
-        });
-      }
-    }
-  }
-
-  List<SpotModel> _filterSpots(List<SpotModel> spots, String zone) {
-    if (zone == 'all') {
-      return spots;
-    }
-    return spots.where((s) => s.zone == zone).toList();
-  }
-
-  void _onZoneChanged(String zone) {
-    setState(() {
-      _selectedZone = zone;
-      _filteredSpots = _filterSpots(_spots, zone);
-    });
-  }
+  /* 页面自身 UI 状态: 通知/派单记录 (真实/本地模式与数据现统一在 ParkingProvider) */
+  final Set<String> _notifySpots = {};
+  final Set<String> _dispatchSpots = {};
 
   @override
   Widget build(BuildContext context) {
+    final provider = context.watch<ParkingProvider>();
+    final spots = provider.spots;
     return Scaffold(
       backgroundColor: AppColors.background,
-      body: _isLoading
+      body: provider.isLoading && spots.isEmpty
           ? const Center(child: CircularProgressIndicator())
           : RefreshIndicator(
               color: AppColors.primary,
-              onRefresh: _loadSpots,
+              onRefresh: provider.refresh,
               child: SingleChildScrollView(
                 physics: const AlwaysScrollableScrollPhysics(),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    _buildHeader(),
-                    Transform.translate(
-                      offset: const Offset(0, -30),
-                      child: Padding(
-                        padding: const EdgeInsets.fromLTRB(
-                          AppDims.paddingPage,
-                          0,
-                          AppDims.paddingPage,
-                          AppDims.paddingPage,
-                        ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            _buildStatsSummary(),
-                            const SizedBox(height: 16),
-                            _buildSpotGrid(),
-                            const SizedBox(height: 80),
-                          ],
-                        ),
+                    _buildHeader(context),
+                    const SizedBox(height: 16),
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(
+                        AppDims.paddingPage,
+                        0,
+                        AppDims.paddingPage,
+                        AppDims.paddingPage,
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          _buildSpotGrid(spots),
+                          const SizedBox(height: 80),
+                        ],
                       ),
                     ),
                   ],
@@ -105,201 +58,49 @@ class _SpotsPageState extends State<SpotsPage> {
     );
   }
 
-  Widget _buildHeader() {
-    return Stack(
-      clipBehavior: Clip.none,
-      children: [
-        Container(
-          height: 180,
-          decoration: const BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: [Color(0xFF0052D9), Color(0xFF007DFF), Color(0xFF4A9EFF)],
-            ),
-          ),
-        ),
-        Positioned(
-          top: -20,
-          right: -20,
-          child: Container(
-            width: 120,
-            height: 120,
-            decoration: BoxDecoration(
-              color: Colors.white.withOpacity(0.08),
-              shape: BoxShape.circle,
-            ),
-          ),
-        ),
-        Positioned(
-          top: 50,
-          left: -30,
-          child: Container(
-            width: 80,
-            height: 80,
-            decoration: BoxDecoration(
-              color: Colors.white.withOpacity(0.06),
-              shape: BoxShape.circle,
-            ),
-          ),
-        ),
-        Padding(
-          padding: EdgeInsets.only(
-            top: MediaQuery.of(context).padding.top + 16,
-            left: AppDims.paddingPage,
-            right: AppDims.paddingPage,
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  const Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          '车位',
-                          style: TextStyle(
-                            fontSize: 28,
-                            fontWeight: FontWeight.w700,
-                            color: Colors.white,
-                          ),
-                        ),
-                        SizedBox(height: 4),
-                        Text(
-                          '实时监控车位状态',
-                          style: TextStyle(
-                            fontSize: 14,
-                            color: Colors.white70,
-                          ),
-                        ),
-                      ],
-                    ),
+  Widget _buildHeader(BuildContext context) {
+    return Padding(
+      padding: EdgeInsets.only(
+        top: MediaQuery.of(context).padding.top + 16,
+        left: AppDims.paddingPage,
+        right: AppDims.paddingPage,
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: Padding(
+              padding: const EdgeInsets.only(left: 8),
+              // 隐藏操作: 点击大标题"车位"在 真实模式/本地模式 间切换, 无可见指示
+              child: GestureDetector(
+                onTap: () => context.read<ParkingProvider>().toggleRealMode(),
+                behavior: HitTestBehavior.opaque,
+                child: const Text(
+                  '车位',
+                  style: TextStyle(
+                    fontSize: 28,
+                    fontWeight: FontWeight.w500,
+                    color: AppColors.textPrimary,
                   ),
-                  Container(
-                    width: 40,
-                    height: 40,
-                    decoration: BoxDecoration(
-                      color: Colors.white.withOpacity(0.2),
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: const Icon(Icons.search, color: Colors.white, size: 22),
-                  ),
-                ],
+                ),
               ),
-              const SizedBox(height: 16),
-              _buildZoneSelector(),
-            ],
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildZoneSelector() {
-    return Container(
-      padding: const EdgeInsets.all(4),
-      decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.15),
-        borderRadius: BorderRadius.circular(AppDims.radiusMedium),
-      ),
-      child: Row(
-        children: [
-          _buildZoneTab('A区', 'A'),
-          _buildZoneTab('B区', 'B'),
-          _buildZoneTab('C区', 'C'),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildZoneTab(String label, String zone) {
-    final isSelected = _selectedZone == zone;
-    return Expanded(
-      child: GestureDetector(
-        onTap: () => _onZoneChanged(zone),
-        child: Container(
-          padding: const EdgeInsets.symmetric(vertical: 10),
-          decoration: BoxDecoration(
-            color: isSelected ? Colors.white : Colors.transparent,
-            borderRadius: BorderRadius.circular(AppDims.radiusSmall),
-          ),
-          child: Text(
-            label,
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              fontSize: 14,
-              fontWeight: FontWeight.w600,
-              color: isSelected ? AppColors.primary : Colors.white70,
             ),
           ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildStatsSummary() {
-    final total = _filteredSpots.length;
-    final free = _filteredSpots.where((s) => s.isFree).length;
-    final occupied = _filteredSpots.where((s) => s.isOccupied).length;
-    final zombie = _filteredSpots.where((s) => s.isZombie).length;
-
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(AppDims.radiusLarge),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.08),
-            blurRadius: 16,
-            offset: const Offset(0, 4),
-          ),
-        ],
-      ),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceAround,
-        children: [
-          _buildStatItem('$total', '总车位', AppColors.primary),
-          Container(width: 1, height: 40, color: AppColors.textSecondary.withOpacity(0.15)),
-          _buildStatItem('$free', '空闲', AppColors.success),
-          Container(width: 1, height: 40, color: AppColors.textSecondary.withOpacity(0.15)),
-          _buildStatItem('$occupied', '占用', AppColors.warning),
-          Container(width: 1, height: 40, color: AppColors.textSecondary.withOpacity(0.15)),
-          _buildStatItem('$zombie', '僵尸车', AppColors.danger),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildStatItem(String value, String label, Color color) {
-    return Expanded(
-      child: Column(
-        children: [
-          Text(
-            value,
-            style: TextStyle(
-              fontSize: 22,
-              fontWeight: FontWeight.w700,
-              color: color,
+          Container(
+            width: 40,
+            height: 40,
+            decoration: BoxDecoration(
+              color: AppColors.surface,
+              borderRadius: BorderRadius.circular(12),
             ),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            label,
-            style: const TextStyle(
-              fontSize: 12,
-              color: AppColors.textSecondary,
-            ),
+            child: const Icon(Icons.search, color: AppColors.textSecondary, size: 22),
           ),
         ],
       ),
     );
   }
 
-  Widget _buildSpotGrid() {
-    if (_filteredSpots.isEmpty) {
+  Widget _buildSpotGrid(List<SpotModel> spots) {
+    if (spots.isEmpty) {
       return Container(
         padding: const EdgeInsets.symmetric(vertical: 60),
         alignment: Alignment.center,
@@ -308,7 +109,7 @@ class _SpotsPageState extends State<SpotsPage> {
             Icon(Icons.local_parking, size: 48, color: AppColors.textSecondary),
             SizedBox(height: 12),
             Text(
-              '该分区暂无车位',
+              '暂无车位',
               style: TextStyle(fontSize: 14, color: AppColors.textSecondary),
             ),
           ],
@@ -316,33 +117,42 @@ class _SpotsPageState extends State<SpotsPage> {
       );
     }
 
-    return GridView.builder(
+    return ListView.builder(
       shrinkWrap: true,
       physics: const NeverScrollableScrollPhysics(),
-      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: 3,
-        crossAxisSpacing: 10,
-        mainAxisSpacing: 10,
-        childAspectRatio: 0.85,
-      ),
-      itemCount: _filteredSpots.length,
+      itemCount: spots.length,
       itemBuilder: (context, index) {
-        return _buildSpotGridItem(_filteredSpots[index]);
+        return _buildSpotListItem(spots[index]);
       },
     );
   }
 
-  Widget _buildSpotGridItem(SpotModel spot) {
-    final statusColor = spot.isFree
-        ? AppColors.success
-        : spot.isOccupied
-            ? AppColors.warning
-            : AppColors.danger;
-    final statusText = spot.isFree
-        ? '空闲'
-        : spot.isOccupied
-            ? '占用'
-            : '僵尸车';
+  Widget _buildSpotListItem(SpotModel spot) {
+    final bgColor = spot.isOffline
+        ? AppColors.textSecondary
+        : spot.isFree
+            ? AppColors.success
+            : spot.isOccupied
+                ? AppColors.warning
+                : AppColors.danger;
+    final statusText = spot.isOffline
+        ? '离线'
+        : spot.isFree
+            ? '空闲'
+            : spot.isOccupied
+                ? '占用'
+                : '僵尸车';
+    final iconData = spot.isOffline
+        ? Icons.cloud_off
+        : spot.isFree
+            ? Icons.local_parking
+            : spot.isOccupied
+                ? Icons.directions_car
+                : Icons.warning_amber;
+
+    final hasNotify = _notifySpots.contains(spot.id);
+    final hasDispatch = _dispatchSpots.contains(spot.id);
+    final canAct = !spot.isFree && !spot.isOffline;
 
     return GestureDetector(
       onTap: () {
@@ -354,59 +164,238 @@ class _SpotsPageState extends State<SpotsPage> {
         );
       },
       child: Container(
+        margin: const EdgeInsets.only(bottom: 8),
         decoration: BoxDecoration(
-          color: spot.isFree
-              ? AppColors.success.withOpacity(0.1)
-              : spot.isOccupied
-                  ? AppColors.warning.withOpacity(0.1)
-                  : AppColors.danger.withOpacity(0.1),
-          borderRadius: BorderRadius.circular(AppDims.radiusMedium),
-          border: Border.all(
-            color: statusColor.withOpacity(0.3),
-            width: 1,
-          ),
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(12),
         ),
         child: Padding(
-          padding: const EdgeInsets.all(10),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          child: Row(
             children: [
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                width: 40,
+                height: 40,
                 decoration: BoxDecoration(
-                  color: statusColor.withOpacity(0.2),
-                  borderRadius: BorderRadius.circular(4),
+                  color: bgColor.withOpacity(0.12),
+                  borderRadius: BorderRadius.circular(10),
                 ),
-                child: Text(
-                  spot.id.length > 6 ? spot.id.substring(spot.id.length - 4) : spot.id,
-                  style: TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w700,
-                    color: statusColor,
-                  ),
+                child: Icon(iconData, color: bgColor, size: 22),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Text(
+                          spot.id,
+                          style: const TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.w700,
+                            color: AppColors.textPrimary,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: bgColor.withOpacity(0.12),
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: Text(
+                            statusText,
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600,
+                              color: bgColor,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            spot.isOffline
+                                ? '设备离线，无法获取状态'
+                                : spot.isFree
+                                    ? '暂无车辆'
+                                    : '占用 ${spot.occupiedHours}h',
+                            style: const TextStyle(
+                              fontSize: 12,
+                              color: AppColors.textSecondary,
+                            ),
+                          ),
+                        ),
+                        if (canAct && (hasNotify || hasDispatch)) ...[
+                          if (hasNotify)
+                            const Icon(Icons.notifications_active, size: 14, color: AppColors.primary),
+                          if (hasNotify && hasDispatch) const SizedBox(width: 4),
+                          if (hasDispatch)
+                            const Icon(Icons.assignment, size: 14, color: AppColors.warning),
+                        ],
+                      ],
+                    ),
+                  ],
                 ),
               ),
-              const SizedBox(height: 6),
-              Text(
-                statusText,
-                style: TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w500,
-                  color: statusColor,
-                ),
-              ),
-              if (spot.isOccupied || spot.isZombie) ...[
-                const SizedBox(height: 4),
-                Text(
-                  '${spot.occupiedHours}h',
-                  style: const TextStyle(
-                    fontSize: 11,
-                    color: AppColors.textSecondary,
+              if (canAct)
+                GestureDetector(
+                  onTap: () => _showSpotMenu(spot),
+                  behavior: HitTestBehavior.opaque,
+                  child: Container(
+                    width: 32,
+                    height: 32,
+                    decoration: BoxDecoration(
+                      color: AppColors.surface,
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: const Icon(Icons.more_vert, size: 18, color: AppColors.textSecondary),
                   ),
                 ),
-              ],
             ],
           ),
+        ),
+      ),
+    );
+  }
+
+  void _showSpotMenu(SpotModel spot) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (context) {
+        final hasNotify = _notifySpots.contains(spot.id);
+        final hasDispatch = _dispatchSpots.contains(spot.id);
+        return Container(
+          margin: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(16),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(20, 20, 20, 16),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Text(
+                      spot.id,
+                      style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w600, color: AppColors.textPrimary),
+                    ),
+                    const Spacer(),
+                    GestureDetector(
+                      onTap: () => Navigator.pop(context),
+                      child: const Icon(Icons.close, size: 22, color: AppColors.textSecondary),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                _buildMenuCheckbox(
+                  icon: Icons.notifications_outlined,
+                  title: '通知车主',
+                  subtitle: '通知车主尽快挪走车辆',
+                  value: hasNotify,
+                  onChanged: (v) {
+                    setState(() {
+                      if (v == true) {
+                        _notifySpots.add(spot.id);
+                      } else {
+                        _notifySpots.remove(spot.id);
+                      }
+                    });
+                    Navigator.pop(context);
+                  },
+                ),
+                const Divider(height: 1),
+                _buildMenuCheckbox(
+                  icon: Icons.assignment_outlined,
+                  title: '派单',
+                  subtitle: '派给挪车师傅处理僵尸车',
+                  value: hasDispatch,
+                  onChanged: (v) {
+                    setState(() {
+                      if (v == true) {
+                        _dispatchSpots.add(spot.id);
+                      } else {
+                        _dispatchSpots.remove(spot.id);
+                      }
+                    });
+                    Navigator.pop(context);
+                  },
+                ),
+                const SizedBox(height: 8),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildMenuCheckbox({
+    required IconData icon,
+    required String title,
+    required String subtitle,
+    required bool value,
+    required ValueChanged<bool?> onChanged,
+  }) {
+    return GestureDetector(
+      onTap: () => onChanged(!value),
+      behavior: HitTestBehavior.opaque,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 12),
+        child: Row(
+          children: [
+            Container(
+              width: 40,
+              height: 40,
+              decoration: BoxDecoration(
+                color: value ? AppColors.primary.withOpacity(0.12) : AppColors.surface,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Icon(icon, color: value ? AppColors.primary : AppColors.textSecondary, size: 22),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w600,
+                      color: value ? AppColors.primary : AppColors.textPrimary,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    subtitle,
+                    style: const TextStyle(fontSize: 12, color: AppColors.textSecondary),
+                  ),
+                ],
+              ),
+            ),
+            SizedBox(
+              width: 24,
+              height: 24,
+              child: Checkbox(
+                value: value,
+                onChanged: onChanged,
+                activeColor: AppColors.primary,
+                materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                visualDensity: VisualDensity.compact,
+              ),
+            ),
+          ],
         ),
       ),
     );

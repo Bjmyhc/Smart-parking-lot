@@ -1,11 +1,11 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import '../../../../shared/widgets/card_container.dart';
-import '../../../../shared/widgets/custom_app_bar.dart';
 import '../../../../shared/widgets/status_badge.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_dims.dart';
 import '../../../../core/models/alert_model.dart';
-import '../../../../core/services/api_service.dart';
+import '../../../../core/providers/parking_provider.dart';
 
 class AlertsPage extends StatefulWidget {
   const AlertsPage({super.key});
@@ -15,110 +15,131 @@ class AlertsPage extends StatefulWidget {
 }
 
 class _AlertsPageState extends State<AlertsPage> {
-  final ApiService _apiService = ApiService();
-  List<AlertModel> _alerts = [];
-  bool _isLoading = true;
-  bool _isMapView = false;
+  int _filterIndex = 0;
 
-  @override
-  void initState() {
-    super.initState();
-    _loadAlerts();
-  }
-
-  Future<void> _loadAlerts() async {
-    setState(() {
-      _isLoading = true;
-    });
-    try {
-      final alerts = await _apiService.getAlerts();
-      alerts.sort((a, b) => b.occupiedHours.compareTo(a.occupiedHours));
-      if (mounted) {
-        setState(() {
-          _alerts = alerts;
-          _isLoading = false;
-        });
-      }
-    } catch (e) {
-      if (mounted) {
-        setState(() {
-          _alerts = [];
-          _isLoading = false;
-        });
-      }
+  List<AlertModel> _filteredAlerts(List<AlertModel> alerts) {
+    switch (_filterIndex) {
+      case 1:
+        return alerts.where((a) => a.status == 'pending').toList();
+      case 2:
+        return alerts.where((a) => a.status == 'resolved').toList();
+      default:
+        return alerts;
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    final provider = context.watch<ParkingProvider>();
+    final alerts = provider.alerts;
     return Scaffold(
       backgroundColor: AppColors.background,
-      appBar: const CustomAppBar(title: '僵尸车工单', showBackButton: true),
-      body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : Column(
-              children: [
-                _buildViewSwitch(),
-                Expanded(
-                  child: _isMapView ? _buildMapView() : _buildListView(),
-                ),
-              ],
-            ),
+      body: Column(
+        children: [
+          _buildHeader(),
+          _buildFilterTabs(),
+          Expanded(
+            child: provider.isLoading && alerts.isEmpty
+                ? const Center(child: CircularProgressIndicator())
+                : _buildBody(alerts, provider),
+          ),
+        ],
+      ),
     );
   }
 
-  Widget _buildViewSwitch() {
-    return Container(
-      padding: const EdgeInsets.all(AppDims.paddingPage),
-      child: Container(
-        padding: const EdgeInsets.all(4),
-        decoration: BoxDecoration(
-          color: AppColors.surface,
-          borderRadius: BorderRadius.circular(AppDims.radiusMedium),
-        ),
+  Widget _buildHeader() {
+    return Padding(
+      padding: EdgeInsets.only(
+        top: MediaQuery.of(context).padding.top + 16,
+        left: AppDims.paddingPage,
+        right: AppDims.paddingPage,
+        bottom: 16,
+      ),
+      child: Row(
+        children: [
+          const Expanded(
+            child: Padding(
+              padding: EdgeInsets.only(left: 8),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    '告警管理',
+                    style: TextStyle(
+                      fontSize: 28,
+                      fontWeight: FontWeight.w500,
+                      color: AppColors.textPrimary,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          Container(
+            width: 40,
+            height: 40,
+            decoration: BoxDecoration(
+              color: AppColors.surface,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: const Icon(Icons.notifications_none, color: AppColors.textSecondary, size: 22),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildFilterTabs() {
+    final tabs = ['全部', '待处理', '已处理'];
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: AppDims.paddingPage),
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
         child: Row(
-          children: [
-            _buildTab('列表视图', false),
-            _buildTab('车位地图', true),
-          ],
+          children: List.generate(tabs.length, (i) {
+            final isSelected = _filterIndex == i;
+            return Container(
+              margin: EdgeInsets.only(right: i < tabs.length - 1 ? 10 : 0),
+              child: GestureDetector(
+                onTap: () {
+                  setState(() {
+                    _filterIndex = i;
+                  });
+                },
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                  decoration: BoxDecoration(
+                    color: isSelected ? AppColors.primary : Colors.white,
+                    borderRadius: BorderRadius.circular(AppDims.radiusLarge),
+                    border: Border.all(
+                      color: isSelected ? AppColors.primary : AppColors.textSecondary.withOpacity(0.2),
+                      width: 1,
+                    ),
+                  ),
+                  child: Text(
+                    tabs[i],
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                      color: isSelected ? Colors.white : AppColors.textPrimary,
+                    ),
+                  ),
+                ),
+              ),
+            );
+          }),
         ),
       ),
     );
   }
 
-  Widget _buildTab(String label, bool isMap) {
-    final isSelected = _isMapView == isMap;
-    return Expanded(
-      child: GestureDetector(
-        onTap: () {
-          setState(() {
-            _isMapView = isMap;
-          });
-        },
-        child: Container(
-          padding: const EdgeInsets.symmetric(vertical: 10),
-          decoration: BoxDecoration(
-            color: isSelected ? AppColors.primary : Colors.transparent,
-            borderRadius: BorderRadius.circular(AppDims.radiusSmall),
-          ),
-          child: Text(
-            label,
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              fontSize: 14,
-              fontWeight: FontWeight.w600,
-              color: isSelected ? AppColors.surface : AppColors.textSecondary,
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildListView() {
-    if (_alerts.isEmpty) {
+  Widget _buildBody(List<AlertModel> alerts, ParkingProvider provider) {
+    final list = _filteredAlerts(alerts);
+    if (list.isEmpty) {
       return Center(
         child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
           children: [
             const Icon(Icons.warning_amber, size: 64, color: AppColors.textSecondary),
             const SizedBox(height: 16),
@@ -133,364 +154,277 @@ class _AlertsPageState extends State<AlertsPage> {
 
     return RefreshIndicator(
       color: AppColors.primary,
-      onRefresh: _loadAlerts,
+      onRefresh: provider.refresh,
       child: ListView.builder(
         padding: const EdgeInsets.all(AppDims.paddingPage),
-        itemCount: _alerts.length,
+        itemCount: list.length,
         itemBuilder: (context, index) {
-          return _buildAlertItem(_alerts[index]);
+          return _buildAlertCard(list[index]);
         },
       ),
     );
   }
 
-  Widget _buildAlertItem(AlertModel alert) {
-    return _SlidableAlertItem(
-      alert: alert,
-      onDispatch: () async {
-        await _apiService.dispatchAlert(alert.id);
-        _showSnackBar('已派单');
-      },
-      onNotify: () async {
-        await _apiService.notifyOwner(alert.id);
-        _showSnackBar('已通知车主');
-      },
-      onResolve: () async {
-        await _apiService.resolveAlert(alert.id);
-        _showSnackBar('已处置');
-        _loadAlerts();
-      },
-    );
-  }
+  Widget _buildAlertCard(AlertModel alert) {
+    Color iconBgColor;
+    Color iconColor;
+    IconData iconData;
 
-  Widget _buildMapView() {
-    if (_alerts.isEmpty) {
-      return Center(
-        child: Column(
-          children: [
-            const Icon(Icons.map, size: 64, color: AppColors.textSecondary),
-            const SizedBox(height: 16),
-            Text(
-              '暂无僵尸车标记',
-              style: const TextStyle(fontSize: 16, color: AppColors.textSecondary),
-            ),
-          ],
-        ),
-      );
+    switch (alert.status) {
+      case 'pending':
+        iconBgColor = AppColors.danger.withOpacity(0.1);
+        iconColor = AppColors.danger;
+        iconData = Icons.warning_amber;
+        break;
+      case 'resolved':
+      default:
+        iconBgColor = AppColors.success.withOpacity(0.1);
+        iconColor = AppColors.success;
+        iconData = Icons.check_circle;
+        break;
     }
 
     return Container(
-      margin: const EdgeInsets.all(AppDims.paddingPage),
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(AppDims.radiusLarge),
-        boxShadow: [
-          BoxShadow(
-            color: AppColors.textPrimary.withOpacity(0.08),
-            blurRadius: 12,
-            offset: const Offset(0, 2),
-          ),
-        ],
-      ),
-      child: Column(
-        children: [
-          Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              border: Border(
-                bottom: BorderSide(color: AppColors.textSecondary.withOpacity(0.2)),
-              ),
-            ),
-            child: Row(
+      margin: const EdgeInsets.only(bottom: AppDims.gapCard),
+      child: CardContainer(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Icon(Icons.map, color: AppColors.primary, size: 20),
-                const SizedBox(width: 8),
-                const Text(
-                  '僵尸车位置分布',
-                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
-                ),
-                const Spacer(),
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  width: 56,
+                  height: 56,
                   decoration: BoxDecoration(
-                    color: AppColors.danger.withOpacity(0.1),
-                    borderRadius: BorderRadius.circular(AppDims.radiusSmall),
+                    color: iconBgColor,
+                    borderRadius: BorderRadius.circular(AppDims.radiusMedium),
                   ),
-                  child: Text(
-                    '${_alerts.length} 辆',
-                    style: const TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
-                      color: AppColors.danger,
+                  child: Icon(iconData, color: iconColor, size: 30),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              '僵尸车告警 - ${alert.plateNumber}',
+                              style: const TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w700,
+                                color: AppColors.textPrimary,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          StatusBadge.fromStatus(alert.status),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        '车位: ${alert.spotId} · 占用 ${alert.occupiedHours}小时',
+                        style: const TextStyle(
+                          fontSize: 13,
+                          color: AppColors.textSecondary,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      if (alert.createdAt != null)
+                        Text(
+                          '创建时间: ${_formatDate(alert.createdAt!)}',
+                          style: const TextStyle(
+                            fontSize: 12,
+                            color: AppColors.textSecondary,
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                _buildIgnoreButton(alert),
+                if (alert.status == 'pending') ...[
+                  const SizedBox(width: 12),
+                  _buildProcessButton(alert),
+                ],
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildIgnoreButton(AlertModel alert) {
+    return GestureDetector(
+      onTap: () async {
+        final provider = context.read<ParkingProvider>();
+        final confirmed = await showModalBottomSheet<bool>(
+          context: context,
+          backgroundColor: Colors.transparent,
+          isScrollControlled: true,
+          builder: (ctx) => Container(
+            decoration: const BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+            ),
+            padding: EdgeInsets.only(
+              left: 24,
+              right: 24,
+              top: 20,
+              bottom: MediaQuery.of(ctx).padding.bottom + 20,
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: AppColors.textSecondary.withOpacity(0.2),
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+                const SizedBox(height: 20),
+                const Text(
+                  '确认忽略',
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w700,
+                    color: AppColors.textPrimary,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  '确定要忽略该告警吗？忽略后将不再显示此条僵尸车告警。',
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    fontSize: 14,
+                    color: AppColors.textSecondary,
+                    height: 1.5,
+                  ),
+                ),
+                const SizedBox(height: 28),
+                GestureDetector(
+                  onTap: () => Navigator.pop(ctx, true),
+                  child: Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.symmetric(vertical: 15),
+                    decoration: BoxDecoration(
+                      color: AppColors.primary,
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    child: const Text(
+                      '确认忽略',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.white,
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                GestureDetector(
+                  onTap: () => Navigator.pop(ctx, false),
+                  child: Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.symmetric(vertical: 15),
+                    decoration: BoxDecoration(
+                      color: AppColors.textSecondary.withOpacity(0.08),
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    child: const Text(
+                      '取消',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w500,
+                        color: AppColors.textSecondary,
+                      ),
                     ),
                   ),
                 ),
               ],
             ),
           ),
-          Expanded(
-            child: GridView.builder(
-              padding: const EdgeInsets.all(16),
-              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                crossAxisCount: 4,
-                crossAxisSpacing: 12,
-                mainAxisSpacing: 12,
-              ),
-              itemCount: 24,
-              itemBuilder: (context, index) {
-                AlertModel? alert;
-                for (final a in _alerts) {
-                  final spotNum = int.tryParse(a.spotId.replaceFirst('Park', '')) ?? 0;
-                  if (spotNum == index + 1) {
-                    alert = a;
-                    break;
-                  }
-                }
-
-                final hasAlert = alert != null;
-                final spotLabel = 'P${(index + 1).toString().padLeft(3, '0')}';
-
-                return Container(
-                  decoration: BoxDecoration(
-                    color: hasAlert
-                        ? AppColors.danger.withOpacity(0.2)
-                        : AppColors.success.withOpacity(0.1),
-                    borderRadius: BorderRadius.circular(AppDims.radiusSmall),
-                    border: Border.all(
-                      color: hasAlert
-                          ? AppColors.danger.withOpacity(0.5)
-                          : AppColors.success.withOpacity(0.3),
-                    ),
-                  ),
-                  child: Stack(
-                    children: [
-                      Center(
-                        child: Text(
-                          spotLabel,
-                          style: TextStyle(
-                            fontSize: 14,
-                            fontWeight: FontWeight.w700,
-                            color: hasAlert ? AppColors.danger : AppColors.success,
-                          ),
-                        ),
-                      ),
-                      if (hasAlert)
-                        Positioned(
-                          top: 4,
-                          right: 4,
-                          child: Container(
-                            width: 10,
-                            height: 10,
-                            decoration: const BoxDecoration(
-                              color: AppColors.danger,
-                              shape: BoxShape.circle,
-                            ),
-                          ),
-                        ),
-                    ],
-                  ),
-                );
-              },
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _showSnackBar(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message)),
-    );
-  }
-}
-
-class _SlidableAlertItem extends StatefulWidget {
-  final AlertModel alert;
-  final VoidCallback? onDispatch;
-  final VoidCallback? onNotify;
-  final VoidCallback? onResolve;
-
-  const _SlidableAlertItem({
-    required this.alert,
-    this.onDispatch,
-    this.onNotify,
-    this.onResolve,
-  });
-
-  @override
-  State<_SlidableAlertItem> createState() => _SlidableAlertItemState();
-}
-
-class _SlidableAlertItemState extends State<_SlidableAlertItem> {
-  double _dragOffset = 0;
-  bool _isDragging = false;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      height: 100,
-      child: Stack(
-        children: [
-          _buildActionButtons(),
-          GestureDetector(
-            onHorizontalDragStart: (_) {
-              setState(() => _isDragging = true);
-            },
-            onHorizontalDragUpdate: (details) {
-              setState(() {
-                _dragOffset += details.delta.dx;
-                if (_dragOffset > 0) _dragOffset = 0;
-                if (_dragOffset < -150) _dragOffset = -150;
-              });
-            },
-            onHorizontalDragEnd: (_) {
-              setState(() {
-                _isDragging = false;
-                if (_dragOffset > -50) _dragOffset = 0;
-              });
-            },
-            child: Transform.translate(
-              offset: Offset(_dragOffset, 0),
-              child: _buildAlertContent(),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildActionButtons() {
-    return Row(
-      children: [
-        Expanded(
-          child: GestureDetector(
-            onTap: widget.onDispatch,
-            child: Container(
-              height: 100,
-              color: AppColors.primary,
-              alignment: Alignment.center,
-              child: const Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(Icons.send, color: Colors.white, size: 24),
-                  SizedBox(height: 4),
-                  Text('派单', style: TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w600)),
-                ],
-              ),
-            ),
-          ),
+        );
+        if (confirmed == true) {
+          _showSnackBar('已忽略');
+          provider.ignoreAlert(alert);
+        }
+      },
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+        decoration: BoxDecoration(
+          color: AppColors.textSecondary.withOpacity(0.08),
+          borderRadius: BorderRadius.circular(AppDims.radiusMedium),
         ),
-        Expanded(
-          child: GestureDetector(
-            onTap: widget.onNotify,
-            child: Container(
-              height: 100,
-              color: AppColors.warning,
-              alignment: Alignment.center,
-              child: const Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(Icons.notification_important, color: Colors.white, size: 24),
-                  SizedBox(height: 4),
-                  Text('通知', style: TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w600)),
-                ],
-              ),
-            ),
-          ),
-        ),
-        Expanded(
-          child: GestureDetector(
-            onTap: widget.onResolve,
-            child: Container(
-              height: 100,
-              color: AppColors.success,
-              alignment: Alignment.center,
-              child: const Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(Icons.check_circle, color: Colors.white, size: 24),
-                  SizedBox(height: 4),
-                  Text('处置', style: TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w600)),
-                ],
-              ),
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildAlertContent() {
-    final alert = widget.alert;
-    final statusBadge = StatusBadge.fromStatus(alert.status);
-
-    return CardContainer(
-      child: Padding(
-        padding: const EdgeInsets.all(12),
         child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Container(
-              width: 4,
-              height: 60,
-              decoration: BoxDecoration(
-                color: alert.status == 'pending' ? AppColors.danger : AppColors.warning,
-                borderRadius: BorderRadius.circular(2),
+          mainAxisSize: MainAxisSize.min,
+          children: const [
+            Icon(Icons.not_interested, color: AppColors.textSecondary, size: 18),
+            SizedBox(width: 6),
+            Text(
+              '忽略',
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: AppColors.textSecondary,
               ),
             ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          alert.plateNumber,
-                          style: const TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.w700,
-                            color: AppColors.textPrimary,
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      statusBadge,
-                    ],
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    '车位 ${alert.spotId} · 占用 ${alert.occupiedHours}小时',
-                    style: const TextStyle(
-                      fontSize: 13,
-                      color: AppColors.textSecondary,
-                    ),
-                  ),
-                  if (alert.createdAt != null) ...[
-                    const SizedBox(height: 4),
-                    Text(
-                      '创建于 ${_formatTime(alert.createdAt!)}',
-                      style: const TextStyle(
-                        fontSize: 11,
-                        color: AppColors.textSecondary,
-                      ),
-                    ),
-                  ],
-                ],
-              ),
-            ),
-            const Icon(Icons.chevron_right, color: AppColors.textSecondary),
           ],
         ),
       ),
     );
   }
 
-  String _formatTime(DateTime time) {
-    return '${time.month}月${time.day}日 ${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}';
+  Widget _buildProcessButton(AlertModel alert) {
+    return GestureDetector(
+      onTap: () {
+        context.read<ParkingProvider>().resolveAlert(alert);
+        _showSnackBar('已处置');
+      },
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+        decoration: BoxDecoration(
+          color: AppColors.primary,
+          borderRadius: BorderRadius.circular(AppDims.radiusMedium),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: const [
+            Icon(Icons.check, color: Colors.white, size: 18),
+            SizedBox(width: 6),
+            Text(
+              '处理',
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: Colors.white,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  String _formatDate(DateTime time) {
+    return '${time.year}-${time.month}-${time.day}';
+  }
+
+  void _showSnackBar(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message)),
+    );
   }
 }

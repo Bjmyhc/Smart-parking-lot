@@ -117,6 +117,49 @@ static void subPost(uint8_t slot)
     mqttTxCount++;   /* 上行计数 */
 }
 
+/* 代子设备批量上报属性 (pack/post): 把本轮所有在线且已上线成功的子设备
+ * 合并进同一条 params 数组, 整轮仅 1 次上行.
+ * 依据 OneNET 平台限制"上行报文 ≤1次/s": 若 N 台节点各自发一条,
+ * 同轮 N 条上行会瞬时超限被延迟处理; 合并为一条后单轮只有 1 次上行,
+ * 完全符合平台限制. 上线/下线仍逐条处理(需要回复对应身份) */
+static void subPostBatch(void)
+{
+    uint8_t slots[LORA_MAX_NODES];
+    uint8_t count = 0;
+    for (uint8_t i = 0; i < nodeCount; i++)
+    {
+        if (nodes[i].online && nodes[i].subLogin)
+            slots[count++] = i;
+    }
+    if (count == 0) return;
+
+    StaticJsonDocument<2048> doc;   /* 与 MQTT 发送缓冲(2048B)对齐 */
+    doc["id"] = String(millis());
+    doc["version"] = "1.0";
+    JsonArray params = doc.createNestedArray("params");
+    for (uint8_t k = 0; k < count; k++)
+    {
+        NodeData &nd = nodes[slots[k]];
+        JsonObject sub = params.createNestedObject();
+        JsonObject identity = sub.createNestedObject("identity");
+        identity["productID"]  = nd.productKey;
+        identity["deviceName"] = nd.deviceName;
+        JsonObject props = sub.createNestedObject("properties");
+        props[SUB_PROP_PARK_STATUS]["value"]     = nd.parkStatus;
+        props[SUB_PROP_ULTRASONIC]["value"]      = nd.ultrasonic;
+        props[SUB_PROP_GEO_MAGNETIC]["value"]    = nd.geoMagnetic;
+        props[SUB_PROP_OCCUPIED_TIME]["value"]   = (long)nd.occupiedTime;
+        props[SUB_PROP_LED]["value"]             = nd.led;
+        props[SUB_PROP_LED_ENABLE]["value"]      = nd.ledEnable;
+    }
+
+    String out;
+    serializeJson(doc, out);
+    DBG_PRINTF("[MQTT] 批量上报 %d 台子设备: %s\n", count, out.c_str());
+    mqtt.publish(TOPIC_PACK_POST, out.c_str());
+    mqttTxCount++;   /* 上行计数 */
+}
+
 /* 处理平台下行: 子设备属性设置 -> 转发 LoRa 控制命令 */
 static void handleSubPropertySet(JsonDocument &doc)
 {
@@ -340,12 +383,9 @@ void onenet_uploadAll(void)
         }
     }
 
-    /* 4. 已上线节点批量上报 */
-    for (i = 0; i < nodeCount; i++)
-    {
-        if (nodes[i].online && nodes[i].subLogin)
-            subPost(i);
-    }
+    /* 4. 已上线节点批量上报: 一轮内所有在线节点合并为一条 pack/post
+     *    (满足平台"上行≤1次/s"限制, 避免 N 台节点瞬时 N 条上行超限) */
+    subPostBatch();
 }
 
 /* 回复平台"子设备属性设置"执行结果 */

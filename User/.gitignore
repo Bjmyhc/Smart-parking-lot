@@ -11,6 +11,10 @@
 .pub-cache/
 .pub/
 .dart_tool/
+build/
+local_plugins/**/build/
+local_plugins/**/.dart_tool/
+local_plugins/**/.gradle/
 
 # Android
 android/.gradle/
@@ -36,3 +40,23 @@ lib/generated_plugin_registrant.dart
 # OS
 .DS_Store
 Thumbs.db
+
+# IDE 工程文件
+*.iml
+
+# 本地 Gradle 仓库 (下载的二进制构件, 不入库)
+android/local-repo/
+
+# 本地插件裁剪: 示例/测试/代码生成 目录不入库 (只保留 lib 与 android/src/main)
+local_plugins/**/example/
+local_plugins/**/test/
+local_plugins/**/pigeons/
+local_plugins/**/android/src/test/
+
+# iOS 生成文件 (含本机绝对路径, 由 Flutter 重新生成)
+ios/Flutter/ephemeral/
+ios/Flutter/Generated.xcconfig
+ios/Flutter/flutter_export_environment.sh
+
+# 临时产物
+终端输出

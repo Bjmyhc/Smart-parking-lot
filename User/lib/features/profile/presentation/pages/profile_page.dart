@@ -1,4 +1,4 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
 import '../../../../shared/widgets/card_container.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_dims.dart';
@@ -28,8 +28,6 @@ class ProfilePage extends StatelessWidget {
                 children: [
                   _buildUserCard(),
                   const SizedBox(height: 12),
-                  _buildQuickActions(),
-                  const SizedBox(height: 12),
                   _buildSystemGroup(),
                   const SizedBox(height: 12),
                   _buildDeviceGroup(),
@@ -55,12 +53,20 @@ class ProfilePage extends StatelessWidget {
       child: Row(
         children: [
           const Expanded(
-            child: Text(
-              '我的',
-              style: TextStyle(
-                fontSize: 28,
-                fontWeight: FontWeight.w700,
-                color: AppColors.textPrimary,
+            child: Padding(
+              padding: EdgeInsets.only(left: 8),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    '我的',
+                    style: TextStyle(
+                      fontSize: 28,
+                      fontWeight: FontWeight.w500,
+                      color: AppColors.textPrimary,
+                    ),
+                  ),
+                ],
               ),
             ),
           ),
@@ -80,6 +86,7 @@ class ProfilePage extends StatelessWidget {
 
   Widget _buildUserCard() {
     return CardContainer(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 16),
       child: Column(
         children: [
           Row(
@@ -163,52 +170,9 @@ class ProfilePage extends StatelessWidget {
     );
   }
 
-  Widget _buildQuickActions() {
-    return CardContainer(
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 16),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceAround,
-          children: [
-            _buildQuickItem(Icons.warning_amber, '告警中心', AppColors.danger),
-            _buildQuickItem(Icons.local_parking, '车位管理', AppColors.primary),
-            _buildQuickItem(Icons.file_download, '数据导出', AppColors.warning),
-            _buildQuickItem(Icons.cloud_sync, '云端同步', AppColors.success),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildQuickItem(IconData icon, String label, Color color) {
-    return GestureDetector(
-      onTap: () {},
-      child: Column(
-        children: [
-          Container(
-            width: 44,
-            height: 44,
-            decoration: BoxDecoration(
-              color: color.withOpacity(0.1),
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Icon(icon, color: color, size: 24),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            label,
-            style: const TextStyle(
-              fontSize: 12,
-              color: AppColors.textPrimary,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
   Widget _buildSystemGroup() {
     return CardContainer(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
       child: Column(
         children: [
           _buildGroupItem(
@@ -232,6 +196,7 @@ class ProfilePage extends StatelessWidget {
 
   Widget _buildDeviceGroup() {
     return CardContainer(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
       child: Column(
         children: [
           _buildGroupItem(
@@ -255,6 +220,7 @@ class ProfilePage extends StatelessWidget {
 
   Widget _buildAccountGroup() {
     return CardContainer(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
       child: Column(
         children: [
           _buildGroupItem(
@@ -288,7 +254,7 @@ class ProfilePage extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
         child: Row(
           children: [
-            Icon(icon, color: AppColors.textPrimary, size: 22),
+            Icon(icon, color: AppColors.textPrimary.withOpacity(0.7), size: 22),
             const SizedBox(width: 14),
             Expanded(
               child: Text(
@@ -308,8 +274,8 @@ class ProfilePage extends StatelessWidget {
 
   Widget _buildDivider() {
     return Padding(
-      padding: const EdgeInsets.only(left: 60),
-      child: Container(height: 1, color: AppColors.textSecondary.withOpacity(0.5)),
+      padding: const EdgeInsets.only(left: 50, right: 20),
+      child: Container(height: 1, color: AppColors.textSecondary.withOpacity(0.3)),
     );
   }
 }
