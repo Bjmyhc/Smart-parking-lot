@@ -1,6 +1,7 @@
 import 'dart:convert';
-import 'package:http/http.dart' as http;
 import 'package:crypto/crypto.dart';
+import 'package:flutter/foundation.dart';
+import 'package:http/http.dart' as http;
 import '../models/spot_model.dart';
 import '../models/alert_model.dart';
 import '../models/stats_model.dart';
@@ -9,6 +10,9 @@ class ApiService {
   static const String _baseUrl = 'https://iot-api.heclouds.com';
   // 车位列表只展示节点产品(04kjwU9TC7)下的设备; 网关产品(9YIs0S7V11)不是车位, 不纳入列表
   static const String _nodeProductId = '04kjwU9TC7';
+  // 网关设备(承载 OtaAllow 全网升级确认门控): OtaAllow 是网关自身属性, 下发目标为 PGW001
+  static const String gatewayProductId = '9YIs0S7V11';
+  static const String gatewayDeviceId = 'PGW001';
   static const String _userId = '528332';
   static const String _accessKey = 'e3b97243b0d24ffda1befead601ef617';
 
@@ -17,13 +21,13 @@ class ApiService {
   String _generateAuthorization() {
     const version = '2020-05-29';
     // 主用户资源标识: userid/{userid}，末尾不带斜杠
-    final res = 'userid/$_userId';
+    const res = 'userid/$_userId';
     final et = (DateTime.now().millisecondsSinceEpoch ~/ 1000 + 3600).toString();
     const method = 'md5';
 
     // 官方规范: StringForSignature = et + "\n" + method + "\n" + res + "\n" + version (末尾无换行)
     final stringToSign = '$et\n$method\n$res\n$version';
-    print('>>> StringToSign: $stringToSign');
+    debugPrint('>>> StringToSign: $stringToSign');
 
     final keyBytes = base64Decode(_accessKey);
     final hmac = Hmac(md5, keyBytes);
@@ -34,7 +38,7 @@ class ApiService {
     final encodedSign = Uri.encodeComponent(sign);
 
     final auth = 'version=$version&res=$encodedRes&et=$et&method=$method&sign=$encodedSign';
-    print('>>> Authorization: $auth');
+    debugPrint('>>> Authorization: $auth');
     return auth;
   }
 
@@ -51,14 +55,14 @@ class ApiService {
             parsed.add(SpotModel.fromJson(e));
           } catch (err) {
             // 单台设备解析失败不影响其它设备
-            print('>>> 单台设备解析失败: ${e['name']} -> $err');
+            debugPrint('>>> 单台设备解析失败: ${e['name']} -> $err');
           }
         }
         realSpots = parsed;
-        print('>>> 真实设备: ${realSpots.length} 台');
+        debugPrint('>>> 真实设备: ${realSpots.length} 台');
       }
     } catch (e) {
-      print('>>> 获取真实设备失败: $e');
+      debugPrint('>>> 获取真实设备失败: $e');
     }
 
     // 按车位编号升序排列, 保证 001 在 002 之前
@@ -66,7 +70,7 @@ class ApiService {
 
     // 真实模式: 只显示真实设备, 不补模拟数据
     if (realOnly) {
-      print('>>> 真实模式: 仅展示 ${realSpots.length} 台真实设备');
+      debugPrint('>>> 真实模式: 仅展示 ${realSpots.length} 台真实设备');
       return realSpots;
     }
 
@@ -79,7 +83,7 @@ class ApiService {
         .toList();
 
     final allSpots = [...realSpots, ...extraSpots];
-    print('>>> 合计: ${allSpots.length} 台 (真实${realSpots.length} + 模拟${extraSpots.length})');
+    debugPrint('>>> 合计: ${allSpots.length} 台 (真实${realSpots.length} + 模拟${extraSpots.length})');
     return allSpots;
   }
 
@@ -93,7 +97,7 @@ class ApiService {
     try {
       final auth = _generateAuthorization();
       final url = Uri.parse('$_baseUrl/device/list?product_id=$productId&offset=0&limit=20');
-      print('>>> OneNET 请求: $url');
+      debugPrint('>>> OneNET 请求: $url');
 
       final response = await _client.get(
         url,
@@ -103,14 +107,14 @@ class ApiService {
         },
       );
 
-      print('>>> HTTP ${response.statusCode}');
-      print('>>> 响应体: ${response.body}');
+      debugPrint('>>> HTTP ${response.statusCode}');
+      debugPrint('>>> 响应体: ${response.body}');
 
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
         if (data['code'] == 0) {
           final List<dynamic> rawList = data['data']['list'] ?? [];
-          print('>>> 设备数量: ${rawList.length}');
+          debugPrint('>>> 设备数量: ${rawList.length}');
           final devices = <Map<String, dynamic>>[];
           for (var d in rawList) {
             final device = Map<String, dynamic>.from(d as Map);
@@ -119,17 +123,17 @@ class ApiService {
             final statusValue = device['status'];
             final isOnline = statusValue == 1 || statusValue == 'online' || statusValue == true;
             device['online'] = isOnline;
-            print('>>> 设备: ${device['name']} (${isOnline ? "在线" : "离线"})');
+            debugPrint('>>> 设备: ${device['name']} (${isOnline ? "在线" : "离线"})');
             devices.add(device);
           }
           return devices;
         } else {
-          print('>>> OneNET 返回错误: code=${data['code']}, msg=${data['msg']}');
+          debugPrint('>>> OneNET 返回错误: code=${data['code']}, msg=${data['msg']}');
         }
       }
       return [];
     } catch (e) {
-      print('>>> 请求异常: $e');
+      debugPrint('>>> 请求异常: $e');
       return [];
     }
   }
@@ -171,8 +175,8 @@ class ApiService {
 
         if (response.statusCode == 200) {
           final data = json.decode(response.body);
-          print('>>> 属性查询 ${device['name']}: ${data['code']} ${data['msg']}');
-          print('>>> 属性响应体: ${response.body}');
+          debugPrint('>>> 属性查询 ${device['name']}: ${data['code']} ${data['msg']}');
+          debugPrint('>>> 属性响应体: ${response.body}');
           if (data['code'] == 0) {
             final properties = <String, dynamic>{};
             final List<dynamic> propList = data['data'] ?? [];
@@ -285,7 +289,8 @@ class ApiService {
           'product_id': pid,
           'device_name': deviceName,
           'params': {
-            identifier: value is int ? value : value.toString(),
+            // 保留原始类型: 布尔属性发 true/false, 整型属性发数字, 避免平台类型校验拒绝
+            identifier: value,
           },
         }),
       );
@@ -297,6 +302,149 @@ class ApiService {
       return false;
     } catch (e) {
       return true;
+    }
+  }
+
+  /* ==================== OneNET 固件升级 (fuse-ota, sha1/2022-05-01) ====================
+   * 升级任务检测/状态查询用"新版"签名: method=sha1, version=2022-05-01,
+   * res=userid/{userId} (用户级 accessKey, 与网关 SOTA 一致), 可跨产品访问节点 OTA.
+   * 全网一键升级确认/复位复用现有 setProperty 下发 OtaAllow(1=确认 / 0=复位). */
+
+  static const String _otaVersion = '2022-05-01';
+  static const String _otaMethod = 'sha1';
+
+  String _generateOtaAuthorization() {
+    // OneNET 规范: StringForSignature = et + "\n" + method + "\n" + res + "\n" + version
+    const res = 'userid/$_userId';
+    final et = (DateTime.now().millisecondsSinceEpoch ~/ 1000 + 300).toString();
+    final stringToSign = '$et\n$_otaMethod\n$res\n$_otaVersion';
+    debugPrint('>>> OTA StringToSign: $stringToSign');
+
+    final keyBytes = base64Decode(_accessKey);
+    final hmac = Hmac(sha1, keyBytes);
+    final signature = hmac.convert(utf8.encode(stringToSign));
+    final sign = base64Encode(signature.bytes);
+
+    final auth = 'version=$_otaVersion&res=${Uri.encodeComponent(res)}&et=$et&method=$_otaMethod&sign=${Uri.encodeComponent(sign)}';
+    debugPrint('>>> OTA Authorization: $auth');
+    return auth;
+  }
+
+  /// 读取节点当前固件版本 (GET /fuse-ota/{pro}/{dev}/version), 返回 s_version; 失败返回 null.
+  Future<String?> getOtaNodeVersion(String deviceName) async {
+    try {
+      final auth = _generateOtaAuthorization();
+      final url = Uri.parse('$_baseUrl/fuse-ota/$_nodeProductId/${Uri.encodeComponent(deviceName)}/version');
+      final response = await _client.get(
+        url,
+        headers: {'Authorization': auth, 'Content-Type': 'application/json'},
+      );
+      debugPrint('>>> OTA 读版本 HTTP ${response.statusCode}: ${response.body}');
+      if (response.statusCode != 200) return null;
+      final data = json.decode(response.body);
+      if (data['code'] != 0) return null;
+      final obj = data['data'];
+      if (obj is Map) {
+        final v = obj['s_version'];
+        if (v != null) return v.toString();
+      }
+      return null;
+    } catch (e) {
+      debugPrint('>>> OTA 读版本异常: $e');
+      return null;
+    }
+  }
+
+  /// 检测节点升级任务 (GET /fuse-ota/{pro}/{dev}/check?type=2&version={cur}).
+  /// 有未结束任务返回 {tid,target,size,status}, 无任务/已结束返回 null.
+  Future<Map<String, dynamic>?> getOtaTask(String deviceName, {required String version}) async {
+    try {
+      final auth = _generateOtaAuthorization();
+      final url = Uri.parse('$_baseUrl/fuse-ota/$_nodeProductId/${Uri.encodeComponent(deviceName)}/check?type=2&version=${Uri.encodeComponent(version)}');
+      final response = await _client.get(
+        url,
+        headers: {'Authorization': auth, 'Content-Type': 'application/json'},
+      );
+      debugPrint('>>> OTA 查任务 HTTP ${response.statusCode}: ${response.body}');
+      if (response.statusCode != 200) return null;
+      final data = json.decode(response.body);
+      if (data['code'] != 0) return null;
+      final task = data['data'];
+      if (task is! Map || task.isEmpty) return null;
+      final status = task['status'];
+      // 平台对已结束任务(status>3)不再作为"待升级任务"返回
+      if (status is int && status > 3) return null;
+      return Map<String, dynamic>.from(task);
+    } catch (e) {
+      debugPrint('>>> OTA 查任务异常: $e');
+      return null;
+    }
+  }
+
+  /// 查询指定升级任务的状态 (GET /fuse-ota/{pro}/{dev}/{tid}/check).
+  /// 官方返回 data:{status}, 1待升级 2下载中 3升级中 4升级成功 5失败 6取消.
+  /// 任务状态独立且持久: 完成/失败后保持 status=4/5, 不会像物模型属性那样残留,
+  /// 天然避免"下次升级误读旧状态". 失败/接口异常返回 null (保留上一轮状态).
+  Future<int?> getOtaTaskStatus(String deviceName, String tid) async {
+    try {
+      final auth = _generateOtaAuthorization();
+      final url = Uri.parse(
+          '$_baseUrl/fuse-ota/$_nodeProductId/${Uri.encodeComponent(deviceName)}/$tid/check');
+      final response = await _client.get(
+        url,
+        headers: {'Authorization': auth, 'Content-Type': 'application/json'},
+      );
+      debugPrint('>>> OTA 查任务状态 HTTP ${response.statusCode}: ${response.body}');
+      if (response.statusCode != 200) return null;
+      final data = json.decode(response.body);
+      if (data['code'] != 0) return null;
+      final obj = data['data'];
+      if (obj is Map) {
+        final s = obj['status'];
+        if (s is num) return s.toInt();
+        if (s is String) return int.tryParse(s);
+      }
+      return null;
+    } catch (e) {
+      debugPrint('>>> OTA 查任务状态异常: $e');
+      return null;
+    }
+  }
+
+  /// 读取网关 OTA 实时进度 (网关自身物模型属性 OtaProgress, 由网关经 MQTT 上报到平台).
+  /// 阶段状态已改用官方 fuse-ota $tid/check 接口, 这里只取真实进度驱动精确进度条.
+  /// 返回 {OtaProgress:int}; 网关未上报/请求失败返回 null.
+  Future<Map<String, dynamic>?> getGatewayOtaState() async {
+    try {
+      final auth = _generateAuthorization();
+      final url = Uri.parse('$_baseUrl/thingmodel/query-device-property?product_id=$gatewayProductId&device_name=${Uri.encodeComponent(gatewayDeviceId)}');
+      final response = await _client.get(
+        url,
+        headers: {'Authorization': auth, 'Content-Type': 'application/json'},
+      );
+      debugPrint('>>> OTA 读网关进度 HTTP ${response.statusCode}: ${response.body}');
+      if (response.statusCode != 200) return null;
+      final data = json.decode(response.body);
+      if (data['code'] != 0) return null;
+
+      final result = <String, dynamic>{};
+      final List<dynamic> propList = data['data'] ?? [];
+      for (final prop in propList) {
+        final identifier = prop['identifier'] as String? ?? '';
+        final value = prop['value'];
+        if (identifier == 'OtaProgress') {
+          if (value is num) {
+            result[identifier] = value.toInt();
+          } else if (value is String) {
+            result[identifier] = int.tryParse(value) ?? 0;
+          }
+        }
+      }
+      if (result.isEmpty) return null; // 属性未上报(网关未升级固件/未配置物模型)
+      return result;
+    } catch (e) {
+      debugPrint('>>> OTA 读网关进度异常: $e');
+      return null;
     }
   }
 

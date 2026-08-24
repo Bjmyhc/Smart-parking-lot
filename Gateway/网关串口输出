@@ -1,508 +1,67 @@
-[OTA][ฦฝฬจ] ษฯฑจฝฺตใฐๆฑพ {"s_version":"v2.2","f_version":"V0.1"}: HTTP 200 {"code":0,"msg":"succ","request_id":"e4d980f41e4743b5b971eaf55d5e92f4"}
-[LoRa] PING-> ฝฺตใ1
-[OTA][ฦฝฬจ] ษฯฑจอ๘นุฐๆฑพ {"s_version":"v2.2","f_version":"V0.1"}: HTTP 200 {"code":0,"msg":"succ","request_id":"c226651aeaf44d91b3354c4676764f62"}
-[OTA][ฦฝฬจ] ผ์ฒโศฮฮ๑ code!=0: {"code":12012,"msg":"not exist","request_id":"e2ed312848384e59beb6dc5ecd38e57c"}
-[OTA][ฦฝฬจ] ผ์ฒโศฮฮ๑ code!=0: {"code":12012,"msg":"not exist","request_id":"2d0f738b69434656a1b72bf6f7e4ddae"}
-[OTA][ฦฝฬจ] ฮÞษýผถศฮฮ๑
-[LoRa] ฝฺตใ1 ณฌสฑ (ฬ๘นý)
-[OTA][ฦฝฬจ] ษฯฑจฝฺตใฐๆฑพ {"s_version":"v2.2","f_version":"V0.1"}: HTTP 200 {"code":0,"msg":"succ","request_id":"e9c688b9b15f4db5b71cd7242f3da8dd"}
-[OTA][ฦฝฬจ] ษฯฑจอ๘นุฐๆฑพ {"s_version":"v2.2","f_version":"V0.1"}: HTTP 200 {"code":0,"msg":"succ","request_id":"35a0ea39e3fb4b3294261211d632b923"}
-[OTA][ฦฝฬจ] ผ์ฒโศฮฮ๑ code!=0: {"code":12012,"msg":"not exist","request_id":"fabf0b7c16f446f3a5ad9df1fb5ca5e9"}
-[OTA][ฦฝฬจ] ผ์ฒโศฮฮ๑ code!=0: {"code":12012,"msg":"not exist","request_id":"92de1686802c4b76839cf18382b61ef1"}
-[OTA][ฦฝฬจ] ฮÞษýผถศฮฮ๑
-[OTA][ฦฝฬจ] ษฯฑจฝฺตใฐๆฑพ {"s_version":"v2.2","f_version":"V0.1"}: HTTP 200 {"code":0,"msg":"succ","request_id":"268e9faabb3a4ad6936672ebc3995bfe"}
-[OTA][ฦฝฬจ] ษฯฑจอ๘นุฐๆฑพ {"s_version":"v2.2","f_version":"V0.1"}: HTTP 200 {"code":0,"msg":"succ","request_id":"8d93b4b085754d5da31ebaf4910c2383"}
-[OTA][ฦฝฬจ] ผ์ฒโศฮฮ๑ code!=0: {"code":12012,"msg":"not exist","request_id":"edc99549f06f43889da8edaaf711915a"}
-[OTA][ฦฝฬจ] ผ์ฒโศฮฮ๑ code!=0: {"code":12012,"msg":"not exist","request_id":"03f11900598540d4814ce41714d29b3b"}
-[OTA][ฦฝฬจ] ฮÞษýผถศฮฮ๑
-????????????????????????????????????????????????????????????????[LoRa] ฝฺตใ1 ณฌสฑ (ฬ๘นý)
-[OTA][ฦฝฬจ] ษฯฑจฝฺตใฐๆฑพ {"s_version":"v2.2","f_version":"V0.1"}: HTTP 200 {"code":0,"msg":"succ","request_id":"3bddbc8d88c54baf9d1f1bc54d8a2d71"}
-[OTA][ฦฝฬจ] ษฯฑจอ๘นุฐๆฑพ {"s_version":"v2.2","f_version":"V0.1"}: HTTP 200 {"code":0,"msg":"succ","request_id":"16167af4f0564a7dba458f53765513e9"}
-[OTA][ฦฝฬจ] ผ์ฒโศฮฮ๑ code!=0: {"code":12012,"msg":"not exist","request_id":"55c3384086df4daeb44c9ee28058a55c"}
-[OTA][ฦฝฬจ] ผ์ฒโศฮฮ๑ code!=0: {"code":12012,"msg":"not exist","request_id":"275005ce06fa4afcb1599bbe51034385"}
-[OTA][ฦฝฬจ] ฮÞษýผถศฮฮ๑
-[OTA][ฦฝฬจ] ษฯฑจฝฺตใฐๆฑพ {"s_version":"v2.2","f_version":"V0.1"}: HTTP 200 {"code":0,"msg":"succ","request_id":"3389d9a9ff66445a83cd7455fe0c7391"}
-[OTA][ฦฝฬจ] ษฯฑจอ๘นุฐๆฑพ {"s_version":"v2.2","f_version":"V0.1"}: HTTP 200 {"code":0,"msg":"succ","request_id":"fb75682be332400d96ee83899115a1bd"}
-[OTA][ฦฝฬจ] ผ์ฒโศฮฮ๑ code!=0: {"code":12012,"msg":"not exist","request_id":"14a07cdb6b2b46c8b59ce10085ce07a1"}
-[OTA][ฦฝฬจ] ผ์ฒโศฮฮ๑ code!=0: {"code":12012,"msg":"not exist","request_id":"f9da123a02e04de89e999353a0e7b594"}
-[OTA][ฦฝฬจ] ฮÞษýผถศฮฮ๑
-[LoRa] PING-> ฝฺตใ1
-[LoRa] ฝฺตใ1 ณฌสฑ (ฬ๘นý)
-......[WiFi] ึุมฌนýณฬ: ป๑ศกIPึะ...
-.
-[WiFi] มฌฝำณษนฆ! IP=192.168.10.23
-[MQTT] ีýิฺมฌฝำ OneNET (อ๘นุ)...
-[MQTT] มฌฝำณษนฆ, าัถฉิฤืำษ่ฑธตวยผ/ษฯฑจ/ษ่ึรึ๗ฬโ
-[อ๘นุ] ณ๕สผปฏอ๊ณษ
-
-[LoRa] PING-> ฝฺตใ1
-[MQTT] ืำษ่ฑธฯยฯ฿ ฝฺตใ1: {"id":"8797","version":"1.0","params":{"productID":"04kjwU9TC7","deviceName":"Park001"}}
-[LoRa] สีตฝ<- ฝฺตใ1 ศทศฯ: PONG
-[LoRa] PING-> ฝฺตใ2
-[LoRa] PING-> ฝฺตใ2 (ณขสิ1/3)
-[LoRa] PING-> ฝฺตใ2 (ณขสิ2/3)
-[LoRa] ฝฺตใ2 ณฌสฑ (ฬ๘นý)
-[LoRa] ฝฺตใทขฯึษจร่อ๊ณษ, ปึธดีýณฃยึัฏ
-[LoRa] ทขหอ-> ฝฺตใ1: AT+DATA
-[LoRa] สีตฝ<- ฝฺตใ1 สýพÝ: ณตฮป=0 พเภ๋=6 ตุดล=0 สฑณค=0 LED=0 สนฤÜ=1
-[MQTT] ืำษ่ฑธษฯฯ฿ ฝฺตใ1 (04kjwU9TC7/Park001): {"id":"12512","version":"1.0","params":{"productID":"04kjwU9TC7","deviceName":"Park001"}}
-[MQTT] สีตฝ topic=$sys/9YIs0S7V11/PGW001/thing/sub/login/reply
-{"id":"12512","code":200,"msg":"success"}
-[MQTT] ืำษ่ฑธ1 ษฯฯ฿ณษนฆ
-[MQTT] ืำษ่ฑธษฯฑจ ฝฺตใ1: {"id":"12573","version":"1.0","params":[{"identity":{"productID":"04kjwU9TC7","deviceName":"Park001"},"properties":{"ParkStatus":{"value":0},"Ultrasonic":{"value":6},"GeoMagnetic":{"value":0},"OccupiedTime":{"value":0},"LED":{"value":false},"LedEnable":{"value":true}}}]}
-[MQTT] สีตฝ topic=$sys/9YIs0S7V11/PGW001/thing/pack/post/reply
-{"id":"12573","code":200,"msg":"success"}
-[LoRa] ทขหอ-> ฝฺตใ1: AT+DATA
-[LoRa] สีตฝ<- ฝฺตใ1 สýพÝ: ณตฮป=0 พเภ๋=6 ตุดล=0 สฑณค=0 LED=0 สนฤÜ=1
-[LoRa] ทขหอ-> ฝฺตใ1: AT+DATA
-[LoRa] สีตฝ<- ฝฺตใ1 สýพÝ: ณตฮป=0 พเภ๋=6 ตุดล=0 สฑณค=0 LED=0 สนฤÜ=1
-[LoRa] ทขหอ-> ฝฺตใ1: AT+DATA
-[LoRa] สีตฝ<- ฝฺตใ1 สýพÝ: ณตฮป=0 พเภ๋=6 ตุดล=0 สฑณค=0 LED=0 สนฤÜ=1
-[LoRa] ทขหอ-> ฝฺตใ1: AT+DATA
-[LoRa] สีตฝ<- ฝฺตใ1 สýพÝ: ณตฮป=0 พเภ๋=6 ตุดล=0 สฑณค=0 LED=0 สนฤÜ=1
-[LoRa] ทขหอ-> ฝฺตใ1: AT+DATA
-[LoRa] สีตฝ<- ฝฺตใ1 สýพÝ: ณตฮป=0 พเภ๋=6 ตุดล=0 สฑณค=0 LED=0 สนฤÜ=1
-[LoRa] ทขหอ-> ฝฺตใ1: AT+DATA
-[LoRa] สีตฝ<- ฝฺตใ1 สýพÝ: ณตฮป=0 พเภ๋=6 ตุดล=0 สฑณค=0 LED=0 สนฤÜ=1
-[LoRa] ทขหอ-> ฝฺตใ1: AT+DATA
-[LoRa] สีตฝ<- ฝฺตใ1 สýพÝ: ณตฮป=0 พเภ๋=6 ตุดล=0 สฑณค=0 LED=0 สนฤÜ=1
-[MQTT] ืำษ่ฑธษฯฑจ ฝฺตใ1: {"id":"27512","version":"1.0","params":[{"identity":{"productID":"04kjwU9TC7","deviceName":"Park001"},"properties":{"ParkStatus":{"value":0},"Ultrasonic":{"value":6},"GeoMagnetic":{"value":0},"OccupiedTime":{"value":0},"LED":{"value":false},"LedEnable":{"value":true}}}]}
-[MQTT] สีตฝ topic=$sys/9YIs0S7V11/PGW001/thing/pack/post/reply
-{"id":"27512","code":200,"msg":"success"}
-[LoRa] ทขหอ-> ฝฺตใ1: AT+DATA
-[LoRa] สีตฝ<- ฝฺตใ1 สýพÝ: ณตฮป=0 พเภ๋=6 ตุดล=0 สฑณค=0 LED=0 สนฤÜ=1
-[OTA][ฦฝฬจ] ผ์ฒโศฮฮ๑ code!=0: {"code":12012,"msg":"not exist","request_id":"1e6df11642904fb59c69404cf45a583b"}
-[OTA][ฦฝฬจ] ผ์ฒโศฮฮ๑ code!=0: {"code":12012,"msg":"not exist","request_id":"fec0ed8d10b0498ab0d467aeb3682077"}
-[OTA][ฦฝฬจ] ฮÞษýผถศฮฮ๑
-[LoRa] ทขหอ-> ฝฺตใ1: AT+DATA
-[LoRa] สีตฝ<- ฝฺตใ1 สýพÝ: ณตฮป=0 พเภ๋=6 ตุดล=0 สฑณค=0 LED=0 สนฤÜ=1
-[LoRa] ทขหอ-> ฝฺตใ1: AT+DATA
-[LoRa] สีตฝ<- ฝฺตใ1 สýพÝ: ณตฮป=0 พเภ๋=6 ตุดล=0 สฑณค=0 LED=0 สนฤÜ=1
-[LoRa] ทขหอ-> ฝฺตใ1: AT+DATA
-[LoRa] สีตฝ<- ฝฺตใ1 สýพÝ: ณตฮป=0 พเภ๋=6 ตุดล=0 สฑณค=0 LED=0 สนฤÜ=1
-[LoRa] ทขหอ-> ฝฺตใ1: AT+DATA
-[LoRa] สีตฝ<- ฝฺตใ1 สýพÝ: ณตฮป=0 พเภ๋=6 ตุดล=0 สฑณค=0 LED=0 สนฤÜ=1
-[LoRa] ทขหอ-> ฝฺตใ1: AT+DATA
-[LoRa] สีตฝ<- ฝฺตใ1 สýพÝ: ณตฮป=0 พเภ๋=6 ตุดล=0 สฑณค=0 LED=0 สนฤÜ=1
-[LoRa] ทขหอ-> ฝฺตใ1: AT+DATA
-[LoRa] สีตฝ<- ฝฺตใ1 สýพÝ: ณตฮป=0 พเภ๋=6 ตุดล=0 สฑณค=0 LED=0 สนฤÜ=1
-[MQTT] ืำษ่ฑธษฯฑจ ฝฺตใ1: {"id":"42512","version":"1.0","params":[{"identity":{"productID":"04kjwU9TC7","deviceName":"Park001"},"properties":{"ParkStatus":{"value":0},"Ultrasonic":{"value":6},"GeoMagnetic":{"value":0},"OccupiedTime":{"value":0},"LED":{"value":false},"LedEnable":{"value":true}}}]}
-[MQTT] สีตฝ topic=$sys/9YIs0S7V11/PGW001/thing/pack/post/reply
-{"id":"42512","code":200,"msg":"success"}
-[LoRa] ทขหอ-> ฝฺตใ1: AT+DATA
-[LoRa] สีตฝ<- ฝฺตใ1 สýพÝ: ณตฮป=0 พเภ๋=6 ตุดล=0 สฑณค=0 LED=0 สนฤÜ=1
-[LoRa] ทขหอ-> ฝฺตใ1: AT+DATA
-[LoRa] สีตฝ<- ฝฺตใ1 สýพÝ: ณตฮป=0 พเภ๋=6 ตุดล=0 สฑณค=0 LED=0 สนฤÜ=1
-[LoRa] ทขหอ-> ฝฺตใ1: AT+DATA
-[LoRa] สีตฝ<- ฝฺตใ1 สýพÝ: ณตฮป=0 พเภ๋=6 ตุดล=0 สฑณค=0 LED=0 สนฤÜ=1
-[LoRa] ทขหอ-> ฝฺตใ1: AT+DATA
-[LoRa] สีตฝ<- ฝฺตใ1 สýพÝ: ณตฮป=0 พเภ๋=6 ตุดล=0 สฑณค=0 LED=0 สนฤÜ=1
-[LoRa] ทขหอ-> ฝฺตใ1: AT+DATA
-[LoRa] สีตฝ<- ฝฺตใ1 สýพÝ: ณตฮป=0 พเภ๋=6 ตุดล=0 สฑณค=0 LED=0 สนฤÜ=1
-[LoRa] ทขหอ-> ฝฺตใ1: AT+DATA
-[LoRa] สีตฝ<- ฝฺตใ1 สýพÝ: ณตฮป=0 พเภ๋=6 ตุดล=0 สฑณค=0 LED=0 สนฤÜ=1
-[LoRa] ทขหอ-> ฝฺตใ1: AT+DATA
-[LoRa] สีตฝ<- ฝฺตใ1 สýพÝ: ณตฮป=0 พเภ๋=6 ตุดล=0 สฑณค=0 LED=0 สนฤÜ=1
-[MQTT] ืำษ่ฑธษฯฑจ ฝฺตใ1: {"id":"57512","version":"1.0","params":[{"identity":{"productID":"04kjwU9TC7","deviceName":"Park001"},"properties":{"ParkStatus":{"value":0},"Ultrasonic":{"value":6},"GeoMagnetic":{"value":0},"OccupiedTime":{"value":0},"LED":{"value":false},"LedEnable":{"value":true}}}]}
-[MQTT] สีตฝ topic=$sys/9YIs0S7V11/PGW001/thing/pack/post/reply
-{"id":"57512","code":200,"msg":"success"}
-[LoRa] ทขหอ-> ฝฺตใ1: AT+DATA
-[LoRa] สีตฝ<- ฝฺตใ1 สýพÝ: ณตฮป=0 พเภ๋=6 ตุดล=0 สฑณค=0 LED=0 สนฤÜ=1
-[OTA][ฦฝฬจ] ผ์ฒโศฮฮ๑ code!=0: {"code":12012,"msg":"not exist","request_id":"a4c05a3f1b3e4014a10918868218a4e3"}
-[OTA][ฦฝฬจ] ผ์ฒโศฮฮ๑ code!=0: {"code":12012,"msg":"not exist","request_id":"d9396aa3f8ee4fa4ad09d548bf09fdf4"}
-[OTA][ฦฝฬจ] ฮÞษýผถศฮฮ๑
-[LoRa] ทขหอ-> ฝฺตใ1: AT+DATA
-[LoRa] สีตฝ<- ฝฺตใ1 สýพÝ: ณตฮป=0 พเภ๋=6 ตุดล=0 สฑณค=0 LED=0 สนฤÜ=1
-[LoRa] ทขหอ-> ฝฺตใ1: AT+DATA
-[LoRa] สีตฝ<- ฝฺตใ1 สýพÝ: ณตฮป=0 พเภ๋=6 ตุดล=0 สฑณค=0 LED=0 สนฤÜ=1
-[LoRa] ทขหอ-> ฝฺตใ1: AT+DATA
-[LoRa] สีตฝ<- ฝฺตใ1 สýพÝ: ณตฮป=0 พเภ๋=6 ตุดล=0 สฑณค=0 LED=0 สนฤÜ=1
-[LoRa] ทขหอ-> ฝฺตใ1: AT+DATA
-[LoRa] สีตฝ<- ฝฺตใ1 สýพÝ: ณตฮป=0 พเภ๋=6 ตุดล=0 สฑณค=0 LED=0 สนฤÜ=1
-[LoRa] ทขหอ-> ฝฺตใ1: AT+DATA
-[LoRa] สีตฝ<- ฝฺตใ1 สýพÝ: ณตฮป=0 พเภ๋=6 ตุดล=0 สฑณค=0 LED=0 สนฤÜ=1
-[LoRa] ทขหอ-> ฝฺตใ1: AT+DATA
-[LoRa] สีตฝ<- ฝฺตใ1 สýพÝ: ณตฮป=0 พเภ๋=6 ตุดล=0 สฑณค=0 LED=0 สนฤÜ=1
-[MQTT] ืำษ่ฑธษฯฑจ ฝฺตใ1: {"id":"72512","version":"1.0","params":[{"identity":{"productID":"04kjwU9TC7","deviceName":"Park001"},"properties":{"ParkStatus":{"value":0},"Ultrasonic":{"value":6},"GeoMagnetic":{"value":0},"OccupiedTime":{"value":0},"LED":{"value":false},"LedEnable":{"value":true}}}]}
-[MQTT] สีตฝ topic=$sys/9YIs0S7V11/PGW001/thing/pack/post/reply
-{"id":"72512","code":200,"msg":"success"}
-[LoRa] ทขหอ-> ฝฺตใ1: AT+DATA
-[LoRa] สีตฝ<- ฝฺตใ1 สýพÝ: ณตฮป=0 พเภ๋=6 ตุดล=0 สฑณค=0 LED=0 สนฤÜ=1
-[LoRa] ทขหอ-> ฝฺตใ1: AT+DATA
-[LoRa] สีตฝ<- ฝฺตใ1 สýพÝ: ณตฮป=0 พเภ๋=6 ตุดล=0 สฑณค=0 LED=0 สนฤÜ=1
-[LoRa] ทขหอ-> ฝฺตใ1: AT+DATA
-[LoRa] สีตฝ<- ฝฺตใ1 สýพÝ: ณตฮป=0 พเภ๋=6 ตุดล=0 สฑณค=0 LED=0 สนฤÜ=1
-[LoRa] ทขหอ-> ฝฺตใ1: AT+DATA
-[LoRa] สีตฝ<- ฝฺตใ1 สýพÝ: ณตฮป=0 พเภ๋=6 ตุดล=0 สฑณค=0 LED=0 สนฤÜ=1
-[LoRa] ทขหอ-> ฝฺตใ1: AT+DATA
-[LoRa] สีตฝ<- ฝฺตใ1 สýพÝ: ณตฮป=0 พเภ๋=6 ตุดล=0 สฑณค=0 LED=0 สนฤÜ=1
-[LoRa] ทขหอ-> ฝฺตใ1: AT+DATA
-[LoRa] สีตฝ<- ฝฺตใ1 สýพÝ: ณตฮป=0 พเภ๋=6 ตุดล=0 สฑณค=0 LED=0 สนฤÜ=1
-[LoRa] ทขหอ-> ฝฺตใ1: AT+DATA
-[LoRa] สีตฝ<- ฝฺตใ1 สýพÝ: ณตฮป=0 พเภ๋=6 ตุดล=0 สฑณค=0 LED=0 สนฤÜ=1
-[MQTT] ืำษ่ฑธษฯฑจ ฝฺตใ1: {"id":"87512","version":"1.0","params":[{"identity":{"productID":"04kjwU9TC7","deviceName":"Park001"},"properties":{"ParkStatus":{"value":0},"Ultrasonic":{"value":6},"GeoMagnetic":{"value":0},"OccupiedTime":{"value":0},"LED":{"value":false},"LedEnable":{"value":true}}}]}
-[MQTT] สีตฝ topic=$sys/9YIs0S7V11/PGW001/thing/pack/post/reply
-{"id":"87512","code":200,"msg":"success"}
-[LoRa] ทขหอ-> ฝฺตใ1: AT+DATA
-[LoRa] สีตฝ<- ฝฺตใ1 สýพÝ: ณตฮป=0 พเภ๋=6 ตุดล=0 สฑณค=0 LED=0 สนฤÜ=1
-[OTA][ฦฝฬจ] ผ์ฒโศฮฮ๑ code!=0: {"code":12012,"msg":"not exist","request_id":"5827a8c79d3f471aaaba56b6142d59f1"}
-[OTA][ฦฝฬจ] ผ์ฒโศฮฮ๑ code!=0: {"code":12012,"msg":"not exist","request_id":"26b2f807915641ecb5def285a4b3dc92"}
-[OTA][ฦฝฬจ] ฮÞษýผถศฮฮ๑
-[LoRa] ทขหอ-> ฝฺตใ1: AT+DATA
-[LoRa] สีตฝ<- ฝฺตใ1 สýพÝ: ณตฮป=0 พเภ๋=6 ตุดล=0 สฑณค=0 LED=0 สนฤÜ=1
-[LoRa] ทขหอ-> ฝฺตใ1: AT+DATA
-[LoRa] สีตฝ<- ฝฺตใ1 สýพÝ: ณตฮป=0 พเภ๋=6 ตุดล=0 สฑณค=0 LED=0 สนฤÜ=1
-[LoRa] ทขหอ-> ฝฺตใ1: AT+DATA
-[LoRa] สีตฝ<- ฝฺตใ1 สýพÝ: ณตฮป=0 พเภ๋=18 ตุดล=0 สฑณค=0 LED=0 สนฤÜ=1
-[MQTT] ืำษ่ฑธษฯฑจ ฝฺตใ1: {"id":"95194","version":"1.0","params":[{"identity":{"productID":"04kjwU9TC7","deviceName":"Park001"},"properties":{"ParkStatus":{"value":0},"Ultrasonic":{"value":18},"GeoMagnetic":{"value":0},"OccupiedTime":{"value":0},"LED":{"value":false},"LedEnable":{"value":true}}}]}
-[MQTT] สีตฝ topic=$sys/9YIs0S7V11/PGW001/thing/pack/post/reply
-{"id":"95194","code":200,"msg":"success"}
-[LoRa] ทขหอ-> ฝฺตใ1: AT+DATA
-[LoRa] สีตฝ<- ฝฺตใ1 สýพÝ: ณตฮป=0 พเภ๋=6 ตุดล=0 สฑณค=0 LED=0 สนฤÜ=1
-[MQTT] ืำษ่ฑธษฯฑจ ฝฺตใ1: {"id":"97314","version":"1.0","params":[{"identity":{"productID":"04kjwU9TC7","deviceName":"Park001"},"properties":{"ParkStatus":{"value":0},"Ultrasonic":{"value":6},"GeoMagnetic":{"value":0},"OccupiedTime":{"value":0},"LED":{"value":false},"LedEnable":{"value":true}}}]}
-[MQTT] สีตฝ topic=$sys/9YIs0S7V11/PGW001/thing/pack/post/reply
-{"id":"97314","code":200,"msg":"success"}
-[LoRa] ทขหอ-> ฝฺตใ1: AT+DATA
-[LoRa] สีตฝ<- ฝฺตใ1 สýพÝ: ณตฮป=0 พเภ๋=6 ตุดล=0 สฑณค=0 LED=0 สนฤÜ=1
-[LoRa] ทขหอ-> ฝฺตใ1: AT+DATA
-[LoRa] สีตฝ<- ฝฺตใ1 สýพÝ: ณตฮป=0 พเภ๋=6 ตุดล=0 สฑณค=0 LED=0 สนฤÜ=1
-[LoRa] ทขหอ-> ฝฺตใ1: AT+DATA
-[LoRa] สีตฝ<- ฝฺตใ1 สýพÝ: ณตฮป=0 พเภ๋=6 ตุดล=0 สฑณค=0 LED=0 สนฤÜ=1
-[LoRa] ทขหอ-> ฝฺตใ1: AT+DATA
-[LoRa] สีตฝ<- ฝฺตใ1 สýพÝ: ณตฮป=0 พเภ๋=6 ตุดล=0 สฑณค=0 LED=0 สนฤÜ=1
-[LoRa] ทขหอ-> ฝฺตใ1: AT+DATA
-[LoRa] สีตฝ<- ฝฺตใ1 สýพÝ: ณตฮป=0 พเภ๋=6 ตุดล=0 สฑณค=0 LED=0 สนฤÜ=1
-[LoRa] ทขหอ-> ฝฺตใ1: AT+DATA
-[LoRa] สีตฝ<- ฝฺตใ1 สýพÝ: ณตฮป=0 พเภ๋=6 ตุดล=0 สฑณค=0 LED=0 สนฤÜ=1
-[LoRa] ทขหอ-> ฝฺตใ1: AT+DATA
-[LoRa] สีตฝ<- ฝฺตใ1 สýพÝ: ณตฮป=0 พเภ๋=6 ตุดล=0 สฑณค=0 LED=0 สนฤÜ=1
-[MQTT] ืำษ่ฑธษฯฑจ ฝฺตใ1: {"id":"112314","version":"1.0","params":[{"identity":{"productID":"04kjwU9TC7","deviceName":"Park001"},"properties":{"ParkStatus":{"value":0},"Ultrasonic":{"value":6},"GeoMagnetic":{"value":0},"OccupiedTime":{"value":0},"LED":{"value":false},"LedEnable":{"value":true}}}]}
-[MQTT] สีตฝ topic=$sys/9YIs0S7V11/PGW001/thing/pack/post/reply
-{"id":"112314","code":200,"msg":"success"}
-[LoRa] ทขหอ-> ฝฺตใ1: AT+DATA
-[LoRa] สีตฝ<- ฝฺตใ1 สýพÝ: ณตฮป=0 พเภ๋=6 ตุดล=0 สฑณค=0 LED=0 สนฤÜ=1
-[LoRa] ทขหอ-> ฝฺตใ1: AT+CER
-[LFS] าัฑฃดๆ 1 ฬ๕ึคส้
-[LoRa] สีตฝ<- ฝฺตใ1 ึคส้ (ำะะง=1 ฒ๚ฦท=04kjwU9TC7 ษ่ฑธ=Park001)
-[MQTT] ืำษ่ฑธษฯฯ฿ ฝฺตใ1 (04kjwU9TC7/Park001): {"id":"116612","version":"1.0","params":{"productID":"04kjwU9TC7","deviceName":"Park001"}}
-[MQTT] สีตฝ topic=$sys/9YIs0S7V11/PGW001/thing/sub/login/reply
-{"id":"116612","code":200,"msg":"success"}
-[MQTT] ืำษ่ฑธ1 ษฯฯ฿ณษนฆ
-[MQTT] ืำษ่ฑธษฯฑจ ฝฺตใ1: {"id":"116681","version":"1.0","params":[{"identity":{"productID":"04kjwU9TC7","deviceName":"Park001"},"properties":{"ParkStatus":{"value":0},"Ultrasonic":{"value":6},"GeoMagnetic":{"value":0},"OccupiedTime":{"value":0},"LED":{"value":false},"LedEnable":{"value":true}}}]}
-[MQTT] สีตฝ topic=$sys/9YIs0S7V11/PGW001/thing/pack/post/reply
-{"id":"116681","code":200,"msg":"success"}
-[LoRa] ทขหอ-> ฝฺตใ1: AT+DATA
-[LoRa] สีตฝ<- ฝฺตใ1 สýพÝ: ณตฮป=0 พเภ๋=6 ตุดล=0 สฑณค=0 LED=0 สนฤÜ=1
-[OTA][ฦฝฬจ] ผ์ฒโศฮฮ๑ code!=0: {"code":12012,"msg":"not exist","request_id":"ccb4264d613d46c6a9bc5d313d465620"}
-[OTA][ฦฝฬจ] ผ์ฒโตฝศฮฮ๑ type=2 tid=1489370 target=v2.3_test size=22576 status=1
-[OTA][ฦฝฬจ] ฯยิุนฬผþ tid=1489370 -> /ota_firmware.bin
-[OTA][ฦฝฬจ] ฯยิุฝ๘ถศ: 75% (17152/22576)
-[OTA][ฦฝฬจ] ฯยิุฝ๘ถศ: 100% (22576/22576)
-[OTA][ฦฝฬจ] ฯยิุอ๊ณษ: 22576 ืึฝฺ
-[LoRa] ทขหอ-> ฝฺตใ1: AT+DATA
-[OTA][ฦฝฬจ] ฝฺตในฬผþอท: magic=0xA55A ver=0x0203 len=22564 file=22564
-[OTA][ฦฝฬจ] ฤฟฑ๊ฝฺตใ=1 (Park001)
-[OTA] ????(?????): ???1, ?ทฺ=v2.3_test
-[LoRa] สีตฝ<- ฝฺตใ1 สýพÝ: ณตฮป=0 พเภ๋=6 ตุดล=0 สฑณค=0 LED=0 สนฤÜ=1
-[OTA] ???????1: AT+OTA=start,v2.3_test
-[OTA] ???ฆห??????, ?????????
-[OTA] ??????????, ??งณ=22576 ???, ??????????
-[OTA] ???? #1/177 (0%) 128/22576B
-[OTA] ACK #1/177 (0%)
-????????????????????????????????????????????????????????????????{"id":"131612","version":"1.0","params":[{"identity":{"productID":"04kjwU9TC7","deviceName":"Park001"},"properties":{"ParkStatus":{"value":0},"Ultrasonic":{"value":6},"GeoMagnetic":{"value":0},"OccupiedTime":{"value":0},"LED":{"value":false},"LedEnable":{"value":true}}}]}
-[MQTT] สีตฝ topic=$sys/9YIs0S7V11/PGW001/thing/pack/post/reply
-{"id":"131612","code":200,"msg":"success"}
-[OTA] ???? #10/177 (5%) 1280/22576B
-[OTA] ACK #10/177 (5%)
-[OTA] ???? #20/177 (11%) 2560/22576B
-[OTA] ACK #20/177 (11%)
-[OTA] ???? #30/177 (16%) 3840/22576B
-[OTA] ACK #30/177 (16%)
-[OTA] ???? #40/177 (22%) 5120/22576B
-[OTA] ACK #40/177 (22%)
-[MQTT] ืำษ่ฑธษฯฑจ ฝฺตใ1: {"id":"146727","version":"1.0","params":[{"identity":{"productID":"04kjwU9TC7","deviceName":"Park001"},"properties":{"ParkStatus":{"value":0},"Ultrasonic":{"value":6},"GeoMagnetic":{"value":0},"OccupiedTime":{"value":0},"LED":{"value":false},"LedEnable":{"value":true}}}]}
-[MQTT] สีตฝ topic=$sys/9YIs0S7V11/PGW001/thing/pack/post/reply
-{"id":"146727","code":200,"msg":"success"}
-[OTA] ???? #50/177 (28%) 6400/22576B
-[OTA] ACK #50/177 (28%)
-[OTA] ???? #60/177 (33%) 7680/22576B
-[OTA] ACK #60/177 (33%)
-[OTA] ???? #70/177 (39%) 8960/22576B
-[OTA] ACK #70/177 (39%)
-[OTA] ???? #80/177 (45%) 10240/22576B
-[OTA] ACK #80/177 (45%)
-[MQTT] ืำษ่ฑธษฯฑจ ฝฺตใ1: {"id":"161856","version":"1.0","params":[{"identity":{"productID":"04kjwU9TC7","deviceName":"Park001"},"properties":{"ParkStatus":{"value":0},"Ultrasonic":{"value":6},"GeoMagnetic":{"value":0},"OccupiedTime":{"value":0},"LED":{"value":false},"LedEnable":{"value":true}}}]}
-[MQTT] สีตฝ topic=$sys/9YIs0S7V11/PGW001/thing/pack/post/reply
-{"id":"161856","code":200,"msg":"success"}
-[OTA] ???? #90/177 (50%) 11520/22576B
-[OTA] ACK #90/177 (50%)
-[OTA] ???? #100/177 (56%) 12800/22576B
-[OTA] ACK #100/177 (56%)
-????????????????????????????????????????????????????????????????22576B
-[OTA] ACK #110/177 (62%)
-[MQTT] ืำษ่ฑธษฯฑจ ฝฺตใ1: {"id":"176989","version":"1.0","params":[{"identity":{"productID":"04kjwU9TC7","deviceName":"Park001"},"properties":{"ParkStatus":{"value":0},"Ultrasonic":{"value":6},"GeoMagnetic":{"value":0},"OccupiedTime":{"value":0},"LED":{"value":false},"LedEnable":{"value":true}}}]}
-[MQTT] สีตฝ topic=$sys/9YIs0S7V11/PGW001/thing/pack/post/reply
-{"id":"176989","code":200,"msg":"success"}
-[OTA] ???? #120/177 (67%) 15360/22576B
-[OTA] ACK #120/177 (67%)
-[OTA] ???? #130/177 (73%) 16640/22576B
-[OTA] ACK #130/177 (73%)
-[OTA] ???? #140/177 (79%) 17920/22576B
-[OTA] ACK #140/177 (79%)
-[OTA] ???? #150/177 (84%) 19200/22576B
-[OTA] ACK #150/177 (84%)
-[MQTT] ืำษ่ฑธษฯฑจ ฝฺตใ1: {"id":"192113","version":"1.0","params":[{"identity":{"productID":"04kjwU9TC7","deviceName":"Park001"},"properties":{"ParkStatus":{"value":0},"Ultrasonic":{"value":6},"GeoMagnetic":{"value":0},"OccupiedTime":{"value":0},"LED":{"value":false},"LedEnable":{"value":true}}}]}
-[MQTT] สีตฝ topic=$sys/9YIs0S7V11/PGW001/thing/pack/post/reply
-{"id":"192113","code":200,"msg":"success"}
-[OTA] ???? #160/177 (90%) 20480/22576B
-[OTA] ACK #160/177 (90%)
-[OTA] ???? #170/177 (96%) 21760/22576B
-[OTA] ACK #170/177 (96%)
-[OTA] ???????????????? (177 ??), ???? EOT
-[OTA] EOT ?????, ??????????
-[OTA] ???????!
-[OTA] ???, ??? 80 ??
-[OTA][ฦฝฬจ] LoRa มดยทฝแส๘, ณษนฆ, ษฯฑจฦฝฬจ
-[OTA][ฦฝฬจ] ษฯฑจฝ๘ถศ step=201: HTTP 200
-[ฝฺตใ] ฝฺตใ1 ภ๋ฯ฿ (ณฌสฑ)
-[MQTT] ืำษ่ฑธฯยฯ฿ ฝฺตใ1: {"id":"202728","version":"1.0","params":{"productID":"04kjwU9TC7","deviceName":"Park001"}}
-[OTA][ฦฝฬจ] ผ์ฒโศฮฮ๑ code!=0: {"code":12012,"msg":"not exist","request_id":"3af93bc4c7254f0688718717e150413b"}
-[OTA][ฦฝฬจ] ผ์ฒโศฮฮ๑ code!=0: {"code":12012,"msg":"not exist","request_id":"51688d5d3bd947aa8eef039b5f899fa8"}
-[OTA][ฦฝฬจ] ฮÞษýผถศฮฮ๑
-[LoRa] PING-> ฝฺตใ1
-[LoRa] สีตฝ<- ฝฺตใ1 ศทศฯ: PONG
-[LoRa] ทขหอ-> ฝฺตใ1: AT+DATA
-[LoRa] สีตฝ<- ฝฺตใ1 สýพÝ: ณตฮป=0 พเภ๋=19 ตุดล=0 สฑณค=0 LED=0 สนฤÜ=1
-[MQTT] ืำษ่ฑธษฯฯ฿ ฝฺตใ1 (04kjwU9TC7/Park001): {"id":"204956","version":"1.0","params":{"productID":"04kjwU9TC7","deviceName":"Park001"}}
-[MQTT] สีตฝ topic=$sys/9YIs0S7V11/PGW001/thing/sub/login/reply
-{"id":"204956","code":200,"msg":"success"}
-[MQTT] ืำษ่ฑธ1 ษฯฯ฿ณษนฆ
-[MQTT] ืำษ่ฑธษฯฑจ ฝฺตใ1: {"id":"205026","version":"1.0","params":[{"identity":{"productID":"04kjwU9TC7","deviceName":"Park001"},"properties":{"ParkStatus":{"value":0},"Ultrasonic":{"value":19},"GeoMagnetic":{"value":0},"OccupiedTime":{"value":0},"LED":{"value":false},"LedEnable":{"value":true}}}]}
-[MQTT] สีตฝ topic=$sys/9YIs0S7V11/PGW001/thing/pack/post/reply
-{"id":"205026","code":200,"msg":"success"}
-[LoRa] ทขหอ-> ฝฺตใ1: AT+DATA
-[LoRa] สีตฝ<- ฝฺตใ1 สýพÝ: ณตฮป=0 พเภ๋=6 ตุดล=0 สฑณค=0 LED=0 สนฤÜ=1
-[MQTT] ืำษ่ฑธษฯฑจ ฝฺตใ1: {"id":"207076","version":"1.0","params":[{"identity":{"productID":"04kjwU9TC7","deviceName":"Park001"},"properties":{"ParkStatus":{"value":0},"Ultrasonic":{"value":6},"GeoMagnetic":{"value":0},"OccupiedTime":{"value":0},"LED":{"value":false},"LedEnable":{"value":true}}}]}
-[MQTT] สีตฝ topic=$sys/9YIs0S7V11/PGW001/thing/pack/post/reply
-{"id":"207076","code":200,"msg":"success"}
-[LoRa] ทขหอ-> ฝฺตใ1: AT+DATA
-[LoRa] สีตฝ<- ฝฺตใ1 สýพÝ: ณตฮป=0 พเภ๋=6 ตุดล=0 สฑณค=0 LED=0 สนฤÜ=1
-[LoRa] ทขหอ-> ฝฺตใ1: AT+DATA
-[LoRa] สีตฝ<- ฝฺตใ1 สýพÝ: ณตฮป=0 พเภ๋=6 ตุดล=0 สฑณค=0 LED=0 สนฤÜ=1
-[LoRa] ทขหอ-> ฝฺตใ1: AT+DATA
-[LoRa] สีตฝ<- ฝฺตใ1 สýพÝ: ณตฮป=0 พเภ๋=6 ตุดล=0 สฑณค=0 LED=0 สนฤÜ=1
-[LoRa] ทขหอ-> ฝฺตใ1: AT+DATA
-[LoRa] สีตฝ<- ฝฺตใ1 สýพÝ: ณตฮป=0 พเภ๋=6 ตุดล=0 สฑณค=0 LED=0 สนฤÜ=1
-[LoRa] ทขหอ-> ฝฺตใ1: AT+DATA
-[LoRa] สีตฝ<- ฝฺตใ1 สýพÝ: ณตฮป=0 พเภ๋=6 ตุดล=0 สฑณค=0 LED=0 สนฤÜ=1
-[LoRa] ทขหอ-> ฝฺตใ1: AT+DATA
-[LoRa] สีตฝ<- ฝฺตใ1 สýพÝ: ณตฮป=0 พเภ๋=6 ตุดล=0 สฑณค=0 LED=0 สนฤÜ=1
-[LoRa] ทขหอ-> ฝฺตใ1: AT+DATA
-[LoRa] สีตฝ<- ฝฺตใ1 สýพÝ: ณตฮป=0 พเภ๋=6 ตุดล=0 สฑณค=0 LED=0 สนฤÜ=1
-[MQTT] ืำษ่ฑธษฯฑจ ฝฺตใ1: {"id":"222076","version":"1.0","params":[{"identity":{"productID":"04kjwU9TC7","deviceName":"Park001"},"properties":{"ParkStatus":{"value":0},"Ultrasonic":{"value":6},"GeoMagnetic":{"value":0},"OccupiedTime":{"value":0},"LED":{"value":false},"LedEnable":{"value":true}}}]}
-[MQTT] สีตฝ topic=$sys/9YIs0S7V11/PGW001/thing/pack/post/reply
-{"id":"222076","code":200,"msg":"success"}
-[LoRa] ทขหอ-> ฝฺตใ1: AT+DATA
-[LoRa] สีตฝ<- ฝฺตใ1 สýพÝ: ณตฮป=0 พเภ๋=6 ตุดล=0 สฑณค=0 LED=0 สนฤÜ=1
-[LoRa] ทขหอ-> ฝฺตใ1: AT+DATA
-[LoRa] สีตฝ<- ฝฺตใ1 สýพÝ: ณตฮป=0 พเภ๋=6 ตุดล=0 สฑณค=0 LED=0 สนฤÜ=1
-[LoRa] ทขหอ-> ฝฺตใ1: AT+DATA
-[LoRa] สีตฝ<- ฝฺตใ1 สýพÝ: ณตฮป=0 พเภ๋=6 ตุดล=0 สฑณค=0 LED=0 สนฤÜ=1
-[LoRa] ทขหอ-> ฝฺตใ1: AT+DATA
-[LoRa] สีตฝ<- ฝฺตใ1 สýพÝ: ณตฮป=0 พเภ๋=6 ตุดล=0 สฑณค=0 LED=0 สนฤÜ=1
-[LoRa] ทขหอ-> ฝฺตใ1: AT+DATA
-[LoRa] สีตฝ<- ฝฺตใ1 สýพÝ: ณตฮป=0 พเภ๋=6 ตุดล=0 สฑณค=0 LED=0 สนฤÜ=1
-[OTA][ฦฝฬจ] ผ์ฒโศฮฮ๑ code!=0: {"code":12012,"msg":"not exist","request_id":"7a01a0b80eb4461ea5617f76e6d075c9"}
-[OTA][ฦฝฬจ] ผ์ฒโศฮฮ๑ code!=0: {"code":12012,"msg":"not exist","request_id":"07708a6da0ad4dafb5d9dd24a021a93a"}
-[OTA][ฦฝฬจ] ฮÞษýผถศฮฮ๑
-[LoRa] ทขหอ-> ฝฺตใ1: AT+DATA
-[LoRa] สีตฝ<- ฝฺตใ1 สýพÝ: ณตฮป=0 พเภ๋=6 ตุดล=0 สฑณค=0 LED=0 สนฤÜ=1
-[LoRa] ทขหอ-> ฝฺตใ1: AT+DATA
-[LoRa] สีตฝ<- ฝฺตใ1 สýพÝ: ณตฮป=0 พเภ๋=6 ตุดล=0 สฑณค=0 LED=0 สนฤÜ=1
-[MQTT] ืำษ่ฑธษฯฑจ ฝฺตใ1: {"id":"237077","version":"1.0","params":[{"identity":{"productID":"04kjwU9TC7","deviceName":"Park001"},"properties":{"ParkStatus":{"value":0},"Ultrasonic":{"value":6},"GeoMagnetic":{"value":0},"OccupiedTime":{"value":0},"LED":{"value":false},"LedEnable":{"value":true}}}]}
-[MQTT] สีตฝ topic=$sys/9YIs0S7V11/PGW001/thing/pack/post/reply
-{"id":"237077","code":200,"msg":"success"}
-[LoRa] ทขหอ-> ฝฺตใ1: AT+DATA
-[LoRa] สีตฝ<- ฝฺตใ1 สýพÝ: ณตฮป=0 พเภ๋=6 ตุดล=0 สฑณค=0 LED=0 สนฤÜ=1
-[LoRa] ทขหอ-> ฝฺตใ1: AT+DATA
-[LoRa] สีตฝ<- ฝฺตใ1 สýพÝ: ณตฮป=0 พเภ๋=6 ตุดล=0 สฑณค=0 LED=0 สนฤÜ=1
-[LoRa] ทขหอ-> ฝฺตใ1: AT+DATA
-[LoRa] สีตฝ<- ฝฺตใ1 สýพÝ: ณตฮป=0 พเภ๋=6 ตุดล=0 สฑณค=0 LED=0 สนฤÜ=1
-[LoRa] ทขหอ-> ฝฺตใ1: AT+DATA
-[LoRa] สีตฝ<- ฝฺตใ1 สýพÝ: ณตฮป=0 พเภ๋=6 ตุดล=0 สฑณค=0 LED=0 สนฤÜ=1
-[LoRa] ทขหอ-> ฝฺตใ1: AT+DATA
-[LoRa] สีตฝ<- ฝฺตใ1 สýพÝ: ณตฮป=0 พเภ๋=6 ตุดล=0 สฑณค=0 LED=0 สนฤÜ=1
-[LoRa] ทขหอ-> ฝฺตใ1: AT+DATA
-[LoRa] สีตฝ<- ฝฺตใ1 สýพÝ: ณตฮป=0 พเภ๋=6 ตุดล=0 สฑณค=0 LED=0 สนฤÜ=1
-[LoRa] ทขหอ-> ฝฺตใ1: AT+DATA
-[LoRa] สีตฝ<- ฝฺตใ1 สýพÝ: ณตฮป=0 พเภ๋=6 ตุดล=0 สฑณค=0 LED=0 สนฤÜ=1
-[MQTT] ืำษ่ฑธษฯฑจ ฝฺตใ1: {"id":"252077","version":"1.0","params":[{"identity":{"productID":"04kjwU9TC7","deviceName":"Park001"},"properties":{"ParkStatus":{"value":0},"Ultrasonic":{"value":6},"GeoMagnetic":{"value":0},"OccupiedTime":{"value":0},"LED":{"value":false},"LedEnable":{"value":true}}}]}
-[MQTT] สีตฝ topic=$sys/9YIs0S7V11/PGW001/thing/pack/post/reply
-{"id":"252077","code":200,"msg":"success"}
-[LoRa] ทขหอ-> ฝฺตใ1: AT+DATA
-[LoRa] สีตฝ<- ฝฺตใ1 สýพÝ: ณตฮป=0 พเภ๋=6 ตุดล=0 สฑณค=0 LED=0 สนฤÜ=1
-[LoRa] ทขหอ-> ฝฺตใ1: AT+DATA
-[LoRa] สีตฝ<- ฝฺตใ1 สýพÝ: ณตฮป=0 พเภ๋=6 ตุดล=0 สฑณค=0 LED=0 สนฤÜ=1
-[LoRa] ทขหอ-> ฝฺตใ1: AT+DATA
-[LoRa] สีตฝ<- ฝฺตใ1 สýพÝ: ณตฮป=0 พเภ๋=6 ตุดล=0 สฑณค=0 LED=0 สนฤÜ=1
-[LoRa] ทขหอ-> ฝฺตใ1: AT+DATA
-[LoRa] สีตฝ<- ฝฺตใ1 สýพÝ: ณตฮป=0 พเภ๋=6 ตุดล=0 สฑณค=0 LED=0 สนฤÜ=1
-[LoRa] ทขหอ-> ฝฺตใ1: AT+DATA
-[LoRa] สีตฝ<- ฝฺตใ1 สýพÝ: ณตฮป=0 พเภ๋=6 ตุดล=0 สฑณค=0 LED=0 สนฤÜ=1
-[OTA][ฦฝฬจ] ผ์ฒโศฮฮ๑ code!=0: {"code":12012,"msg":"not exist","request_id":"893e56bcbdeb4856bcea259c0ece4d22"}
-[OTA][ฦฝฬจ] ผ์ฒโศฮฮ๑ code!=0: {"code":12012,"msg":"not exist","request_id":"4d4649a990d543c48223245953e5cf0b"}
-[OTA][ฦฝฬจ] ฮÞษýผถศฮฮ๑
-[LoRa] ทขหอ-> ฝฺตใ1: AT+DATA
-[LoRa] สีตฝ<- ฝฺตใ1 สýพÝ: ณตฮป=0 พเภ๋=6 ตุดล=0 สฑณค=0 LED=0 สนฤÜ=1
-[LoRa] ทขหอ-> ฝฺตใ1: AT+DATA
-[LoRa] สีตฝ<- ฝฺตใ1 สýพÝ: ณตฮป=0 พเภ๋=6 ตุดล=0 สฑณค=0 LED=0 สนฤÜ=1
-[MQTT] ืำษ่ฑธษฯฑจ ฝฺตใ1: {"id":"267077","version":"1.0","params":[{"identity":{"productID":"04kjwU9TC7","deviceName":"Park001"},"properties":{"ParkStatus":{"value":0},"Ultrasonic":{"value":6},"GeoMagnetic":{"value":0},"OccupiedTime":{"value":0},"LED":{"value":false},"LedEnable":{"value":true}}}]}
-[MQTT] สีตฝ topic=$sys/9YIs0S7V11/PGW001/thing/pack/post/reply
-{"id":"267077","code":200,"msg":"success"}
-[LoRa] ทขหอ-> ฝฺตใ1: AT+DATA
-[LoRa] สีตฝ<- ฝฺตใ1 สýพÝ: ณตฮป=0 พเภ๋=6 ตุดล=0 สฑณค=0 LED=0 สนฤÜ=1
-[LoRa] ทขหอ-> ฝฺตใ1: AT+DATA
-[LoRa] สีตฝ<- ฝฺตใ1 สýพÝ: ณตฮป=0 พเภ๋=6 ตุดล=0 สฑณค=0 LED=0 สนฤÜ=1
-[LoRa] ทขหอ-> ฝฺตใ1: AT+DATA
-[LoRa] สีตฝ<- ฝฺตใ1 สýพÝ: ณตฮป=0 พเภ๋=10 ตุดล=0 สฑณค=0 LED=0 สนฤÜ=1
-[MQTT] ืำษ่ฑธษฯฑจ ฝฺตใ1: {"id":"272788","version":"1.0","params":[{"identity":{"productID":"04kjwU9TC7","deviceName":"Park001"},"properties":{"ParkStatus":{"value":0},"Ultrasonic":{"value":10},"GeoMagnetic":{"value":0},"OccupiedTime":{"value":0},"LED":{"value":false},"LedEnable":{"value":true}}}]}
-[MQTT] สีตฝ topic=$sys/9YIs0S7V11/PGW001/thing/pack/post/reply
-{"id":"272788","code":200,"msg":"success"}
-[LoRa] ทขหอ-> ฝฺตใ1: AT+DATA
-[LoRa] สีตฝ<- ฝฺตใ1 สýพÝ: ณตฮป=0 พเภ๋=6 ตุดล=0 สฑณค=0 LED=0 สนฤÜ=1
-[MQTT] ืำษ่ฑธษฯฑจ ฝฺตใ1: {"id":"274908","version":"1.0","params":[{"identity":{"productID":"04kjwU9TC7","deviceName":"Park001"},"properties":{"ParkStatus":{"value":0},"Ultrasonic":{"value":6},"GeoMagnetic":{"value":0},"OccupiedTime":{"value":0},"LED":{"value":false},"LedEnable":{"value":true}}}]}
-[MQTT] สีตฝ topic=$sys/9YIs0S7V11/PGW001/thing/pack/post/reply
-{"id":"274908","code":200,"msg":"success"}
-[LoRa] ทขหอ-> ฝฺตใ1: AT+DATA
-[LoRa] สีตฝ<- ฝฺตใ1 สýพÝ: ณตฮป=0 พเภ๋=6 ตุดล=0 สฑณค=0 LED=0 สนฤÜ=1
-[LoRa] ทขหอ-> ฝฺตใ1: AT+DATA
-[LoRa] สีตฝ<- ฝฺตใ1 สýพÝ: ณตฮป=0 พเภ๋=6 ตุดล=0 สฑณค=0 LED=0 สนฤÜ=1
-[LoRa] ทขหอ-> ฝฺตใ1: AT+DATA
-[LoRa] สีตฝ<- ฝฺตใ1 สýพÝ: ณตฮป=0 พเภ๋=6 ตุดล=0 สฑณค=0 LED=0 สนฤÜ=1
-[LoRa] ทขหอ-> ฝฺตใ1: AT+DATA
-[LoRa] สีตฝ<- ฝฺตใ1 สýพÝ: ณตฮป=0 พเภ๋=6 ตุดล=0 สฑณค=0 LED=0 สนฤÜ=1
-[LoRa] ทขหอ-> ฝฺตใ1: AT+DATA
-[LoRa] สีตฝ<- ฝฺตใ1 สýพÝ: ณตฮป=0 พเภ๋=13 ตุดล=0 สฑณค=0 LED=0 สนฤÜ=1
-[MQTT] ืำษ่ฑธษฯฑจ ฝฺตใ1: {"id":"285505","version":"1.0","params":[{"identity":{"productID":"04kjwU9TC7","deviceName":"Park001"},"properties":{"ParkStatus":{"value":0},"Ultrasonic":{"value":13},"GeoMagnetic":{"value":0},"OccupiedTime":{"value":0},"LED":{"value":false},"LedEnable":{"value":true}}}]}
-[MQTT] สีตฝ topic=$sys/9YIs0S7V11/PGW001/thing/pack/post/reply
-{"id":"285505","code":200,"msg":"success"}
-[LoRa] ทขหอ-> ฝฺตใ1: AT+DATA
-[LoRa] สีตฝ<- ฝฺตใ1 สýพÝ: ณตฮป=0 พเภ๋=6 ตุดล=0 สฑณค=0 LED=0 สนฤÜ=1
-[MQTT] ืำษ่ฑธษฯฑจ ฝฺตใ1: {"id":"287624","version":"1.0","params":[{"identity":{"productID":"04kjwU9TC7","deviceName":"Park001"},"properties":{"ParkStatus":{"value":0},"Ultrasonic":{"value":6},"GeoMagnetic":{"value":0},"OccupiedTime":{"value":0},"LED":{"value":false},"LedEnable":{"value":true}}}]}
-[MQTT] สีตฝ topic=$sys/9YIs0S7V11/PGW001/thing/pack/post/reply
-{"id":"287624","code":200,"msg":"success"}
-[LoRa] ทขหอ-> ฝฺตใ1: AT+DATA
-[LoRa] สีตฝ<- ฝฺตใ1 สýพÝ: ณตฮป=0 พเภ๋=6 ตุดล=0 สฑณค=0 LED=0 สนฤÜ=1
-[LoRa] ทขหอ-> ฝฺตใ1: AT+DATA
-[LoRa] สีตฝ<- ฝฺตใ1 สýพÝ: ณตฮป=0 พเภ๋=6 ตุดล=0 สฑณค=0 LED=0 สนฤÜ=1
-[OTA][ฦฝฬจ] ผ์ฒโศฮฮ๑ code!=0: {"code":12012,"msg":"not exist","request_id":"f37f687482b9418597e7e7bc9d949cae"}
-[OTA][ฦฝฬจ] ผ์ฒโศฮฮ๑ code!=0: {"code":12012,"msg":"not exist","request_id":"1f21e6bc3f6946a295d46876cc5d2845"}
-[OTA][ฦฝฬจ] ฮÞษýผถศฮฮ๑
-[LoRa] ทขหอ-> ฝฺตใ1: AT+DATA
-[LoRa] ฝฺตใ1 ณฌสฑ (ฬ๘นý)
-[ฝฺตใ] ฝฺตใ1 ภ๋ฯ฿ (ณฌสฑ)
-[MQTT] ืำษ่ฑธฯยฯ฿ ฝฺตใ1: {"id":"297863","version":"1.0","params":{"productID":"04kjwU9TC7","deviceName":"Park001"}}
-[LoRa] PING-> ฝฺตใ1
-[LoRa] ฝฺตใ1 ณฌสฑ (ฬ๘นý)
-[LoRa] PING-> ฝฺตใ1
-[LoRa] ฝฺตใ1 ณฌสฑ (ฬ๘นý)
-[LoRa] PING-> ฝฺตใ1
-[LoRa] สีตฝ<- ฝฺตใ1 ศทศฯ: PONG
-[LoRa] ทขหอ-> ฝฺตใ1: AT+DATA
-[LoRa] สีตฝ<- ฝฺตใ1 สýพÝ: ณตฮป=0 พเภ๋=6 ตุดล=0 สฑณค=0 LED=0 สนฤÜ=1
-[MQTT] ืำษ่ฑธษฯฯ฿ ฝฺตใ1 (04kjwU9TC7/Park001): {"id":"312863","version":"1.0","params":{"productID":"04kjwU9TC7","deviceName":"Park001"}}
-[MQTT] สีตฝ topic=$sys/9YIs0S7V11/PGW001/thing/sub/login/reply
-{"id":"312863","code":200,"msg":"success"}
-[MQTT] ืำษ่ฑธ1 ษฯฯ฿ณษนฆ
-[MQTT] ืำษ่ฑธษฯฑจ ฝฺตใ1: {"id":"312920","version":"1.0","params":[{"identity":{"productID":"04kjwU9TC7","deviceName":"Park001"},"properties":{"ParkStatus":{"value":0},"Ultrasonic":{"value":6},"GeoMagnetic":{"value":0},"OccupiedTime":{"value":0},"LED":{"value":false},"LedEnable":{"value":true}}}]}
-[MQTT] สีตฝ topic=$sys/9YIs0S7V11/PGW001/thing/pack/post/reply
-{"id":"312920","code":200,"msg":"success"}
-[LoRa] ทขหอ-> ฝฺตใ1: AT+DATA
-[LoRa] สีตฝ<- ฝฺตใ1 สýพÝ: ณตฮป=0 พเภ๋=6 ตุดล=0 สฑณค=0 LED=0 สนฤÜ=1
-[LoRa] ทขหอ-> ฝฺตใ1: AT+DATA
-[LoRa] สีตฝ<- ฝฺตใ1 สýพÝ: ณตฮป=0 พเภ๋=6 ตุดล=0 สฑณค=0 LED=0 สนฤÜ=1
-[LoRa] ทขหอ-> ฝฺตใ1: AT+DATA
-[LoRa] สีตฝ<- ฝฺตใ1 สýพÝ: ณตฮป=0 พเภ๋=6 ตุดล=0 สฑณค=0 LED=0 สนฤÜ=1
-[LoRa] ทขหอ-> ฝฺตใ1: AT+CER
-[LFS] าัฑฃดๆ 1 ฬ๕ึคส้
-[LoRa] สีตฝ<- ฝฺตใ1 ึคส้ (ำะะง=1 ฒ๚ฦท=04kjwU9TC7 ษ่ฑธ=Park001)
-[MQTT] ืำษ่ฑธษฯฯ฿ ฝฺตใ1 (04kjwU9TC7/Park001): {"id":"320797","version":"1.0","params":{"productID":"04kjwU9TC7","deviceName":"Park001"}}
-[MQTT] สีตฝ topic=$sys/9YIs0S7V11/PGW001/thing/sub/login/reply
-{"id":"320797","code":200,"msg":"success"}
-[MQTT] ืำษ่ฑธ1 ษฯฯ฿ณษนฆ
-[MQTT] ืำษ่ฑธษฯฑจ ฝฺตใ1: {"id":"320857","version":"1.0","params":[{"identity":{"productID":"04kjwU9TC7","deviceName":"Park001"},"properties":{"ParkStatus":{"value":0},"Ultrasonic":{"value":6},"GeoMagnetic":{"value":0},"OccupiedTime":{"value":0},"LED":{"value":false},"LedEnable":{"value":true}}}]}
-[MQTT] สีตฝ topic=$sys/9YIs0S7V11/PGW001/thing/pack/post/reply
-{"id":"320857","code":200,"msg":"success"}
-[OTA][ฦฝฬจ] ผ์ฒโศฮฮ๑ code!=0: {"code":12012,"msg":"not exist","request_id":"c5582fcfa782431ca8495d78a63254bf"}
-[LoRa] ทขหอ-> ฝฺตใ1: AT+DATA
-[OTA][ฦฝฬจ] ผ์ฒโศฮฮ๑ code!=0: {"code":12012,"msg":"not exist","request_id":"84f164a91d394456a21e1d7001689d36"}
-[OTA][ฦฝฬจ] ฮÞษýผถศฮฮ๑
-[LoRa] สีตฝ<- ฝฺตใ1 สýพÝ: ณตฮป=0 พเภ๋=6 ตุดล=0 สฑณค=0 LED=0 สนฤÜ=1
-[LoRa] ทขหอ-> ฝฺตใ1: AT+DATA
-[LoRa] สีตฝ<- ฝฺตใ1 สýพÝ: ณตฮป=0 พเภ๋=6 ตุดล=0 สฑณค=0 LED=0 สนฤÜ=1
-[LoRa] ทขหอ-> ฝฺตใ1: AT+DATA
-[LoRa] สีตฝ<- ฝฺตใ1 สýพÝ: ณตฮป=0 พเภ๋=6 ตุดล=0 สฑณค=0 LED=0 สนฤÜ=1
-[LoRa] ทขหอ-> ฝฺตใ1: AT+DATA
-[LoRa] สีตฝ<- ฝฺตใ1 สýพÝ: ณตฮป=0 พเภ๋=6 ตุดล=0 สฑณค=0 LED=0 สนฤÜ=1
-[LoRa] ทขหอ-> ฝฺตใ1: AT+DATA
-[LoRa] สีตฝ<- ฝฺตใ1 สýพÝ: ณตฮป=0 พเภ๋=6 ตุดล=0 สฑณค=0 LED=0 สนฤÜ=1
-[LoRa] ทขหอ-> ฝฺตใ1: AT+DATA
-[LoRa] สีตฝ<- ฝฺตใ1 สýพÝ: ณตฮป=0 พเภ๋=6 ตุดล=0 สฑณค=0 LED=0 สนฤÜ=1
-[LoRa] ทขหอ-> ฝฺตใ1: AT+DATA
-[LoRa] สีตฝ<- ฝฺตใ1 สýพÝ: ณตฮป=0 พเภ๋=6 ตุดล=0 สฑณค=0 LED=0 สนฤÜ=1
-[MQTT] ืำษ่ฑธษฯฑจ ฝฺตใ1: {"id":"335797","version":"1.0","params":[{"identity":{"productID":"04kjwU9TC7","deviceName":"Park001"},"properties":{"ParkStatus":{"value":0},"Ultrasonic":{"value":6},"GeoMagnetic":{"value":0},"OccupiedTime":{"value":0},"LED":{"value":false},"LedEnable":{"value":true}}}]}
-[MQTT] สีตฝ topic=$sys/9YIs0S7V11/PGW001/thing/pack/post/reply
-{"id":"335797","code":200,"msg":"success"}
-[LoRa] ทขหอ-> ฝฺตใ1: AT+DATA
-[LoRa] สีตฝ<- ฝฺตใ1 สýพÝ: ณตฮป=0 พเภ๋=6 ตุดล=0 สฑณค=0 LED=0 สนฤÜ=1
-[LoRa] ทขหอ-> ฝฺตใ1: AT+DATA
-[LoRa] สีตฝ<- ฝฺตใ1 สýพÝ: ณตฮป=0 พเภ๋=6 ตุดล=0 สฑณค=0 LED=0 สนฤÜ=1
-[LoRa] ทขหอ-> ฝฺตใ1: AT+DATA
-[LoRa] สีตฝ<- ฝฺตใ1 สýพÝ: ณตฮป=0 พเภ๋=6 ตุดล=0 สฑณค=0 LED=0 สนฤÜ=1
-[LoRa] ทขหอ-> ฝฺตใ1: AT+DATA
-[LoRa] สีตฝ<- ฝฺตใ1 สýพÝ: ณตฮป=0 พเภ๋=6 ตุดล=0 สฑณค=0 LED=0 สนฤÜ=1
-[LoRa] ทขหอ-> ฝฺตใ1: AT+DATA
-[LoRa] สีตฝ<- ฝฺตใ1 สýพÝ: ณตฮป=0 พเภ๋=6 ตุดล=0 สฑณค=0 LED=0 สนฤÜ=1
-[LoRa] ทขหอ-> ฝฺตใ1: AT+DATA
-[LoRa] สีตฝ<- ฝฺตใ1 สýพÝ: ณตฮป=0 พเภ๋=6 ตุดล=0 สฑณค=0 LED=0 สนฤÜ=1
-[LoRa] ทขหอ-> ฝฺตใ1: AT+DATA
-[LoRa] สีตฝ<- ฝฺตใ1 สýพÝ: ณตฮป=0 พเภ๋=6 ตุดล=0 สฑณค=0 LED=0 สนฤÜ=1
-[MQTT] ืำษ่ฑธษฯฑจ ฝฺตใ1: {"id":"350798","version":"1.0","params":[{"identity":{"productID":"04kjwU9TC7","deviceName":"Park001"},"properties":{"ParkStatus":{"value":0},"Ultrasonic":{"value":6},"GeoMagnetic":{"value":0},"OccupiedTime":{"value":0},"LED":{"value":false},"LedEnable":{"value":true}}}]}
-[MQTT] สีตฝ topic=$sys/9YIs0S7V11/PGW001/thing/pack/post/reply
-{"id":"350798","code":200,"msg":"success"}
-[LoRa] ทขหอ-> ฝฺตใ1: AT+DATA
-[LoRa] สีตฝ<- ฝฺตใ1 สýพÝ: ณตฮป=0 พเภ๋=6 ตุดล=0 สฑณค=0 LED=0 สนฤÜ=1
-[OTA][ฦฝฬจ] ษฯฑจฝฺตใฐๆฑพ {"s_version":"v2.3","f_version":"V0.1"}: HTTP 200 {"code":0,"msg":"succ","request_id":"8812f71a4b8d4d80a2a26353ebda3c3c"}
-[OTA][ฦฝฬจ] ษฯฑจอ๘นุฐๆฑพ {"s_version":"v2.3","f_version":"V0.1"}: HTTP 200 {"code":0,"msg":"succ","request_id":"5e6275fff25b482886062ce1bd637bfc"}
-[OTA][ฦฝฬจ] ผ์ฒโศฮฮ๑ code!=0: {"code":12012,"msg":"not exist","request_id":"d589be38af44456cb7e4365b68ae61a2"}
-[OTA][ฦฝฬจ] ผ์ฒโศฮฮ๑ code!=0: {"code":12012,"msg":"not exist","request_id":"9df927d4861348e6bf0107ea69aa1271"}
-[OTA][ฦฝฬจ] ฮÞษýผถศฮฮ๑
-[LoRa] ทขหอ-> ฝฺตใ1: AT+DATA
-[LoRa] สีตฝ<- ฝฺตใ1 สýพÝ: ณตฮป=0 พเภ๋=6 ตุดล=0 สฑณค=0 LED=0 สนฤÜ=1
-[LoRa] ทขหอ-> ฝฺตใ1: AT+DATA
-[LoRa] สีตฝ<- ฝฺตใ1 สýพÝ: ณตฮป=0 พเภ๋=6 ตุดล=0 สฑณค=0 LED=0 สนฤÜ=1
-[LoRa] ทขหอ-> ฝฺตใ1: AT+DATA
-[LoRa] สีตฝ<- ฝฺตใ1 สýพÝ: ณตฮป=0 พเภ๋=6 ตุดล=0 สฑณค=0 LED=0 สนฤÜ=1
-[LoRa] ทขหอ-> ฝฺตใ1: AT+DATA
-[LoRa] สีตฝ<- ฝฺตใ1 สýพÝ: ณตฮป=0 พเภ๋=6 ตุดล=0 สฑณค=0 LED=0 สนฤÜ=1
-[LoRa] ทขหอ-> ฝฺตใ1: AT+DATA
-[LoRa] สีตฝ<- ฝฺตใ1 สýพÝ: ณตฮป=0 พเภ๋=6 ตุดล=0 สฑณค=0 LED=0 สนฤÜ=1
-[LoRa] ทขหอ-> ฝฺตใ1: AT+DATA
-[LoRa] สีตฝ<- ฝฺตใ1 สýพÝ: ณตฮป=0 พเภ๋=6 ตุดล=0 สฑณค=0 LED=0 สนฤÜ=1
-[MQTT] ืำษ่ฑธษฯฑจ ฝฺตใ1: {"id":"365798","version":"1.0","params":[{"identity":{"productID":"04kjwU9TC7","deviceName":"Park001"},"properties":{"ParkStatus":{"value":0},"Ultrasonic":{"value":6},"GeoMagnetic":{"value":0},"OccupiedTime":{"value":0},"LED":{"value":false},"LedEnable":{"value":true}}}]}
-[MQTT] สีตฝ topic=$sys/9YIs0S7V11/PGW001/thing/pack/post/reply
-{"id":"365798","code":200,"msg":"success"}
-[LoRa] ทขหอ-> ฝฺตใ1: AT+DATA
-[LoRa] สีตฝ<- ฝฺตใ1 สýพÝ: ณตฮป=0 พเภ๋=6 ตุดล=0 สฑณค=0 LED=0 สนฤÜ=1
-[LoRa] ทขหอ-> ฝฺตใ1: AT+DATA
-[LoRa] สีตฝ<- ฝฺตใ1 สýพÝ: ณตฮป=0 พเภ๋=6 ตุดล=0 สฑณค=0 LED=0 สนฤÜ=1
-[LoRa] ทขหอ-> ฝฺตใ1: AT+DATA
-[LoRa] สีตฝ<- ฝฺตใ1 สýพÝ: ณตฮป=0 พเภ๋=6 ตุดล=0 สฑณค=0 LED=0 สนฤÜ=1
-[LoRa] ทขหอ-> ฝฺตใ1: AT+DATA
-[LoRa] สีตฝ<- ฝฺตใ1 สýพÝ: ณตฮป=0 พเภ๋=6 ตุดล=0 สฑณค=0 LED=0 สนฤÜ=1
-[LoRa] ทขหอ-> ฝฺตใ1: AT+DATA
-[LoRa] สีตฝ<- ฝฺตใ1 สýพÝ: ณตฮป=0 พเภ๋=6 ตุดล=0 สฑณค=0 LED=0 สนฤÜ=1
-[LoRa] ทขหอ-> ฝฺตใ1: AT+DATA
-[LoRa] สีตฝ<- ฝฺตใ1 สýพÝ: ณตฮป=0 พเภ๋=6 ตุดล=0 สฑณค=0 LED=0 สนฤÜ=1
-[LoRa] ทขหอ-> ฝฺตใ1: AT+DATA
-[LoRa] สีตฝ<- ฝฺตใ1 สýพÝ: ณตฮป=0 พเภ๋=6 ตุดล=0 สฑณค=0 LED=0 สนฤÜ=1
+[LoRa] ่็น1 ่ถ…ๆ—ถ (่ทณ่ฟ)
+[LoRa] ๆๅจ่งฆๅ‘่็นๅ‘็ฐ (ๅ…จ้ๆซๆ)
+[LoRa] PING-> ่็น1
+[LoRa] ๆ”ถๅฐ<- ่็น1 ็กฎ่ฎค: PONG
+[LoRa] PING-> ่็น2
+[LoRa] PING-> ่็น2 (ๅฐ่ฏ•1/3)
+[LoRa] PING-> ่็น2 (ๅฐ่ฏ•2/3)
+[OTA][ๅนณๅฐ] ๆฃ€ๆตไปปๅก code!=0: {"code":12012,"msg":"not exist","request_id":"0424f99200d34492b27d9fb309b1b260"}
+[OTA][ๅนณๅฐ] ๆฃ€ๆตไปปๅก code!=0: {"code":12012,"msg":"not exist","request_id":"4582515260144d0c80f986db30e42271"}
+[OTA][ๅนณๅฐ] ๆ— ๅ็บงไปปๅก
+[LoRa] ่็น2 ่ถ…ๆ—ถ (่ทณ่ฟ)
+[LoRa] ่็นๅ‘็ฐๆซๆๅฎๆ, ๆขๅคๆญฃๅธธ่ฝฎ่ฏข
+[LoRa] ๅ‘้€-> ่็น1: AT+DATA
+[LoRa] ๆ”ถๅฐ<- ่็น1 ๆ•ฐๆฎ: ่ฝฆไฝ=0 ่ท็ฆป=9 ๅฐ็ฃ=0 ๆ—ถ้•ฟ=0 LED=0 ไฝฟ่ฝ=1
+[LoRa] ๅ‘้€-> ่็น1: AT+DATA
+[LoRa] ๆ”ถๅฐ<- ่็น1 ๆ•ฐๆฎ: ่ฝฆไฝ=0 ่ท็ฆป=9 ๅฐ็ฃ=0 ๆ—ถ้•ฟ=0 LED=0 ไฝฟ่ฝ=1
+[LoRa] ๅ‘้€-> ่็น1: AT+DATA
+[LoRa] ๆ”ถๅฐ<- ่็น1 ๆ•ฐๆฎ: ่ฝฆไฝ=0 ่ท็ฆป=9 ๅฐ็ฃ=0 ๆ—ถ้•ฟ=0 LED=0 ไฝฟ่ฝ=1
+[MQTT] ๆน้ไธๆฅ 1 ๅฐๅญ่ฎพๅค: {"id":"218571","version":"1.0","params":[{"identity":{"productID":"04kjwU9TC7","deviceName":"Park001"},"properties":{"ParkStatus":{"value":0},"Ultrasonic":{"value":9},"GeoMagnetic":{"value":0},"OccupiedTime":{"value":0},"LED":{"value":false},"LedEnable":{"value":true}}}]}
+[MQTT] ๆ”ถๅฐ topic=$sys/9YIs0S7V11/PGW001/thing/pack/post/reply
+{"id":"218571","code":200,"msg":"success"}
+[LoRa] ๅ‘้€-> ่็น1: AT+DATA
+[LoRa] ๆ”ถๅฐ<- ่็น1 ๆ•ฐๆฎ: ่ฝฆไฝ=0 ่ท็ฆป=9 ๅฐ็ฃ=0 ๆ—ถ้•ฟ=0 LED=0 ไฝฟ่ฝ=1
+[LoRa] ๅ‘้€-> ่็น1: AT+DATA
+[LoRa] ๆ”ถๅฐ<- ่็น1 ๆ•ฐๆฎ: ่ฝฆไฝ=0 ่ท็ฆป=9 ๅฐ็ฃ=0 ๆ—ถ้•ฟ=0 LED=0 ไฝฟ่ฝ=1
+[LoRa] ๅ‘้€-> ่็น1: AT+DATA
+[LoRa] ๆ”ถๅฐ<- ่็น1 ๆ•ฐๆฎ: ่ฝฆไฝ=0 ่ท็ฆป=9 ๅฐ็ฃ=0 ๆ—ถ้•ฟ=0 LED=0 ไฝฟ่ฝ=1
+[LoRa] ๅ‘้€-> ่็น1: AT+DATA
+[LoRa] ๆ”ถๅฐ<- ่็น1 ๆ•ฐๆฎ: ่ฝฆไฝ=0 ่ท็ฆป=9 ๅฐ็ฃ=0 ๆ—ถ้•ฟ=0 LED=0 ไฝฟ่ฝ=1
+[LoRa] ๅ‘้€-> ่็น1: AT+CER
+[LFS] ๅทฒไฟๅญ 1 ๆก่ฏไนฆ
+[LoRa] ๆ”ถๅฐ<- ่็น1 ่ฏไนฆ (ๆๆ•=1 ไบงๅ“=04kjwU9TC7 ่ฎพๅค=Park001)
+[MQTT] ๅญ่ฎพๅคไธ็บฟ ่็น1 (04kjwU9TC7/Park001): {"id":"227423","version":"1.0","params":{"productID":"04kjwU9TC7","deviceName":"Park001"}}
+[MQTT] ๆ”ถๅฐ topic=$sys/9YIs0S7V11/PGW001/thing/sub/login/reply
+{"id":"227423","code":200,"msg":"success"}
+[MQTT] ๅญ่ฎพๅค1 ไธ็บฟๆๅ
+[MQTT] ๅญ่ฎพๅคไธๆฅ ่็น1: {"id":"227473","version":"1.0","params":[{"identity":{"productID":"04kjwU9TC7","deviceName":"Park001"},"properties":{"ParkStatus":{"value":0},"Ultrasonic":{"value":9},"GeoMagnetic":{"value":0},"OccupiedTime":{"value":0},"LED":{"value":false},"LedEnable":{"value":true}}}]}
+[MQTT] ๆ”ถๅฐ topic=$sys/9YIs0S7V11/PGW001/thing/pack/post/reply
+{"id":"227473","code":200,"msg":"success"}
+[LoRa] ๅ‘้€-> ่็น1: AT+DATA
+[LoRa] ๆ”ถๅฐ<- ่็น1 ๆ•ฐๆฎ: ่ฝฆไฝ=0 ่ท็ฆป=9 ๅฐ็ฃ=0 ๆ—ถ้•ฟ=0 LED=0 ไฝฟ่ฝ=1
+[LoRa] ๅ‘้€-> ่็น1: AT+DATA
+[LoRa] ๆ”ถๅฐ<- ่็น1 ๆ•ฐๆฎ: ่ฝฆไฝ=0 ่ท็ฆป=9 ๅฐ็ฃ=0 ๆ—ถ้•ฟ=0 LED=0 ไฝฟ่ฝ=1
+[LoRa] ๅ‘้€-> ่็น1: AT+DATA
+[LoRa] ๆ”ถๅฐ<- ่็น1 ๆ•ฐๆฎ: ่ฝฆไฝ=0 ่ท็ฆป=9 ๅฐ็ฃ=0 ๆ—ถ้•ฟ=0 LED=0 ไฝฟ่ฝ=1
+[LoRa] ๅ‘้€-> ่็น1: AT+DATA
+[LoRa] ๆ”ถๅฐ<- ่็น1 ๆ•ฐๆฎ: ่ฝฆไฝ=0 ่ท็ฆป=9 ๅฐ็ฃ=0 ๆ—ถ้•ฟ=0 LED=0 ไฝฟ่ฝ=1
+[LoRa] ๅ‘้€-> ่็น1: AT+DATA
+[LoRa] ๆ”ถๅฐ<- ่็น1 ๆ•ฐๆฎ: ่ฝฆไฝ=0 ่ท็ฆป=9 ๅฐ็ฃ=0 ๆ—ถ้•ฟ=0 LED=0 ไฝฟ่ฝ=1
+[OTA][ๅนณๅฐ] ๆฃ€ๆตไปปๅก code!=0: {"code":12012,"msg":"not exist","request_id":"a6dcebf3ba6542988e87657ecef96d87"}
+[LoRa] ๅ‘้€-> ่็น1: AT+DATA
+[OTA][ๅนณๅฐ] ๆฃ€ๆตไปปๅก code!=0: {"code":12012,"msg":"not exist","request_id":"418e760047ae4c5592e76c2692f3841f"}
+[OTA][ๅนณๅฐ] ๆ— ๅ็บงไปปๅก
+[LoRa] ๆ”ถๅฐ<- ่็น1 ๆ•ฐๆฎ: ่ฝฆไฝ=0 ่ท็ฆป=9 ๅฐ็ฃ=0 ๆ—ถ้•ฟ=0 LED=0 ไฝฟ่ฝ=1
+[LoRa] ๅ‘้€-> ่็น1: AT+DATA
+[MQTT] ๆน้ไธๆฅ 1 ๅฐๅญ่ฎพๅค: {"id":"242422","version":"1.0","params":[{"identity":{"productID":"04kjwU9TC7","deviceName":"Park001"},"properties":{"ParkStatus":{"value":0},"Ultrasonic":{"value":9},"GeoMagnetic":{"value":0},"OccupiedTime":{"value":0},"LED":{"value":false},"LedEnable":{"value":true}}}]}
+[LoRa] ๆ”ถๅฐ<- ่็น1 ๆ•ฐๆฎ: ่ฝฆไฝ=0 ่ท็ฆป=9 ๅฐ็ฃ=0 ๆ—ถ้•ฟ=0 LED=0 ไฝฟ่ฝ=1
+[MQTT] ๆ”ถๅฐ topic=$sys/9YIs0S7V11/PGW001/thing/pack/post/reply
+{"id":"242422","code":200,"msg":"success"}
+[LoRa] ๅ‘้€-> ่็น1: AT+DATA
+[LoRa] ๆ”ถๅฐ<- ่็น1 ๆ•ฐๆฎ: ่ฝฆไฝ=0 ่ท็ฆป=9 ๅฐ็ฃ=0 ๆ—ถ้•ฟ=0 LED=0 ไฝฟ่ฝ=1
+[LoRa] ๅ‘้€-> ่็น1: AT+DATA
+[LoRa] ๆ”ถๅฐ<- ่็น1 ๆ•ฐๆฎ: ่ฝฆไฝ=0 ่ท็ฆป=9 ๅฐ็ฃ=0 ๆ—ถ้•ฟ=0 LED=0 ไฝฟ่ฝ=1
+[LoRa] ๅ‘้€-> ่็น1: AT+DATA
+[LoRa] ๆ”ถๅฐ<- ่็น1 ๆ•ฐๆฎ: ่ฝฆไฝ=0 ่ท็ฆป=9 ๅฐ็ฃ=0 ๆ—ถ้•ฟ=0 LED=0 ไฝฟ่ฝ=1
+[LoRa] ๅ‘้€-> ่็น1: AT+DATA
+[LoRa] ๆ”ถๅฐ<- ่็น1 ๆ•ฐๆฎ: ่ฝฆไฝ=0 ่ท็ฆป=9 ๅฐ็ฃ=0 ๆ—ถ้•ฟ=0 LED=0 ไฝฟ่ฝ=1

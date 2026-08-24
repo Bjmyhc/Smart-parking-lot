@@ -1,4 +1,4 @@
-﻿﻿﻿/****************************************************************************
+﻿/****************************************************************************
  * 应用层周期任务实现 - app_tasks.c
  * 
  * 功能描述:
@@ -42,7 +42,7 @@
 #define DIST_THRESHOLD_CM       10      /* 超声波判断有车的距离阈值(cm) */
 
 /* -------- OTA 升级 -------- */
-#include "app_version.h"    /* 版本单一源头: APP_VERSION / NODE_FW_VERSION */
+#include "app_version.h"    /* 版本单一源头: NODE_FW_VERSION */
 #define OTA_FLAG_ADDR           0x0800FC00  /* 升级标志页地址 */
 #define OTA_FLAG_GO             0xA5A5A5A5  /* 需要升级 */
 #define OTA_FLAG_DONE           0x00000000  /* 升级完成 */
@@ -260,7 +260,36 @@ static void PackNodeData(void)
     NodeDataCache.OccupiedTime  = OccupiedTime;
     NodeDataCache.LED           = LED_GetState() ? 1 : 0;
     NodeDataCache.LedEnable     = LEDEnable;
-    NodeDataCache.FwVersion     = APP_VERSION;   /* 固件版本, 网关据此自动更新 OTA 版本 */
+    strncpy(NodeDataCache.FwVersion, NODE_FW_VERSION, sizeof(NodeDataCache.FwVersion) - 1);
+    NodeDataCache.FwVersion[sizeof(NodeDataCache.FwVersion) - 1] = '\0';   /* 固件版本串, 网关据此更新 OTA 版本 */
+}
+
+/****************************************************************************
+ * 函数名: ota_version_compare
+ * 功能:   字符串版本比较 (全程字符串方案)
+ * 参数:   a/b - 版本字符串 (如 "v2.321" / "2.3.1"), 跳过前导 v/V
+ * 返回:   >0 a>b, <0 a<b, =0 相等
+ * 说明:   按 '.' 分段, 每段逐位解析为数字后比较,
+ *         支持任意位数与段数, 空串/非法串按 0 段处理
+ ****************************************************************************/
+static int ota_version_compare(const char *a, const char *b)
+{
+    if (a == NULL) a = "";
+    if (b == NULL) b = "";
+    if (*a == 'v' || *a == 'V') a++;
+    if (*b == 'v' || *b == 'V') b++;
+
+    while (*a || *b)
+    {
+        unsigned va = 0, vb = 0;
+        while (*a >= '0' && *a <= '9') { va = va * 10 + (unsigned)(*a - '0'); a++; }
+        while (*b >= '0' && *b <= '9') { vb = vb * 10 + (unsigned)(*b - '0'); b++; }
+        if (va != vb)
+            return (va > vb) ? 1 : -1;
+        if (*a == '.') a++;
+        if (*b == '.') b++;
+    }
+    return 0;
 }
 
 /****************************************************************************
@@ -317,23 +346,25 @@ static void LoRa_CmdCallback(const char *cmd, const char *value)
     {
         LoRa_Node_SendAck("PONG");
     }
-    /* 网关触发 OTA 升级: AT+OTA=start,V<x> 或 AT+OTA
+    /* 网关触发 OTA 升级: AT+OTA=start,<版本串>
      * 触发后: 写升级标志 → 复位 → BootLoader 接收固件 */
     else if (strcmp(cmd, "AT+OTA") == 0)
     {
-        uint16_t targetVer = 0;
-        char *pVer = NULL;
-
-        /* 尝试解析版本号: AT+OTA=start,V1.2 */
-        if (value != NULL && (pVer = strstr(value, "V")) != NULL)
+        /* 提取目标版本串: 兼容 "start,V2.321" / "start,v2.321" / 纯版本串 */
+        const char *targetVer = NULL;
+        if (value != NULL)
         {
-            int maj = 0, min = 0;
-            if (sscanf(pVer + 1, "%d.%d", &maj, &min) == 2)
-                targetVer = (uint16_t)((maj << 8) | min);
+            const char *p = value;
+            if (strncmp(p, "start,", 6) == 0)
+                p += 6;
+            if (*p == 'V' || *p == 'v')
+                p++;
+            targetVer = p;
         }
 
         /* 版本校验: 目标版本 > 当前版本 或 未指定版本时强制升级 */
-        if (targetVer == 0 || targetVer > APP_VERSION)
+        if (targetVer == NULL || *targetVer == '\0' ||
+            ota_version_compare(targetVer, NODE_FW_VERSION) > 0)
         {
             FLASH_Unlock();
             FLASH_ErasePage(OTA_FLAG_ADDR);
@@ -348,7 +379,7 @@ static void LoRa_CmdCallback(const char *cmd, const char *value)
         else
         {
             LoRa_Node_SendAck("AT+OTA:version_ok");
-            Usart_Printf(USART_DEBUG, "[OTA] 版本已最新(%04X), 跳过升级\r\n", APP_VERSION);
+            Usart_Printf(USART_DEBUG, "[OTA] 版本已最新(%s), 跳过升级\r\n", NODE_FW_VERSION);
         }
     }
     else

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../../../../shared/widgets/card_container.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_dims.dart';
+import 'firmware_upgrade_page.dart';
 
 class ProfilePage extends StatelessWidget {
   const ProfilePage({super.key});
@@ -30,7 +31,7 @@ class ProfilePage extends StatelessWidget {
                   const SizedBox(height: 12),
                   _buildSystemGroup(),
                   const SizedBox(height: 12),
-                  _buildDeviceGroup(),
+                  _buildDeviceGroup(context),
                   const SizedBox(height: 12),
                   _buildAccountGroup(),
                   const SizedBox(height: 80),
@@ -118,7 +119,7 @@ class ProfilePage extends StatelessWidget {
                       '系统管理员 · v2.0',
                       style: TextStyle(
                         fontSize: 13,
-                        color: AppColors.textSecondary.withOpacity(0.7),
+                        color: AppColors.textSecondary.withValues(alpha: 0.7),
                       ),
                     ),
                   ],
@@ -128,15 +129,15 @@ class ProfilePage extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 16),
-          Container(height: 1, color: AppColors.textSecondary.withOpacity(0.1)),
+          Container(height: 1, color: AppColors.textSecondary.withValues(alpha: 0.1)),
           const SizedBox(height: 16),
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceAround,
             children: [
               _buildStatColumn('128', '处理工单'),
-              Container(width: 1, height: 30, color: AppColors.textSecondary.withOpacity(0.1)),
+              Container(width: 1, height: 30, color: AppColors.textSecondary.withValues(alpha: 0.1)),
               _buildStatColumn('8', '在线设备'),
-              Container(width: 1, height: 30, color: AppColors.textSecondary.withOpacity(0.1)),
+              Container(width: 1, height: 30, color: AppColors.textSecondary.withValues(alpha: 0.1)),
               _buildStatColumn('99%', '系统可用'),
             ],
           ),
@@ -194,7 +195,7 @@ class ProfilePage extends StatelessWidget {
     );
   }
 
-  Widget _buildDeviceGroup() {
+  Widget _buildDeviceGroup(BuildContext context) {
     return CardContainer(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
       child: Column(
@@ -207,6 +208,12 @@ class ProfilePage extends StatelessWidget {
           _buildGroupItem(
             icon: Icons.update_outlined,
             title: '固件升级',
+            onTap: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const FirmwareUpgradePage()),
+              );
+            },
           ),
           _buildDivider(),
           _buildGroupItem(
@@ -247,14 +254,14 @@ class ProfilePage extends StatelessWidget {
     );
   }
 
-  Widget _buildGroupItem({required IconData icon, required String title}) {
+  Widget _buildGroupItem({required IconData icon, required String title, VoidCallback? onTap}) {
     return GestureDetector(
-      onTap: () {},
+      onTap: onTap,
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
         child: Row(
           children: [
-            Icon(icon, color: AppColors.textPrimary.withOpacity(0.7), size: 22),
+            Icon(icon, color: AppColors.textPrimary.withValues(alpha: 0.7), size: 22),
             const SizedBox(width: 14),
             Expanded(
               child: Text(
@@ -275,7 +282,7 @@ class ProfilePage extends StatelessWidget {
   Widget _buildDivider() {
     return Padding(
       padding: const EdgeInsets.only(left: 50, right: 20),
-      child: Container(height: 1, color: AppColors.textSecondary.withOpacity(0.3)),
+      child: Container(height: 1, color: AppColors.textSecondary.withValues(alpha: 0.3)),
     );
   }
 }

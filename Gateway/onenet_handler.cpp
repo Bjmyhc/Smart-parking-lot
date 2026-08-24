@@ -18,6 +18,7 @@
 #include "app_cfg.h"       /* sysEventFlag/LORA_MAX_NODES/DBG */
 #include "node_data.h"
 #include "lora_handler.h"
+#include "onenet_ota.h"      /* ota_allow_set: App 全网升级确认门控 */
 #include <ArduinoJson.h>
 
 /* ==================== 子设备物模型属性标识符 ====================
@@ -29,6 +30,12 @@
 #define SUB_PROP_OCCUPIED_TIME   "OccupiedTime"
 #define SUB_PROP_LED             "LED"
 #define SUB_PROP_LED_ENABLE      "LedEnable"
+/* OTA 全网升级确认: App 下发 OtaAllow=1 后网关才执行已检测到的升级任务.
+ * 属性定义在节点产品物模型(下行), 网关在 set 主题按属性名拦截, 不转发节点.
+ * OtaProgress: 网关 OTA 实时进度, 上行属性, 供 App 查询驱动精确进度条.
+ * 阶段状态改用官方 fuse-ota $tid/check 接口, 不再上报 OtaStatus */
+#define SUB_PROP_OTA_ALLOW       "OtaAllow"
+#define SUB_PROP_OTA_PROGRESS    "OtaProgress"
 
 /* 代上线等待平台回复的超时(ms), 超时后重新排队 */
 #define SUB_LOGIN_TIMEOUT_MS     5000
@@ -208,6 +215,71 @@ static void handleSubPropertySet(JsonDocument &doc)
     dataChanged = true;
 }
 
+/* 上报网关自身属性 (property/post): OtaAllow 门控 + OtaProgress 实时进度.
+ * 网关自身属性主题为 $sys/{pid}/{gw}/thing/property/post, params 为属性对象.
+ * 两者合并成一条上报, 任一变化(或刚重连上线)时由 onenet_loop 触发 */
+static void propPostGatewayState(void)
+{
+    if (!mqtt.connected()) return;
+    StaticJsonDocument<384> doc;
+    doc["id"] = String(millis());
+    doc["version"] = "1.0";
+    JsonObject params = doc.createNestedObject("params");
+    /* 平台属性上报要求 value 包裹格式: "OtaAllow":{"value":false} */
+    JsonObject allow = params.createNestedObject(SUB_PROP_OTA_ALLOW);
+    allow["value"] = ota_allow_get();
+    JsonObject progress = params.createNestedObject(SUB_PROP_OTA_PROGRESS);
+    progress["value"] = ota_progress_get();
+    String out;
+    serializeJson(doc, out);
+    DBG_PRINTF("[MQTT] 上报网关属性: %s\n", out.c_str());
+    mqtt.publish(TOPIC_PROP_POST, out.c_str());
+    mqttTxCount++;   /* 上行计数 */
+}
+
+/* 回复平台"网关自身属性设置"执行结果 (property/set_reply) */
+static void replyPropSet(const char *id, int code, const char *msg)
+{
+    if (!mqtt.connected()) return;
+    StaticJsonDocument<256> doc;
+    doc["id"]   = id;
+    doc["code"] = code;
+    doc["msg"]  = msg;
+    String output;
+    serializeJson(doc, output);
+    mqtt.publish(TOPIC_PROP_SET_REPLY, output.c_str());
+    DBG_PRINTF("[MQTT] 回复网关属性设置: %s\n", output.c_str());
+}
+
+/* 处理平台下行: 网关自身属性设置 (thing/property/set).
+ * 目前只支持 OtaAllow 门控; 处理完回 set_reply 给平台 */
+static void handleGatewayPropertySet(JsonDocument &doc)
+{
+    const char *msgId = doc["id"] | "";
+    JsonObject params = doc["params"].as<JsonObject>();
+    if (params.isNull())
+    {
+        replyPropSet(msgId, 401, "invalid params");
+        return;
+    }
+    mqttRxCount++;   /* 下行计数 */
+
+    int handled = 0;
+    for (JsonPair kv : params)
+    {
+        String key = kv.key().c_str();
+        if (key == SUB_PROP_OTA_ALLOW)
+        {
+            bool allow = kv.value().as<bool>();
+            ota_allow_set(allow);
+            handled = 1;
+            DBG_PRINTF("[MQTT] 网关 OtaAllow=%s\n", allow ? "true" : "false");
+        }
+    }
+    replyPropSet(msgId, handled ? 200 : 401,
+                 handled ? "success" : "unsupported property");
+}
+
 static void mqtt_callback(char *topic, byte *payload, unsigned int length)
 {
     char buf[768];
@@ -263,6 +335,21 @@ static void mqtt_callback(char *topic, byte *payload, unsigned int length)
         handleSubPropertySet(doc);
         return;
     }
+
+    /* --- 4. 网关自身属性设置 (下行控制): OtaAllow 门控 --- */
+    if (strstr(topic, "thing/property/set"))
+    {
+        handleGatewayPropertySet(doc);
+        return;
+    }
+
+    /* --- 5. 网关自身属性上报回执 (property/post/reply): 排查平台是否拒收 --- */
+    if (strstr(topic, "thing/property/post/reply"))
+    {
+        int code = doc["code"] | -1;
+        DBG_PRINTF("[MQTT] 网关属性上报回执 code=%d\n", code);
+        return;
+    }
 }
 
 /* ==================== 公开函数 ==================== */
@@ -302,7 +389,9 @@ bool onenet_connect(void)
     mqtt.subscribe(TOPIC_SUB_LOGIN_REPLY);
     mqtt.subscribe(TOPIC_PACK_POST_REPLY);
     mqtt.subscribe(TOPIC_SUB_SET);
-    DBG_PRINTLN("[MQTT] 连接成功, 已订阅子设备登录/上报/设置主题");
+    mqtt.subscribe(TOPIC_PROP_SET);          /* 网关自身属性下行: OtaAllow 门控 */
+    mqtt.subscribe(TOPIC_PROP_POST_REPLY);   /* 网关自身属性上报回执(排查) */
+    DBG_PRINTLN("[MQTT] 连接成功, 已订阅子设备登录/上报/设置 + 网关属性主题");
     sysEventFlag |= SYS_EVENT_MQTT_CONNECTED;
 
     /* MQTT 重连后平台会话重置, 已注册节点全部需要重新代上线;
@@ -327,6 +416,10 @@ void onenet_disconnect(void)
     sysEventFlag &= ~SYS_EVENT_MQTT_CONNECTED;
 }
 
+static bool s_lastOtaAllow     = false;
+static int  s_lastOtaProgress  = -1;
+static bool s_otaPropReported  = false;
+
 void onenet_loop(void)
 {
     mqtt.loop();
@@ -336,6 +429,27 @@ void onenet_loop(void)
     if (!mqtt.connected() && (sysEventFlag & SYS_EVENT_MQTT_CONNECTED))
     {
         onenet_disconnect();
+    }
+
+    /* 网关自身属性上报: OtaAllow / OtaProgress 任一变化,
+     * 或刚(重)连上线后首次, 合并成一条上报当前值, 供 App 实时查询 */
+    if (mqtt.connected())
+    {
+        bool allow = ota_allow_get();
+        int  pg    = ota_progress_get();
+        if (!s_otaPropReported ||
+            allow != s_lastOtaAllow ||
+            pg != s_lastOtaProgress)
+        {
+            propPostGatewayState();
+            s_lastOtaAllow    = allow;
+            s_lastOtaProgress = pg;
+            s_otaPropReported = true;
+        }
+    }
+    else
+    {
+        s_otaPropReported = false;   /* 掉线重置, 重连后再报一次 */
     }
 }
 

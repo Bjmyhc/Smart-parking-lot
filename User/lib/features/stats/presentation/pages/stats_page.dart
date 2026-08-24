@@ -268,9 +268,9 @@ class _StatsPageState extends State<StatsPage> {
             ),
           ),
           const SizedBox(height: 8),
-          Text(
+          const Text(
             '平均占用率和告警数量',
-            style: const TextStyle(
+            style: TextStyle(
               fontSize: 13,
               color: AppColors.textSecondary,
             ),
@@ -293,7 +293,7 @@ class _StatsPageState extends State<StatsPage> {
                         horizontalInterval: 20,
                         getDrawingHorizontalLine: (value) {
                           return FlLine(
-                            color: AppColors.textSecondary.withOpacity(0.2),
+                            color: AppColors.textSecondary.withValues(alpha: 0.2),
                             strokeWidth: 1,
                           );
                         },
@@ -346,7 +346,7 @@ class _StatsPageState extends State<StatsPage> {
                       borderData: FlBorderData(
                         show: true,
                         border: Border.all(
-                          color: AppColors.textSecondary.withOpacity(0.2),
+                          color: AppColors.textSecondary.withValues(alpha: 0.2),
                           width: 1,
                         ),
                       ),
@@ -405,7 +405,7 @@ class _StatsPageState extends State<StatsPage> {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: AppColors.warning.withOpacity(0.1),
+        color: AppColors.warning.withValues(alpha: 0.1),
         borderRadius: BorderRadius.circular(AppDims.radiusMedium),
       ),
       child: Row(
@@ -414,7 +414,7 @@ class _StatsPageState extends State<StatsPage> {
             width: 40,
             height: 40,
             decoration: BoxDecoration(
-              color: AppColors.warning.withOpacity(0.2),
+              color: AppColors.warning.withValues(alpha: 0.2),
               borderRadius: BorderRadius.circular(8),
             ),
             child: const Icon(Icons.notifications_active, color: AppColors.warning),

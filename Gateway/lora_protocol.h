@@ -53,7 +53,7 @@ typedef struct LORA_PACKED {
     uint32_t OccupiedTime;    /* 秒, 小端 */
     uint8_t  LED;             /* 当前LED状态 0/1 */
     uint8_t  LedEnable;       /* LED使能开关 0/1 */
-    uint16_t FwVersion;       /* 节点固件版本(APP_VERSION, 如 0x0203 = v2.3) */
+    char     FwVersion[16];   /* 节点固件版本字符串(如 "v2.321"), 与 STM32 端一致 */
 } LoraNodeData_t;
 
 /* 节点证书帧(供网关代上线 OneNET)

@@ -19,6 +19,7 @@ class StatusBadge extends StatelessWidget {
   factory StatusBadge.pending() => const StatusBadge(text: '待处理', color: AppColors.danger);
   factory StatusBadge.dispatched() => const StatusBadge(text: '处理中', color: AppColors.warning);
   factory StatusBadge.resolved() => const StatusBadge(text: '已处理', color: AppColors.success);
+  factory StatusBadge.ignored() => const StatusBadge(text: '已忽略', color: AppColors.textSecondary);
 
   factory StatusBadge.online() => const StatusBadge(text: '在线', color: AppColors.success);
   factory StatusBadge.offline() => const StatusBadge(text: '离线', color: AppColors.textSecondary);
@@ -37,6 +38,8 @@ class StatusBadge extends StatelessWidget {
         return StatusBadge.dispatched();
       case 'resolved':
         return StatusBadge.resolved();
+      case 'ignored':
+        return StatusBadge.ignored();
       case 'online':
         return StatusBadge.online();
       case 'offline':
@@ -51,9 +54,9 @@ class StatusBadge extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
       decoration: BoxDecoration(
-        color: color.withOpacity(0.1),
+        color: color.withValues(alpha: 0.1),
         borderRadius: BorderRadius.circular(AppDims.radiusSmall),
-        border: Border.all(color: color.withOpacity(0.3), width: 0.5),
+        border: Border.all(color: color.withValues(alpha: 0.3), width: 0.5),
       ),
       child: Text(
         text,

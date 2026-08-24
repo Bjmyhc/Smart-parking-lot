@@ -130,7 +130,8 @@ void updateNodeFromRaw(uint8_t nodeId, const LoraNodeData_t *raw)
     nd.occupiedTime = raw->OccupiedTime;
     nd.led          = (raw->LED != 0);
     nd.ledEnable    = (raw->LedEnable != 0);
-    nd.fwVersion    = raw->FwVersion;   /* 节点上报固件版本, OTA 检测据此自动更新 */
+    strncpy(nd.fwVersion, raw->FwVersion, sizeof(nd.fwVersion) - 1);
+    nd.fwVersion[sizeof(nd.fwVersion) - 1] = '\0';   /* 节点上报固件版本串, OTA 检测据此自动更新 */
     nd.lastUpdate   = millis();
     nd.online       = true;
     sysEventFlag |= (1 << (nd.nodeId - 1));   /* 同步事件标志位 */

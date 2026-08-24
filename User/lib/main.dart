@@ -7,6 +7,7 @@ import 'features/spots/presentation/pages/spots_page.dart';
 import 'features/alerts/presentation/pages/alerts_page.dart';
 import 'features/stats/presentation/pages/stats_page.dart';
 import 'features/profile/presentation/pages/profile_page.dart';
+import 'features/profile/presentation/widgets/ota_upgrade_dialog.dart';
 
 void main() {
   runApp(const ParkingApp());
@@ -66,8 +67,9 @@ class MainShell extends StatefulWidget {
   State<MainShell> createState() => _MainShellState();
 }
 
-class _MainShellState extends State<MainShell> {
+class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
   int _currentIndex = 0;
+  bool _otaDialogShowing = false;
 
   final List<Widget> _pages = const [
     OverviewPage(),
@@ -78,7 +80,50 @@ class _MainShellState extends State<MainShell> {
   ];
 
   @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    // App 首次进入: 触发一轮 OTA 短检测
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      context.read<ParkingProvider>().beginOtaCheckSession();
+    });
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // 每次回到前台: 重新触发一轮 OTA 短检测(低频, 不常驻轮询)
+    if (state == AppLifecycleState.resumed) {
+      context.read<ParkingProvider>().beginOtaCheckSession();
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final provider = context.watch<ParkingProvider>();
+
+    // OTA 升级弹窗: 检测到待升级任务(未被忽略)时全局弹出
+    if (provider.otaPromptVisible && !_otaDialogShowing) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted || _otaDialogShowing || !provider.otaPromptVisible) return;
+        _otaDialogShowing = true;
+        showDialog<void>(
+          context: context,
+          barrierDismissible: false,
+          builder: (_) => OtaUpgradeDialog(provider: provider),
+        ).whenComplete(() {
+          _otaDialogShowing = false;
+          // 兜底: 若对话框被系统返回键关闭且未触发任何动作, 清掉提示位避免反复弹
+          if (provider.otaPromptVisible) provider.dismissOtaPrompt();
+        });
+      });
+    }
+
     return Scaffold(
       body: IndexedStack(
         index: _currentIndex,
@@ -89,7 +134,7 @@ class _MainShellState extends State<MainShell> {
           color: Colors.white,
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withOpacity(0.05),
+              color: Colors.black.withValues(alpha: 0.05),
               blurRadius: 10,
               offset: const Offset(0, -2),
             ),

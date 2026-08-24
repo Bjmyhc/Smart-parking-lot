@@ -9,6 +9,11 @@ class SpotModel {
   final String? lastUpdated;
   final bool isOnline;
 
+  /* 本地模拟字段 (处理记录): 仅内存态, 3s 刷新后由 ParkingProvider 回写, 重启即丢 */
+  String notifyStatus; // 'none'=未通知 / 'notified'=已通知
+  String? handlerName; // 处理人
+  DateTime? handledAt; // 完成时间
+
   SpotModel({
     required this.id,
     this.zone = 'A',
@@ -19,6 +24,9 @@ class SpotModel {
     this.plateNumber,
     this.lastUpdated,
     this.isOnline = true,
+    this.notifyStatus = 'none',
+    this.handlerName,
+    this.handledAt,
   });
 
   factory SpotModel.fromJson(Map<String, dynamic> json) {
@@ -26,7 +34,7 @@ class SpotModel {
     // 直接 as Map<String, dynamic>? 会抛类型错误, 这里统一转成 Map<String, dynamic>
     final rawProperties = json['properties'];
     final properties = rawProperties is Map
-        ? Map<String, dynamic>.from(rawProperties as Map)
+        ? Map<String, dynamic>.from(rawProperties)
         : <String, dynamic>{};
     final isOnline = json['online'] as bool? ?? (json['status'] as String? ?? 'offline') == 'online';
 
@@ -80,6 +88,9 @@ class SpotModel {
       'plate_number': plateNumber,
       'last_updated': lastUpdated,
       'is_online': isOnline,
+      'notify_status': notifyStatus,
+      'handler_name': handlerName,
+      'handled_at': handledAt?.toIso8601String(),
     };
   }
 
@@ -87,4 +98,5 @@ class SpotModel {
   bool get isOccupied => status == 'occupied';
   bool get isZombie => status == 'zombie';
   bool get isOffline => status == 'offline';
+  bool get isNotified => notifyStatus == 'notified';
 }

@@ -23,7 +23,7 @@ class HuaweiCard extends StatelessWidget {
         borderRadius: BorderRadius.circular(AppDims.radiusLarge),
         boxShadow: [
           BoxShadow(
-            color: AppColors.textPrimary.withOpacity(0.08),
+            color: AppColors.textPrimary.withValues(alpha: 0.08),
             blurRadius: 12,
             offset: const Offset(0, 2),
           )

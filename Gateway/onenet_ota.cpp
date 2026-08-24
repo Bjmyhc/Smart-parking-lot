@@ -1,4 +1,4 @@
-﻿/* onenet_ota.cpp - OneNET Studio 固件升级 (fuse-ota HTTP API) 客户端实现
+/* onenet_ota.cpp - OneNET Studio 固件升级 (fuse-ota HTTP API) 客户端实现
  *
  * 与平台"固件升级"服务交互, 实现平台自动下发 OTA:
  *   1. 上报固件版本 (FOTA=网关 / SOTA=节点)
@@ -43,9 +43,13 @@
 #define OTA_AUTH_METHOD         "sha1"
 #define OTA_CHECK_INTERVAL_MS   30000   /* 周期检测升级任务 */
 #define OTA_REPORT_EVERY        10      /* 每N次检测才上报一次版本(降频省HTTP, 减少阻塞) */
+#define OTA_PROGRESS_REPORT_MS  2000    /* LoRa 分发进度上报最小间隔(ms) */
+#define OTA_PROGRESS_MIN_DELTA  5       /* 进度变化≥此值才上报(减少HTTP请求/阻塞) */
 #define OTA_DL_CHUNK            256     /* 下载流式写入块大小 */
 #define OTA_GW_FILE             "/gw_firmware.bin"   /* 网关固件临时文件 */
 #define OTA_FW_HDR_MAGIC        OTA_FW_MAGIC         /* 节点固件魔数 0xA55A */
+#define OTA_STATE_RESET_MS      10000   /* 完成/失败态保持时间: 让 App 轮询看到终端状态,
+                                         * 之后再复位 OtaProgress 供下一次升级 */
 
 /* 任务类型 (fuse-ota check 的 type 参数) */
 #define OTA_TYPE_FOTA           1       /* 模组/网关固件 */
@@ -93,7 +97,8 @@ typedef enum {
     OTA_PLAT_CHECK_SOTA,    /* 检测 SOTA (节点) 任务 */
     OTA_PLAT_DOWNLOAD,      /* 下载固件 */
     OTA_PLAT_DISPATCH,      /* 分发: 自升级 / LoRa 转发 */
-    OTA_PLAT_FINISH         /* 上报完成/失败, 清理 */
+    OTA_PLAT_FINISH,        /* 上报完成/失败 */
+    OTA_PLAT_RESET          /* 保持终端状态片刻后复位 OTA 属性, 再回空闲 */
 } OtaPlatState_t;
 
 /* ==================== 静态变量 ==================== */
@@ -101,6 +106,32 @@ static OtaPlatState_t s_st   = OTA_PLAT_IDLE;
 static uint32_t s_lastCheck  = 0;
 static uint8_t  s_checkCnt   = 0;    /* 版本上报降频计数 */
 static bool     s_busy       = false;
+
+/* OTA 全网一键升级门控:
+ *   s_otaAllow   : App 经物模型下发 OtaAllow=1 的确认标志
+ *   s_pendingSota: 已检测到 SOTA 任务但尚未获 App 确认 (挂起等待) */
+static bool     s_otaAllow    = false;
+static bool     s_pendingSota = false;
+
+/* OTA 实时进度 (网关自身物模型属性 OtaProgress, MQTT 上报给 App 驱动精确进度条):
+ * 阶段状态已改用官方 fuse-ota $tid/check 接口, 网关不再维护/上报 OtaStatus */
+static int      s_otaProgress = 0;
+
+/* 更新 OTA 进度并打日志; onenet_handler 每轮比对变化后经 MQTT 上报 */
+static void ota_progressSet(int progress)
+{
+    s_otaProgress = progress;
+    DBG_PRINTF("[OTA][状态] progress=%d\n", progress);
+}
+
+int ota_progress_get(void) { return s_otaProgress; }
+
+/* 终端状态(完成/失败)进入 OTA_PLAT_RESET 的时间戳, 用于延迟复位属性 */
+static uint32_t s_stateResetAt = 0;
+
+/* LoRa 分发进度上报状态 (降频上报 step 给平台进度栏) */
+static uint32_t s_lastProgressReport = 0;
+static int      s_lastProgressStep   = -1;
 
 /* 当前任务信息 (check 结果) */
 static long     s_tid        = 0;
@@ -374,19 +405,13 @@ static const OtaIdentity_t *otaTaskIdentity(void)
 }
 
 /* 节点当前固件版本字符串: 优先用在线节点上报的 FwVersion (自动跟随节点升级),
- * 无在线节点/版本未知时回退到编译期宏 NODE_FW_VERSION */
+ * 无在线节点/版本为空时回退到编译期宏 NODE_FW_VERSION */
 static const char *otaNodeCurVersion(void)
 {
-    static char ver[16];
     for (uint8_t i = 0; i < nodeCount; i++)
     {
-        if (nodes[i].online && nodes[i].fwVersion != 0)
-        {
-            snprintf(ver, sizeof(ver), "v%d.%d",
-                     (nodes[i].fwVersion >> 8) & 0xFF,
-                     nodes[i].fwVersion & 0xFF);
-            return ver;
-        }
+        if (nodes[i].online && nodes[i].fwVersion[0] != '\0')
+            return nodes[i].fwVersion;
     }
     return NODE_FW_VERSION;
 }
@@ -547,6 +572,43 @@ static void otaReportStatus(long tid, int step)
     DBG_PRINTF("[OTA][平台] 上报进度 step=%d: HTTP %d\n", step, code);
 }
 
+/* 上报 LoRa 链路分发进度 (仅 SOTA; step 1-99).
+ * 降频: 间隔≥OTA_PROGRESS_REPORT_MS 且变化≥OTA_PROGRESS_MIN_DELTA 才上报,
+ * 减少 HTTP 请求并避免阻塞 loop 影响 LoRa 收包 */
+static void otaReportProgress(void)
+{
+    if (s_taskType != OTA_TYPE_SOTA) return;
+    if (ota_getState() == OTA_IDLE) return;   /* 未在分发 */
+    if (s_st != OTA_PLAT_FINISH)   return;    /* 非等待 LoRa 链路完成阶段 */
+
+    const OtaProgress_t *p = ota_getProgress();
+    if (p->totalBytes <= 0) return;           /* 触发/下载阶段, 无发送进度 */
+
+    uint32_t now = millis();
+    if (now - s_lastProgressReport < OTA_PROGRESS_REPORT_MS) return;
+
+    /* 已发送字节 → 1~99 的 step */
+    int pct = (int)(((uint32_t)p->sentBytes * 99u) / (uint32_t)p->totalBytes);
+    if (pct < 1)  pct = 1;
+    if (pct > 99) pct = 99;
+
+    /* 进度变化不足阈值则不重复上报 */
+    if (pct < s_lastProgressStep)
+        s_lastProgressStep = 0;   /* 新一轮分发开始(pct回退): 复位降频状态 */
+    if (pct - s_lastProgressStep < OTA_PROGRESS_MIN_DELTA) return;
+    s_lastProgressStep   = pct;
+    s_lastProgressReport = now;
+    s_otaProgress = pct;   /* 同步真实分发进度到网关物模型属性, 供 App 读取 */
+
+    const OtaIdentity_t *id = otaTaskIdentity();
+    String body = String("{\"step\":") + pct + "}";
+    String path = String("/fuse-ota/") + id->proid + "/" + id->devid +
+                  "/" + String(s_tid) + "/status";
+    String resp;
+    int code = otaHttpRequest(id, "POST", path.c_str(), body.c_str(), resp);
+    DBG_PRINTF("[OTA][平台] 上报进度 step=%d: HTTP %d\n", pct, code);
+}
+
 /* ==================== 分发 ==================== */
 
 /* FOTA: 网关自升级 (Updater 从文件写入 Flash, 成功后重启) */
@@ -581,6 +643,7 @@ static void otaApplyGatewayFirmware(void)
         return;
     }
     DBG_PRINTLN("[OTA][平台] 网关固件写入成功, 即将重启!");
+    ota_progressSet(100);   /* 网关自升级: 写入完成 */
     otaReportStatus(s_tid, 201);
     delay(500);
     ESP.restart();
@@ -623,6 +686,30 @@ static uint8_t otaTargetNode(void)
 
 /* ==================== 公开函数 ==================== */
 
+/* App 下发 OtaAllow: 全网一键升级确认门控.
+ * 若当前正挂起等待确认(已检测到任务), 立即转入下载执行 */
+void ota_allow_set(bool allow)
+{
+    s_otaAllow = allow;
+    DBG_PRINTF("[OTA][门控] OtaAllow=%s (pending=%d tid=%ld st=%d)\n",
+               allow ? "true" : "false", s_pendingSota, s_tid, (int)s_st);
+    if (allow && s_pendingSota && s_tid != 0 && s_st == OTA_PLAT_IDLE)
+    {
+        s_pendingSota = false;
+        s_st = OTA_PLAT_DOWNLOAD;
+        DBG_PRINTLN("[OTA][门控] 已获App确认, 立即执行升级");
+    }
+}
+
+bool ota_allow_get(void) { return s_otaAllow; }
+
+/* 升级结束(完成/失败): 复位门控, 一次确认只对一次任务生效 */
+static void ota_gateReset(void)
+{
+    s_otaAllow    = false;
+    s_pendingSota = false;
+}
+
 void onenet_ota_init(void)
 {
     s_st = OTA_PLAT_IDLE;
@@ -646,6 +733,8 @@ void onenet_ota_tick(void)
     if (ota_getState() != OTA_IDLE)
     {
         s_busy = false;
+        /* LoRa 分发进行中: 周期上报进度到平台进度栏 */
+        otaReportProgress();
         return;
     }
 
@@ -696,22 +785,34 @@ void onenet_ota_tick(void)
         /* 4. 检测 SOTA (节点) 任务, 版本用节点上报的最新版本 */
         if (otaCheckTask(&OTA_ID_SOTA, OTA_TYPE_SOTA, otaNodeCurVersion()))
         {
+            /* 门控: 需 App 下发 OtaAllow=1 确认后才执行 (全网一键升级) */
+            if (!s_otaAllow)
+            {
+                s_pendingSota = true;
+                s_st = OTA_PLAT_IDLE;
+                DBG_PRINTLN("[OTA][平台] 检测到升级任务, 等待App确认(OtaAllow=1)");
+                break;
+            }
+            s_pendingSota = false;
             s_st = OTA_PLAT_DOWNLOAD;
             break;
         }
+        s_pendingSota = false;
         DBG_PRINTLN("[OTA][平台] 无升级任务");
         s_st = OTA_PLAT_IDLE;
         break;
 
     case OTA_PLAT_DOWNLOAD:
     {
+        ota_progressSet(0);             /* 固件下载中 (下载快, 进度置0) */
         const OtaIdentity_t *id = otaTaskIdentity();
         const char *fwFile = (s_taskType == OTA_TYPE_FOTA) ? OTA_GW_FILE : OTA_FW_FILE;
         long n = otaDownloadFile(id, s_tid, fwFile);
         if (n <= 0)
         {
             otaReportStatus(s_tid, 5);          /* 失败 */
-            s_st = OTA_PLAT_IDLE;
+            s_stateResetAt = millis();          /* 保持失败态片刻后复位属性 */
+            s_st = OTA_PLAT_RESET;
             break;
         }
         s_st = OTA_PLAT_DISPATCH;
@@ -721,7 +822,7 @@ void onenet_ota_tick(void)
     case OTA_PLAT_DISPATCH:
         if (s_taskType == OTA_TYPE_FOTA)
         {
-            /* 网关自升级 (内部重启, 不再返回) */
+            /* 网关自升级 (内部重启, 不再返回); 状态在 otaApplyGatewayFirmware 内设置 */
             otaApplyGatewayFirmware();
             s_st = OTA_PLAT_IDLE;               /* 升级失败时回到空闲 */
         }
@@ -734,7 +835,10 @@ void onenet_ota_tick(void)
                 if (node != 0)
                 {
                     if (ota_startFromFile(node, s_taskVer.c_str()))
+                    {
+                        ota_progressSet(0);     /* 升级中: LoRa 分发开始, 进度从0缓走 */
                         s_st = OTA_PLAT_FINISH;     /* 等 LoRa 链路完成 */
+                    }
                     else
                         s_st = OTA_PLAT_IDLE;
                 }
@@ -745,7 +849,8 @@ void onenet_ota_tick(void)
             {
                 DBG_PRINTLN("[OTA][平台] 节点固件校验失败(魔数/长度不符)");
                 otaReportStatus(s_tid, 5);
-                s_st = OTA_PLAT_IDLE;
+                s_stateResetAt = millis();        /* 保持失败态片刻后复位属性 */
+                s_st = OTA_PLAT_RESET;
             }
         }
         break;
@@ -760,8 +865,22 @@ void onenet_ota_tick(void)
             bool ok = (p->totalBytes > 0 && p->sentBytes >= p->totalBytes);
             DBG_PRINTF("[OTA][平台] LoRa 链路结束, %s, 上报平台\n",
                        ok ? "成功" : "失败");
+            ota_progressSet(ok ? 100 : s_otaProgress);  /* 完成置满/失败保持当前进度 */
             otaReportStatus(s_tid, ok ? 201 : 5);
+            s_stateResetAt = millis();            /* 保持终端态片刻后复位属性 */
         }
+        s_st = OTA_PLAT_RESET;
+        break;
+
+    case OTA_PLAT_RESET:
+        /* 完成/失败态保持 OTA_STATE_RESET_MS 后再复位 OtaProgress:
+         * 立即复位 → onenet_loop 永远上报不到 progress=100, App 看不到"升级完成";
+         * 不复位   → 下一次升级 App 直接读到旧的 progress=100, 进度条误显满格.
+         * 复位为 0 与网关初始默认一致, 供下一次升级干净开始. */
+        if (millis() - s_stateResetAt < OTA_STATE_RESET_MS)
+            break;
+        ota_progressSet(0);   /* 清零: OtaProgress=0 */
+        ota_gateReset();
         s_st = OTA_PLAT_IDLE;
         break;
     }

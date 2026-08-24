@@ -280,6 +280,70 @@ static const String _accessKey = 'e3b97243b0d24ffda1befead601ef617';
 | 机卡协同 | /machine-card/query-batch-status-info | 批次任务状态查询 | |
 | 机卡协同 | /machine-card/verify | 机卡绑定校验 | |
 
+### 4.2 OneNET OTA 南向接口详解 · 检测升级状态
+
+> 来源：OneNET 官方文档《检测升级状态》（最近更新时间 2026-01-16）。
+
+**接口地址**
+
+```
+https://iot-api.heclouds.com/fuse-ota/{pro_id}/{dev_name}/{tid}/check
+```
+
+**API 说明**
+
+- 请求方式：`GET`
+- Headers：
+
+| 参数名称 | 格式 | 是否必选 | 说明 |
+|---|---|---|---|
+| Authorization | String | 是 | 设备鉴权信息 |
+
+- HTTP Query 请求参数：
+
+| 参数名称 | 格式 | 是否必选 | 说明 |
+|---|---|---|---|
+| pro_id | String | 是 | 产品id |
+| dev_name | String | 是 | 设备名 |
+| tid | int | 是 | 任务id |
+
+**返回数据**
+
+| 参数名称 | 类型 | 描述 |
+|---|---|---|
+| code | int | 错误码，当为 0 时表示请求成功，取值见错误码说明表 |
+| msg | String | 错误描述信息 |
+| request_id | String | API 请求链路 id |
+| data | - | 具体响应内容 |
+
+**请求示例**
+
+```
+GET http(s)://iot-api.heclouds.com/fuse-ota/{pro_id}/{dev_name}/{tid}/check HTTP/1.1
+
+Authorization: version=2022-05-01&res=userid%2F1&et=1623982416&method=sha1&sign=S04GcvafYIjtAMHJthkGPevbNwE%3D
+```
+
+**响应示例**
+
+```
+{
+    "code": 0,
+    "msg": "succ",
+    "request_id": "**********",
+    "data": {
+        "status": 1 //1: 待升级、2: 下载中、3: 升级中、4: 升级成功、5: 升级失败、6: 升级取消
+    }
+}
+```
+
+**App 实现对照（api_service.dart `getOtaTaskStatus`）**
+
+- URL 与文档完全一致：`/fuse-ota/{pro_id}/{dev_name}/{tid}/check`
+- Authorization 使用用户级签名：`version=2022-05-01&res=userid/{userId}&method=sha1`
+- 已正确解包 `data` 层返回 `{status}`，供 ParkingProvider 轮询驱动弹窗 / 固件升级页状态显示
+- ⚠️ 实测注意：该接口的 `status` 在执行期间可能一直为 1（待升级），直到任务完成才变为 4，并不返回实时进度 step
+
 ---
 
 ## 五、公共组件 & 主题（可复用度）

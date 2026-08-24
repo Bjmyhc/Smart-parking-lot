@@ -14,9 +14,7 @@ class SpotsPage extends StatefulWidget {
 }
 
 class _SpotsPageState extends State<SpotsPage> {
-  /* 页面自身 UI 状态: 通知/派单记录 (真实/本地模式与数据现统一在 ParkingProvider) */
-  final Set<String> _notifySpots = {};
-  final Set<String> _dispatchSpots = {};
+  bool _batchMode = false;
 
   @override
   Widget build(BuildContext context) {
@@ -34,7 +32,11 @@ class _SpotsPageState extends State<SpotsPage> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    _buildHeader(context),
+                    _buildHeader(context, provider),
+                    if (_batchMode) ...[
+                      _buildBatchBar(context, provider, spots),
+                      const SizedBox(height: 12),
+                    ],
                     const SizedBox(height: 16),
                     Padding(
                       padding: const EdgeInsets.fromLTRB(
@@ -46,7 +48,7 @@ class _SpotsPageState extends State<SpotsPage> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          _buildSpotGrid(spots),
+                          _buildSpotGrid(context, provider, spots),
                           const SizedBox(height: 80),
                         ],
                       ),
@@ -58,7 +60,7 @@ class _SpotsPageState extends State<SpotsPage> {
     );
   }
 
-  Widget _buildHeader(BuildContext context) {
+  Widget _buildHeader(BuildContext context, ParkingProvider provider) {
     return Padding(
       padding: EdgeInsets.only(
         top: MediaQuery.of(context).padding.top + 16,
@@ -72,7 +74,7 @@ class _SpotsPageState extends State<SpotsPage> {
               padding: const EdgeInsets.only(left: 8),
               // 隐藏操作: 点击大标题"车位"在 真实模式/本地模式 间切换, 无可见指示
               child: GestureDetector(
-                onTap: () => context.read<ParkingProvider>().toggleRealMode(),
+                onTap: () => provider.toggleRealMode(),
                 behavior: HitTestBehavior.opaque,
                 child: const Text(
                   '车位',
@@ -85,6 +87,18 @@ class _SpotsPageState extends State<SpotsPage> {
               ),
             ),
           ),
+          _buildHeaderIcon(
+            icon: _batchMode ? Icons.close : Icons.checklist,
+            onTap: () {
+              setState(() {
+                _batchMode = !_batchMode;
+              });
+              if (!_batchMode) {
+                provider.clearSpotSelection();
+              }
+            },
+          ),
+          const SizedBox(width: 10),
           Container(
             width: 40,
             height: 40,
@@ -99,7 +113,148 @@ class _SpotsPageState extends State<SpotsPage> {
     );
   }
 
-  Widget _buildSpotGrid(List<SpotModel> spots) {
+  Widget _buildHeaderIcon({required IconData icon, required VoidCallback onTap}) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        width: 40,
+        height: 40,
+        decoration: BoxDecoration(
+          color: _batchMode ? AppColors.primary : AppColors.surface,
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Icon(icon, color: _batchMode ? Colors.white : AppColors.textSecondary, size: 22),
+      ),
+    );
+  }
+
+  /// 顶部批量操作栏: [全选] [批量派单] [批量通知], 选中集合收在 Provider.
+  Widget _buildBatchBar(BuildContext context, ParkingProvider provider, List<SpotModel> spots) {
+    final selected = provider.selectedSpotIds;
+    final allSelected = spots.isNotEmpty && selected.containsAll(spots.map((s) => s.id));
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: AppDims.paddingPage),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(12),
+          boxShadow: [
+            BoxShadow(
+              color: AppColors.textSecondary.withValues(alpha: 0.1),
+              blurRadius: 6,
+              offset: const Offset(0, 2),
+            ),
+          ],
+        ),
+        child: Row(
+          children: [
+            GestureDetector(
+              onTap: () {
+                if (allSelected) {
+                  provider.clearSpotSelection();
+                } else {
+                  provider.selectAllSpots(spots);
+                }
+              },
+              behavior: HitTestBehavior.opaque,
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Checkbox(
+                    value: allSelected,
+                    onChanged: (_) {
+                      if (allSelected) {
+                        provider.clearSpotSelection();
+                      } else {
+                        provider.selectAllSpots(spots);
+                      }
+                    },
+                    activeColor: AppColors.primary,
+                    visualDensity: VisualDensity.compact,
+                  ),
+                  const Text(
+                    '全选',
+                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textPrimary),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                '已选 ${selected.length} 项',
+                style: const TextStyle(fontSize: 13, color: AppColors.textSecondary),
+              ),
+            ),
+            _buildBatchAction(
+              label: '批量派单',
+              color: AppColors.primary,
+              onTap: () => _onBatchDispatch(context, provider, spots),
+            ),
+            const SizedBox(width: 8),
+            _buildBatchAction(
+              label: '批量通知',
+              color: AppColors.warning,
+              onTap: () => _onBatchNotify(context, provider, spots),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildBatchAction({
+    required String label,
+    required Color color,
+    required VoidCallback onTap,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: 0.1),
+          borderRadius: BorderRadius.circular(AppDims.radiusMedium),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: color),
+        ),
+      ),
+    );
+  }
+
+  List<SpotModel> _selectedSpots(ParkingProvider provider, List<SpotModel> spots) {
+    final selected = provider.selectedSpotIds;
+    return spots.where((s) => selected.contains(s.id)).toList();
+  }
+
+  Future<void> _onBatchDispatch(BuildContext context, ParkingProvider provider, List<SpotModel> spots) async {
+    final targets = _selectedSpots(provider, spots).where((s) => s.isZombie).toList();
+    if (targets.isEmpty) {
+      _showSnackBar('未选择可派单的僵尸车位');
+      return;
+    }
+    await provider.dispatchSpots(targets);
+    provider.clearSpotSelection();
+    _showSnackBar('已批量派单 ${targets.length} 台');
+  }
+
+  Future<void> _onBatchNotify(BuildContext context, ParkingProvider provider, List<SpotModel> spots) async {
+    final targets = _selectedSpots(provider, spots)
+        .where((s) => s.isOccupied || s.isZombie)
+        .toList();
+    if (targets.isEmpty) {
+      _showSnackBar('未选择可通知的车位');
+      return;
+    }
+    await provider.notifySpots(targets);
+    provider.clearSpotSelection();
+    _showSnackBar('已批量通知 ${targets.length} 台');
+  }
+
+  Widget _buildSpotGrid(BuildContext context, ParkingProvider provider, List<SpotModel> spots) {
     if (spots.isEmpty) {
       return Container(
         padding: const EdgeInsets.symmetric(vertical: 60),
@@ -122,12 +277,12 @@ class _SpotsPageState extends State<SpotsPage> {
       physics: const NeverScrollableScrollPhysics(),
       itemCount: spots.length,
       itemBuilder: (context, index) {
-        return _buildSpotListItem(spots[index]);
+        return _buildSpotListItem(context, provider, spots[index]);
       },
     );
   }
 
-  Widget _buildSpotListItem(SpotModel spot) {
+  Widget _buildSpotListItem(BuildContext context, ParkingProvider provider, SpotModel spot) {
     final bgColor = spot.isOffline
         ? AppColors.textSecondary
         : spot.isFree
@@ -150,34 +305,55 @@ class _SpotsPageState extends State<SpotsPage> {
                 ? Icons.directions_car
                 : Icons.warning_amber;
 
-    final hasNotify = _notifySpots.contains(spot.id);
-    final hasDispatch = _dispatchSpots.contains(spot.id);
+    final isSelected = provider.selectedSpotIds.contains(spot.id);
+    final hasNotify = spot.isNotified;
+    final hasDispatch = provider.isSpotDispatched(spot.id);
     final canAct = !spot.isFree && !spot.isOffline;
 
     return GestureDetector(
       onTap: () {
-        Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (context) => SpotDetailPage(spot: spot),
-          ),
-        );
+        if (_batchMode) {
+          if (spot.isOffline) return;
+          provider.toggleSpotSelection(spot.id);
+        } else {
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (context) => SpotDetailPage(spot: spot),
+            ),
+          );
+        }
       },
       child: Container(
         margin: const EdgeInsets.only(bottom: 8),
         decoration: BoxDecoration(
           color: Colors.white,
           borderRadius: BorderRadius.circular(12),
+          border: _batchMode && isSelected
+              ? Border.all(color: AppColors.primary, width: 1.5)
+              : null,
         ),
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
           child: Row(
             children: [
+              if (_batchMode) ...[
+                Checkbox(
+                  value: isSelected,
+                  onChanged: spot.isOffline
+                      ? null
+                      : (_) => provider.toggleSpotSelection(spot.id),
+                  activeColor: AppColors.primary,
+                  visualDensity: VisualDensity.compact,
+                  materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                ),
+                const SizedBox(width: 4),
+              ],
               Container(
                 width: 40,
                 height: 40,
                 decoration: BoxDecoration(
-                  color: bgColor.withOpacity(0.12),
+                  color: bgColor.withValues(alpha: 0.12),
                   borderRadius: BorderRadius.circular(10),
                 ),
                 child: Icon(iconData, color: bgColor, size: 22),
@@ -201,7 +377,7 @@ class _SpotsPageState extends State<SpotsPage> {
                         Container(
                           padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                           decoration: BoxDecoration(
-                            color: bgColor.withOpacity(0.12),
+                            color: bgColor.withValues(alpha: 0.12),
                             borderRadius: BorderRadius.circular(6),
                           ),
                           child: Text(
@@ -243,9 +419,9 @@ class _SpotsPageState extends State<SpotsPage> {
                   ],
                 ),
               ),
-              if (canAct)
+              if (canAct && !_batchMode)
                 GestureDetector(
-                  onTap: () => _showSpotMenu(spot),
+                  onTap: () => _showSpotMenu(context, spot),
                   behavior: HitTestBehavior.opaque,
                   child: Container(
                     width: 32,
@@ -264,27 +440,26 @@ class _SpotsPageState extends State<SpotsPage> {
     );
   }
 
-  void _showSpotMenu(SpotModel spot) {
+  /// 三点菜单: 唯一处理入口在详情页, 这里只保留"查看详情".
+  void _showSpotMenu(BuildContext context, SpotModel spot) {
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.transparent,
       isScrollControlled: true,
       builder: (context) {
-        final hasNotify = _notifySpots.contains(spot.id);
-        final hasDispatch = _dispatchSpots.contains(spot.id);
         return Container(
           margin: const EdgeInsets.fromLTRB(16, 0, 16, 16),
           decoration: BoxDecoration(
             color: Colors.white,
             borderRadius: BorderRadius.circular(16),
           ),
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(20, 20, 20, 16),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 20, 20, 8),
+                child: Row(
                   children: [
                     Text(
                       spot.id,
@@ -297,107 +472,32 @@ class _SpotsPageState extends State<SpotsPage> {
                     ),
                   ],
                 ),
-                const SizedBox(height: 16),
-                _buildMenuCheckbox(
-                  icon: Icons.notifications_outlined,
-                  title: '通知车主',
-                  subtitle: '通知车主尽快挪走车辆',
-                  value: hasNotify,
-                  onChanged: (v) {
-                    setState(() {
-                      if (v == true) {
-                        _notifySpots.add(spot.id);
-                      } else {
-                        _notifySpots.remove(spot.id);
-                      }
-                    });
-                    Navigator.pop(context);
-                  },
+              ),
+              const Divider(height: 1),
+              ListTile(
+                leading: const Icon(Icons.info_outline, color: AppColors.primary, size: 22),
+                title: const Text(
+                  '查看详情',
+                  style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: AppColors.textPrimary),
                 ),
-                const Divider(height: 1),
-                _buildMenuCheckbox(
-                  icon: Icons.assignment_outlined,
-                  title: '派单',
-                  subtitle: '派给挪车师傅处理僵尸车',
-                  value: hasDispatch,
-                  onChanged: (v) {
-                    setState(() {
-                      if (v == true) {
-                        _dispatchSpots.add(spot.id);
-                      } else {
-                        _dispatchSpots.remove(spot.id);
-                      }
-                    });
-                    Navigator.pop(context);
-                  },
-                ),
-                const SizedBox(height: 8),
-              ],
-            ),
+                subtitle: const Text('查看车位、车辆、设备与告警信息', style: TextStyle(fontSize: 12, color: AppColors.textSecondary)),
+                onTap: () {
+                  Navigator.pop(context);
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (context) => SpotDetailPage(spot: spot)),
+                  );
+                },
+              ),
+              const SizedBox(height: 8),
+            ],
           ),
         );
       },
     );
   }
 
-  Widget _buildMenuCheckbox({
-    required IconData icon,
-    required String title,
-    required String subtitle,
-    required bool value,
-    required ValueChanged<bool?> onChanged,
-  }) {
-    return GestureDetector(
-      onTap: () => onChanged(!value),
-      behavior: HitTestBehavior.opaque,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 12),
-        child: Row(
-          children: [
-            Container(
-              width: 40,
-              height: 40,
-              decoration: BoxDecoration(
-                color: value ? AppColors.primary.withOpacity(0.12) : AppColors.surface,
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: Icon(icon, color: value ? AppColors.primary : AppColors.textSecondary, size: 22),
-            ),
-            const SizedBox(width: 14),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    title,
-                    style: TextStyle(
-                      fontSize: 15,
-                      fontWeight: FontWeight.w600,
-                      color: value ? AppColors.primary : AppColors.textPrimary,
-                    ),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    subtitle,
-                    style: const TextStyle(fontSize: 12, color: AppColors.textSecondary),
-                  ),
-                ],
-              ),
-            ),
-            SizedBox(
-              width: 24,
-              height: 24,
-              child: Checkbox(
-                value: value,
-                onChanged: onChanged,
-                activeColor: AppColors.primary,
-                materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                visualDensity: VisualDensity.compact,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
+  void _showSnackBar(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
   }
 }
