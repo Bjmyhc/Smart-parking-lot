@@ -4,6 +4,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../models/spot_model.dart';
 import '../models/alert_model.dart';
 import '../models/stats_model.dart';
+import '../models/operation_log_model.dart';
 import '../services/api_service.dart';
 
 /// 全局数据源 (单一数据层): 唯一持有车位数据 + 唯一的轮询刷新定时器 +
@@ -19,6 +20,7 @@ class ParkingProvider extends ChangeNotifier {
   }
 
   static const _modeKey = 'spots_real_mode';
+  static const _layoutKey = 'spots_layout_mode';
 
   final ApiService _apiService;
   Timer? _refreshTimer;
@@ -27,6 +29,7 @@ class ParkingProvider extends ChangeNotifier {
   List<SpotModel> _spots = [];
   bool _realOnly = false; // false=本地模式(真实+模拟), true=真实模式(仅真实设备)
   bool _isLoading = true;
+  int _layoutMode = 0; // 0=列表, 1=网格, 2=流式
 
   /* 告警处理记录 (按车位 spotId): 忽略为手动; 已处理由"僵尸车离开车位"自动派生 */
   final Set<String> _ignoredAlertIds = {};
@@ -42,6 +45,35 @@ class ParkingProvider extends ChangeNotifier {
   /* 批量选中集合 (收进 Provider, 跨页同步) */
   final Set<String> _selectedSpotIds = {};
   final Set<String> _selectedAlertIds = {};
+
+  /* 操作日志 (内存态, 记录用户关键操作, 重启即清空) */
+  final List<OperationLog> _operationLogs = [];
+
+  /// 操作日志 (倒序: 最新在前).
+  List<OperationLog> get operationLogs => List.unmodifiable(_operationLogs);
+
+  /// 追加一条操作日志并通知刷新.
+  void _addLog({
+    required String type,
+    required String title,
+    String? spotId,
+    String detail = '',
+    bool success = true,
+  }) {
+    _operationLogs.insert(
+      0,
+      OperationLog(
+        id: 'log_${DateTime.now().microsecondsSinceEpoch}',
+        type: type,
+        title: title,
+        spotId: spotId,
+        detail: detail,
+        success: success,
+        createdAt: DateTime.now(),
+      ),
+    );
+    notifyListeners();
+  }
 
   /* 一周趋势为演示用静态数据 (图表占位, 非平台真实统计) */
   static final List<DailyTrend> _mockWeeklyTrend = [
@@ -66,6 +98,7 @@ class ParkingProvider extends ChangeNotifier {
   Future<void> _loadMode() async {
     final prefs = await SharedPreferences.getInstance();
     _realOnly = prefs.getBool(_modeKey) ?? false;
+    _layoutMode = prefs.getInt(_layoutKey) ?? 0;
   }
 
   /* ==================== 只读数据 ==================== */
@@ -73,6 +106,14 @@ class ParkingProvider extends ChangeNotifier {
   List<SpotModel> get spots => List.unmodifiable(_spots);
   bool get realOnly => _realOnly;
   bool get isLoading => _isLoading;
+  int get layoutMode => _layoutMode;
+
+  Future<void> setLayoutMode(int mode) async {
+    _layoutMode = mode;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(_layoutKey, mode);
+    notifyListeners();
+  }
 
   int get totalSpots => _spots.length;
   List<SpotModel> get freeSpots => _spots.where((s) => s.isFree).toList();
@@ -155,6 +196,11 @@ class ParkingProvider extends ChangeNotifier {
     _realOnly = !_realOnly;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_modeKey, _realOnly);
+    _addLog(
+      type: 'mode',
+      title: '模式切换',
+      detail: _realOnly ? '切换为真实模式（仅真实设备）' : '切换为本地模式（真实 + 模拟）',
+    );
     notifyListeners();
     await refresh();
   }
@@ -171,6 +217,12 @@ class ParkingProvider extends ChangeNotifier {
     await _apiService.notifyOwner(spot.id);
     _notifiedSpotIds.add(spot.id);
     _syncLocalState();
+    _addLog(
+      type: 'notify',
+      title: '通知车主',
+      spotId: spot.id,
+      detail: '已通知 ${spot.plateNumber ?? spot.id} 车主尽快挪车',
+    );
     notifyListeners();
   }
 
@@ -181,6 +233,12 @@ class ParkingProvider extends ChangeNotifier {
     _handlerNames[spot.id] = handlerName;
     _handledAts.remove(spot.id);
     _syncLocalState();
+    _addLog(
+      type: 'dispatch',
+      title: '派单处理',
+      spotId: spot.id,
+      detail: '派单给 $handlerName 现场处理',
+    );
     notifyListeners();
   }
 
@@ -191,6 +249,11 @@ class ParkingProvider extends ChangeNotifier {
     }
     _notifiedSpotIds.addAll(spots.map((s) => s.id));
     _syncLocalState();
+    _addLog(
+      type: 'notify',
+      title: '批量通知车主',
+      detail: '已通知 ${spots.length} 个车位的车主挪车',
+    );
     notifyListeners();
   }
 
@@ -205,6 +268,11 @@ class ParkingProvider extends ChangeNotifier {
       _handledAts.remove(s.id);
     }
     _syncLocalState();
+    _addLog(
+      type: 'dispatch',
+      title: '批量派单',
+      detail: '已派单 ${spots.length} 个车位',
+    );
     notifyListeners();
   }
 
@@ -367,6 +435,7 @@ class ParkingProvider extends ChangeNotifier {
   /// 立即查 1 次 + 每 5s 再查 9 次(共 10 次, 约 45~50s), 之后自动停止.
   /// 固件升级是低频操作, 无需常驻轮询, 避免长期占用 OneNET 请求配额.
   void beginOtaCheckSession() {
+    if (_otaConfirming) return; // 升级进行中不重启检测会话, 避免再次触发升级弹窗
     _otaCheckTimer?.cancel();
     _otaChecksLeft = 9;
     _checkOtaTask(); // 进入前台立即查一次
@@ -386,6 +455,9 @@ class ParkingProvider extends ChangeNotifier {
     final version =
         await _apiService.getOtaNodeVersion(_otaNodeDevice) ?? _otaDefaultVersion;
     final task = await _apiService.getOtaTask(_otaNodeDevice, version: version);
+    // 网络请求期间用户可能已在固件升级页点击"确认升级": 升级已在进行中,
+    // 直接终止本轮检测, 避免把检测结果再次置为"待升级"而触发全局升级弹窗.
+    if (_otaConfirming) return;
     _otaCurrentVersion = version;
 
     if (task == null) {
@@ -458,6 +530,12 @@ class ParkingProvider extends ChangeNotifier {
       notifyListeners();
       return false;
     }
+    _addLog(
+      type: 'ota',
+      title: '固件升级',
+      spotId: _otaNodeDevice,
+      detail: '确认升级至 ${_otaTarget ?? '未知版本'}',
+    );
     _otaProgress = 0; // 重新升级: 真实进度清零, 由网关上报驱动
     _otaPollTimer?.cancel();
     _pollOtaStatus();

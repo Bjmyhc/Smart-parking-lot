@@ -3,6 +3,8 @@ import '../../../../shared/widgets/card_container.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_dims.dart';
 import 'firmware_upgrade_page.dart';
+import 'diagnosis_page.dart';
+import 'operation_log_page.dart';
 
 class ProfilePage extends StatelessWidget {
   const ProfilePage({super.key});
@@ -203,15 +205,35 @@ class ProfilePage extends StatelessWidget {
           _buildGroupItem(
             icon: Icons.history,
             title: '操作日志',
+            onTap: () {
+              // 与固件升级页一致的纯淡入转场
+              Navigator.push(
+                context,
+                PageRouteBuilder(
+                  transitionDuration: const Duration(milliseconds: 200),
+                  pageBuilder: (context, animation, secondaryAnimation) =>
+                      const OperationLogPage(),
+                  transitionsBuilder: (context, animation, secondaryAnimation, child) =>
+                      FadeTransition(opacity: animation, child: child),
+                ),
+              );
+            },
           ),
           _buildDivider(),
           _buildGroupItem(
             icon: Icons.update_outlined,
             title: '固件升级',
             onTap: () {
+              // 纯淡入转场: 页面原地淡入, 无滑入/缩放位移, 进入瞬间圆环即居中
               Navigator.push(
                 context,
-                MaterialPageRoute(builder: (_) => const FirmwareUpgradePage()),
+                PageRouteBuilder(
+                  transitionDuration: const Duration(milliseconds: 200),
+                  pageBuilder: (context, animation, secondaryAnimation) =>
+                      const FirmwareUpgradePage(),
+                  transitionsBuilder: (context, animation, secondaryAnimation, child) =>
+                      FadeTransition(opacity: animation, child: child),
+                ),
               );
             },
           ),
@@ -219,6 +241,19 @@ class ProfilePage extends StatelessWidget {
           _buildGroupItem(
             icon: Icons.bug_report_outlined,
             title: '故障诊断',
+            onTap: () {
+              // 与固件升级页一致的纯淡入转场
+              Navigator.push(
+                context,
+                PageRouteBuilder(
+                  transitionDuration: const Duration(milliseconds: 200),
+                  pageBuilder: (context, animation, secondaryAnimation) =>
+                      const DiagnosisPage(),
+                  transitionsBuilder: (context, animation, secondaryAnimation, child) =>
+                      FadeTransition(opacity: animation, child: child),
+                ),
+              );
+            },
           ),
         ],
       ),
@@ -255,34 +290,80 @@ class ProfilePage extends StatelessWidget {
   }
 
   Widget _buildGroupItem({required IconData icon, required String title, VoidCallback? onTap}) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-        child: Row(
-          children: [
-            Icon(icon, color: AppColors.textPrimary.withValues(alpha: 0.7), size: 22),
-            const SizedBox(width: 14),
-            Expanded(
-              child: Text(
-                title,
-                style: const TextStyle(
-                  fontSize: 15,
-                  color: AppColors.textPrimary,
-                ),
-              ),
-            ),
-            const Icon(Icons.chevron_right, color: AppColors.textSecondary, size: 20),
-          ],
-        ),
-      ),
-    );
+    return _PressableGroupItem(icon: icon, title: title, onTap: onTap);
   }
 
   Widget _buildDivider() {
     return Padding(
       padding: const EdgeInsets.only(left: 50, right: 20),
       child: Container(height: 1, color: AppColors.textSecondary.withValues(alpha: 0.3)),
+    );
+  }
+}
+
+/// 可按下的菜单项: 按住时行背景平滑变灰(动画过渡), 松开恢复, 配合点击回调.
+class _PressableGroupItem extends StatefulWidget {
+  final IconData icon;
+  final String title;
+  final VoidCallback? onTap;
+
+  const _PressableGroupItem({
+    required this.icon,
+    required this.title,
+    this.onTap,
+  });
+
+  @override
+  State<_PressableGroupItem> createState() => _PressableGroupItemState();
+}
+
+class _PressableGroupItemState extends State<_PressableGroupItem> {
+  bool _pressed = false;
+
+  void _setPressed(bool value) {
+    if (_pressed != value) setState(() => _pressed = value);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // 使用 onTapDown/onTapUp/onTapCancel: 仅点击手势触发按下态,
+    // 页面滚动时(垂直手势获胜)会自动走 onTapCancel, 不会误触发变灰.
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTapDown: (_) => _setPressed(true),
+      onTapUp: (_) => _setPressed(false),
+      onTapCancel: () => _setPressed(false),
+      onTap: widget.onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 150),
+        curve: Curves.easeOut,
+        // 圆角与所在大卡片(CardContainer)保持一致
+        decoration: BoxDecoration(
+          color: _pressed
+              ? AppColors.textSecondary.withValues(alpha: 0.12)
+              : Colors.transparent,
+          borderRadius: BorderRadius.circular(AppDims.radiusLarge),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+          child: Row(
+            children: [
+              Icon(widget.icon, color: AppColors.textPrimary.withValues(alpha: 0.7), size: 22),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Text(
+                  widget.title,
+                  style: const TextStyle(
+                    fontSize: 15,
+                    color: AppColors.textPrimary,
+                  ),
+                ),
+              ),
+              const Icon(Icons.chevron_right, color: AppColors.textSecondary, size: 20),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }

@@ -71,17 +71,25 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
   int _currentIndex = 0;
   bool _otaDialogShowing = false;
 
-  final List<Widget> _pages = const [
-    OverviewPage(),
-    SpotsPage(),
-    AlertsPage(),
-    StatsPage(),
-    ProfilePage(),
-  ];
+  late final List<Widget> _pages;
 
   @override
   void initState() {
     super.initState();
+    // 首页可通过 onSwitchTab 回调切换底部 tab
+    _pages = [
+      OverviewPage(
+        onSwitchTab: (index) {
+          if (mounted && index >= 0 && index < _pages.length) {
+            setState(() => _currentIndex = index);
+          }
+        },
+      ),
+      const SpotsPage(),
+      const AlertsPage(),
+      const StatsPage(),
+      const ProfilePage(),
+    ];
     WidgetsBinding.instance.addObserver(this);
     // App 首次进入: 触发一轮 OTA 短检测
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -107,8 +115,9 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
   Widget build(BuildContext context) {
     final provider = context.watch<ParkingProvider>();
 
-    // OTA 升级弹窗: 检测到待升级任务(未被忽略)时全局弹出
-    if (provider.otaPromptVisible && !_otaDialogShowing) {
+    // OTA 升级弹窗: 检测到待升级任务(未被忽略)时全局弹出.
+    // 升级进行中(_otaConfirming, 含固件升级页手动确认)不再弹窗, 避免重复出现升级提示.
+    if (provider.otaPromptVisible && !_otaDialogShowing && !provider.otaConfirming) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted || _otaDialogShowing || !provider.otaPromptVisible) return;
         _otaDialogShowing = true;

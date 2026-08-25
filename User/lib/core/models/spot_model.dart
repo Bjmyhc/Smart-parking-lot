@@ -9,6 +9,10 @@ class SpotModel {
   final String? lastUpdated;
   final bool isOnline;
 
+  /* 传感器原始数据 (OneNET 物模型属性, 用于传感器矛盾诊断) */
+  final int geoMagnetic; // 地磁检测值: 0=未感应 / 1=感应到车
+  final int ultrasonic;  // 超声波距离(cm)
+
   /* 本地模拟字段 (处理记录): 仅内存态, 3s 刷新后由 ParkingProvider 回写, 重启即丢 */
   String notifyStatus; // 'none'=未通知 / 'notified'=已通知
   String? handlerName; // 处理人
@@ -21,6 +25,8 @@ class SpotModel {
     this.occupiedHours = 0,
     this.batteryLevel = 100.0,
     this.signalStrength = 0,
+    this.geoMagnetic = 0,
+    this.ultrasonic = 0,
     this.plateNumber,
     this.lastUpdated,
     this.isOnline = true,
@@ -55,6 +61,10 @@ class SpotModel {
     final occupiedTime = properties['OccupiedTime'] as int? ?? 0;
     final occupiedHours = isOnline ? (occupiedTime / 3600).round() : 0;
 
+    // 传感器原始数据: 地磁 0/1 + 超声波距离(cm), 用于传感器矛盾诊断
+    final geoMagnetic = properties['GeoMagnetic'] as int? ?? 0;
+    final ultrasonic = properties['Ultrasonic'] as int? ?? 0;
+
     final rawName = json['name'] as String? ?? json['deviceName'] as String? ?? '';
 
     return SpotModel(
@@ -64,6 +74,8 @@ class SpotModel {
       occupiedHours: occupiedHours,
       batteryLevel: isOnline ? 85.0 : 0.0,
       signalStrength: isOnline ? -65 : 0,
+      geoMagnetic: geoMagnetic,
+      ultrasonic: ultrasonic,
       plateNumber: json['plate_number'] as String?,
       lastUpdated: json['updated_at'] as String?,
       isOnline: isOnline,

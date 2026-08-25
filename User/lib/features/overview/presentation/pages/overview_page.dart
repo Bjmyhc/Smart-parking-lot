@@ -11,9 +11,16 @@ import '../../../../core/theme/app_dims.dart';
 import '../../../../core/models/spot_model.dart';
 import '../../../../core/models/alert_model.dart';
 import '../../../../core/providers/parking_provider.dart';
+import '../../../profile/presentation/pages/diagnosis_page.dart';
+import '../../../profile/presentation/pages/firmware_upgrade_page.dart';
 
+/// 首页: 可长按拖动的卡片式首页 (还原自早期提交).
+/// 5 张卡片支持长按 1 秒震动后拖动排序, 顺序持久化到本地.
 class OverviewPage extends StatefulWidget {
-  const OverviewPage({super.key});
+  /// 切换到指定底部 tab (由 MainShell 注入).
+  final void Function(int index)? onSwitchTab;
+
+  const OverviewPage({super.key, this.onSwitchTab});
 
   @override
   State<OverviewPage> createState() => _OverviewPageState();
@@ -130,14 +137,17 @@ class _OverviewPageState extends State<OverviewPage> {
               ],
             ),
           ),
-          Container(
-            width: 40,
-            height: 40,
-            decoration: BoxDecoration(
-              color: AppColors.surface,
-              borderRadius: BorderRadius.circular(12),
+          GestureDetector(
+            onTap: () => widget.onSwitchTab?.call(2),
+            child: Container(
+              width: 40,
+              height: 40,
+              decoration: BoxDecoration(
+                color: AppColors.surface,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: const Icon(Icons.notifications_none, color: AppColors.textSecondary, size: 22),
             ),
-            child: const Icon(Icons.notifications_none, color: AppColors.textSecondary, size: 22),
           ),
         ],
       ),
@@ -205,18 +215,39 @@ class _OverviewPageState extends State<OverviewPage> {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceAround,
         children: [
-          _buildQuickItem(Icons.warning_amber, '告警中心', AppColors.primary),
-          _buildQuickItem(Icons.local_parking, '车位管理', AppColors.primary),
-          _buildQuickItem(Icons.file_download, '数据导出', AppColors.primary),
-          _buildQuickItem(Icons.system_update, '系统状态', AppColors.primary),
+          _buildQuickItem(
+            Icons.warning_amber,
+            '告警中心',
+            AppColors.primary,
+            () => widget.onSwitchTab?.call(2),
+          ),
+          _buildQuickItem(
+            Icons.local_parking,
+            '车位管理',
+            AppColors.primary,
+            () => widget.onSwitchTab?.call(1),
+          ),
+          _buildQuickItem(
+            Icons.sensors,
+            '故障诊断',
+            AppColors.primary,
+            () => _push(context, const DiagnosisPage()),
+          ),
+          _buildQuickItem(
+            Icons.system_update,
+            '固件升级',
+            AppColors.primary,
+            () => _push(context, const FirmwareUpgradePage()),
+          ),
         ],
       ),
     );
   }
 
-  Widget _buildQuickItem(IconData icon, String label, Color color) {
+  Widget _buildQuickItem(IconData icon, String label, Color color, VoidCallback onTap) {
     return GestureDetector(
-      onTap: () {},
+      onTap: onTap,
+      behavior: HitTestBehavior.opaque,
       child: Column(
         children: [
           Container(
@@ -284,7 +315,7 @@ class _OverviewPageState extends State<OverviewPage> {
       child: GestureDetector(
         onTap: () {
           if (label == '僵尸车') {
-            Navigator.pushNamed(context, '/alerts');
+            widget.onSwitchTab?.call(2);
           }
         },
         child: Column(
@@ -388,15 +419,13 @@ class _OverviewPageState extends State<OverviewPage> {
                         style: TextStyle(
                           fontSize: 22,
                           fontWeight: FontWeight.w700,
-                          color: abnormal > 0
-                              ? AppColors.warning
-                              : AppColors.textSecondary,
+                          color: abnormal > 0 ? AppColors.warning : AppColors.textSecondary,
                         ),
                       ),
                       const SizedBox(height: 2),
-                      Text(
-                        abnormal > 0 ? '异常' : '异常',
-                        style: const TextStyle(fontSize: 12, color: AppColors.textSecondary),
+                      const Text(
+                        '异常',
+                        style: TextStyle(fontSize: 12, color: AppColors.textSecondary),
                       ),
                     ],
                   ),
@@ -413,9 +442,7 @@ class _OverviewPageState extends State<OverviewPage> {
     final latestAlert = alerts.isNotEmpty ? alerts.first : null;
 
     return CardContainer(
-      onTap: () {
-        Navigator.pushNamed(context, '/alerts');
-      },
+      onTap: () => widget.onSwitchTab?.call(2),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -490,7 +517,7 @@ class _OverviewPageState extends State<OverviewPage> {
                         ),
                         const SizedBox(height: 4),
                         Text(
-                          '车位 ${latestAlert.spotId} · 已占用 ${latestAlert.occupiedHours}小时',
+                          '车位 ${latestAlert.spotId} · 已占用 ${latestAlert.occupiedHours} 小时',
                           style: const TextStyle(
                             fontSize: 13,
                             color: AppColors.textSecondary,
@@ -516,8 +543,23 @@ class _OverviewPageState extends State<OverviewPage> {
       ),
     );
   }
+
+  /// 淡入转场推入子页.
+  void _push(BuildContext context, Widget page) {
+    Navigator.push(
+      context,
+      PageRouteBuilder(
+        transitionDuration: const Duration(milliseconds: 200),
+        pageBuilder: (context, animation, secondaryAnimation) => page,
+        transitionsBuilder:
+            (context, animation, secondaryAnimation, child) =>
+                FadeTransition(opacity: animation, child: child),
+      ),
+    );
+  }
 }
 
+/// 长按 1 秒后: 震动 + 进入可拖动状态 (由 _DelayedReorderableDragStartListener 接管).
 class _LongPressDraggable extends StatefulWidget {
   final int index;
   final Widget child;
