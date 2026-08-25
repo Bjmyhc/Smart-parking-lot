@@ -7,6 +7,8 @@
 # ============================================
 # Keil �û����ã�������ԣ�
 # ============================================
+*.uvoptx.*
+*.uvgui.*
 *.uvguix.*
 *.uvoptx.bak
 
@@ -57,10 +59,11 @@ Gateway/platform_cfg.h
 Mcp_Tool/config.json
 
 # ============================================
-# Keil ������� HTML ���� & Python ����
+# Keil 构建输出 HTML & Python 产物
 # ============================================
-Node/Output/output.htm
-Node/Output/output.build_log.htm
+Node/Firmware/Output/
+Node/BootLoader/Output/
+*.htm
 __pycache__/
 *.pyc
 
