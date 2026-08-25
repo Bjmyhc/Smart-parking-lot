@@ -1,96 +1,201 @@
-# Â·±ß½©Ê¬³µ¼ì²âÏµÍ³ - APP ¿ª·¢ÎÄµµ
+# è·¯è¾¹åƒµå°¸è½¦æ£€æµ‹ç³»ç»Ÿ Â· APP å¼€å‘æ–‡æ¡£ï¼ˆåˆå¹¶ç‰ˆ v3.0ï¼‰
 
-> **°æ±¾**: v2.0£¨ÖĞÎÄÔöÇ¿°æ£©
-> **ÈÕÆÚ**: 2026-08-19
-> **´úÂë¹æ·¶**: ²Î¿¼ `APP¿ª·¢¹æ·¶.md`
-> **×´Ì¬**: ¿ª·¢ÖĞ
+> **ç‰ˆæœ¬**ï¼šv3.0ï¼ˆåˆå¹¶ç‰ˆï¼Œæ•´åˆè®¾è®¡/å¼€å‘/æ¶æ„ä¸‰ä»½æ—§æ–‡æ¡£ï¼‰
+> **æ›´æ–°æ—¥æœŸ**ï¼š2026-08-25
+> **çŠ¶æ€**ï¼šåŸºç¡€åŠŸèƒ½å·²å®Œæˆï¼Œå¾…åŠè§ã€Œå…­ã€å¼€å‘è¿›åº¦ã€
+> **æ—§æ–‡æ¡£å½’æ¡£**ï¼š`User/archive/`ï¼ˆAPPè®¾è®¡æ–‡æ¡£_æ—§ç‰ˆ / APPå¼€å‘æ–‡æ¡£_æ—§ç‰ˆ / APPæ¶æ„æ–‡æ¡£_æ—§ç‰ˆï¼‰
 
 ---
 
-## Ò»¡¢ÏîÄ¿¸ÅÊö
+## ä¸€ã€é¡¹ç›®æ¦‚è§ˆ
 
-### 1.1 ÏîÄ¿¼ò½é
+### 1.1 é¡¹ç›®ç®€ä»‹
 
-±¾ÏîÄ¿ÊÇÒ»¸ö»ùÓÚ Flutter µÄ"Â·±ß½©Ê¬³µ¼ì²âÏµÍ³"¹ÜÀí¶Ë APP£¬Ö÷ÒªÓÃÓÚÍ£³µ³¡µÄÊµÊ±¼à¿Ø¡¢³µÎ»¹ÜÀí¡¢½©Ê¬³µÔ¤¾¯¡¢Êı¾İÍ³¼Æ·ÖÎöµÈ¹¦ÄÜ¡£
+åŸºäº Flutter çš„ã€Œè·¯è¾¹åƒµå°¸è½¦æ£€æµ‹ç³»ç»Ÿã€ç®¡ç†ç«¯ APPï¼Œç”¨äºåœè½¦åœºçš„å®æ—¶ç›‘æ§ã€è½¦ä½ç®¡ç†ã€åƒµå°¸è½¦é¢„è­¦ä¸å¤„ç½®ã€æ•°æ®ç»Ÿè®¡åˆ†æã€‚
 
-### 1.2 ¼¼ÊõÕ»
+### 1.2 æŠ€æœ¯æ ˆ
 
-| Àà±ğ     | ¼¼Êõ                        | °æ±¾    |
-| -------- | --------------------------- | ------- |
-| ¿ò¼Ü     | Flutter                     | 3.47.0  |
-| ÓïÑÔ     | Dart                        | 3.13.0  |
-| ×´Ì¬¹ÜÀí | setState / Provider         | -       |
-| ÍøÂçÇëÇó | http                        | ^1.2.0  |
-| Í¼±í     | fl_chart                    | ^0.68.0 |
-| »¬¶¯ÁĞ±í | flutter_slidable            | ^3.1.0  |
-| ´íÎ»Íø¸ñ | flutter_staggered_grid_view | ^0.7.0  |
-| ÂÖ²¥     | flutter_swiper_view         | ^1.1.8  |
-| ¶¯»­ÎÄ×Ö | animated_text_kit           | ^4.2.2  |
-| ¼ÓÔØ¶¯»­ | flutter_spinkit             | ^5.2.0  |
-| ¼ÓÃÜ     | crypto                      | ^3.0.3  |
+| ç±»åˆ«     | æŠ€æœ¯              | ç‰ˆæœ¬    |
+| -------- | ----------------- | ------- |
+| æ¡†æ¶     | Flutter           | 3.47.0  |
+| è¯­è¨€     | Dart              | 3.13.0  |
+| çŠ¶æ€ç®¡ç† | Provider          | ^6.1.0  |
+| ç½‘ç»œè¯·æ±‚ | http              | ^1.2.0  |
+| å›¾è¡¨     | fl_chart          | ^0.68.0 |
+| æ»‘åŠ¨åˆ—è¡¨ | flutter_slidable  | ^3.1.0  |
+| é”™ä½ç½‘æ ¼ | flutter_staggered_grid_view | ^0.7.0 |
+| è½®æ’­     | flutter_swiper_view | ^1.1.8 |
+| åŠ¨ç”»æ–‡å­— | animated_text_kit | ^4.2.2  |
+| åŠ è½½åŠ¨ç”» | flutter_spinkit   | ^5.2.0  |
+| åŠ å¯†     | crypto            | ^3.0.3  |
+| æœ¬åœ°å­˜å‚¨ | shared_preferences | 2.2.2  |
+| åç«¯å¹³å° | ä¸­å›½ç§»åŠ¨ OneNETï¼ˆREST + HMAC-MD5 ç­¾åé‰´æƒï¼‰ | â€” |
 
-### 1.3 ÏîÄ¿½á¹¹
+### 1.3 é¡¹ç›®ç»“æ„ï¼ˆæœ€æ–°ï¼‰
 
 ```
 lib/
-©À©¤©¤ core/                          # ºËĞÄÄ£¿é
-©¦   ©À©¤©¤ theme/
-©¦   ©¦   ©À©¤©¤ app_colors.dart        # ÑÕÉ«³£Á¿
-©¦   ©¦   ©¸©¤©¤ app_dims.dart          # ³ß´ç³£Á¿
-©¦   ©À©¤©¤ models/
-©¦   ©¦   ©À©¤©¤ spot_model.dart        # ³µÎ»Ä£ĞÍ
-©¦   ©¦   ©À©¤©¤ alert_model.dart       # Ô¤¾¯Ä£ĞÍ
-©¦   ©¦   ©¸©¤©¤ stats_model.dart       # Í³¼ÆÄ£ĞÍ
-©¦   ©¸©¤©¤ services/
-©¦       ©¸©¤©¤ api_service.dart       # API ·şÎñ
-©À©¤©¤ shared/                        # ¹«¹²×é¼ş
-©¦   ©¸©¤©¤ widgets/
-©¦       ©À©¤©¤ custom_app_bar.dart    # ×Ô¶¨Òåµ¼º½À¸
-©¦       ©À©¤©¤ card_container.dart    # ¿¨Æ¬ÈİÆ÷
-©¦       ©À©¤©¤ list_tile_base.dart    # ÁĞ±íÏî»ùÀà
-©¦       ©À©¤©¤ action_button_group.dart # ²Ù×÷°´Å¥×é
-©¦       ©À©¤©¤ stat_card.dart         # Í³¼Æ¿¨Æ¬
-©¦       ©À©¤©¤ huawei_card.dart       # »ªÎª·ç¸ñ¿¨Æ¬
-©¦       ©À©¤©¤ status_badge.dart      # ×´Ì¬»ÕÕÂ
-©¦       ©À©¤©¤ circle_progress.dart   # Ô²»·½ø¶È
-©¦       ©À©¤©¤ empty_state.dart       # ¿Õ×´Ì¬
-©¦       ©¸©¤©¤ loading_indicator.dart # ¼ÓÔØÖ¸Ê¾Æ÷
-©À©¤©¤ features/
-©¦   ©À©¤©¤ overview/                  # ×ÜÀÀÒ³
-©¦   ©¦   ©¸©¤©¤ presentation/pages/overview_page.dart
-©¦   ©À©¤©¤ spots/                     # ³µÎ»Ò³
-©¦   ©¦   ©¸©¤©¤ presentation/pages/
-©¦   ©¦       ©À©¤©¤ spots_page.dart
-©¦   ©¦       ©¸©¤©¤ spot_detail_page.dart
-©¦   ©À©¤©¤ alerts/                    # Ô¤¾¯Ò³
-©¦   ©¦   ©¸©¤©¤ presentation/pages/alerts_page.dart
-©¦   ©À©¤©¤ stats/                     # Êı¾İ·ÖÎöÒ³
-©¦   ©¦   ©¸©¤©¤ presentation/pages/stats_page.dart
-©¦   ©¸©¤©¤ profile/                   # ÎÒµÄÒ³
-©¦       ©¸©¤©¤ presentation/pages/profile_page.dart
-©¸©¤©¤ main.dart                      # Èë¿ÚÎÄ¼ş
+â”œâ”€â”€ core/                              # æ ¸å¿ƒæ¨¡å—
+â”‚   â”œâ”€â”€ theme/
+â”‚   â”‚   â”œâ”€â”€ app_colors.dart            # é¢œè‰²å¸¸é‡
+â”‚   â”‚   â””â”€â”€ app_dims.dart              # å°ºå¯¸å¸¸é‡
+â”‚   â”œâ”€â”€ models/
+â”‚   â”‚   â”œâ”€â”€ spot_model.dart            # è½¦ä½/èŠ‚ç‚¹è®¾å¤‡æ¨¡å‹
+â”‚   â”‚   â”œâ”€â”€ alert_model.dart           # å‘Šè­¦/å·¥å•æ¨¡å‹
+â”‚   â”‚   â””â”€â”€ stats_model.dart           # ç»Ÿè®¡æ¨¡å‹
+â”‚   â”œâ”€â”€ providers/
+â”‚   â”‚   â””â”€â”€ parking_provider.dart      # å…¨å±€å”¯ä¸€æ•°æ®å±‚ï¼ˆè½®è¯¢/æ¨¡å¼/å‘Šè­¦/OTAï¼‰
+â”‚   â””â”€â”€ services/
+â”‚       â””â”€â”€ api_service.dart           # OneNET API æœåŠ¡
+â”œâ”€â”€ shared/
+â”‚   â””â”€â”€ widgets/                       # å…¬å…±ç»„ä»¶ï¼ˆ10 ä¸ªï¼‰
+â”‚       â”œâ”€â”€ custom_app_bar.dart        # è“è‰²æ¸å˜å¯¼èˆªæ 
+â”‚       â”œâ”€â”€ card_container.dart        # å¡ç‰‡å®¹å™¨ï¼ˆåŸºçŸ³ç»„ä»¶ï¼‰
+â”‚       â”œâ”€â”€ list_tile_base.dart        # åˆ—è¡¨é¡¹åŸºç±»
+â”‚       â”œâ”€â”€ action_button_group.dart   # æ´¾å•/é€šçŸ¥/å¤„ç½®æŒ‰é’®ç»„
+â”‚       â”œâ”€â”€ stat_card.dart             # ç»Ÿè®¡å¡ç‰‡
+â”‚       â”œâ”€â”€ huawei_card.dart           # åä¸ºé£æ ¼å¡ç‰‡ï¼ˆä¿ç•™å…¼å®¹ï¼‰
+â”‚       â”œâ”€â”€ status_badge.dart          # çŠ¶æ€å¾½ç« ï¼ˆfactory æ„é€ ï¼‰
+â”‚       â”œâ”€â”€ circle_progress.dart       # åœ†ç¯è¿›åº¦
+â”‚       â”œâ”€â”€ empty_state.dart           # ç©ºçŠ¶æ€
+â”‚       â””â”€â”€ loading_indicator.dart     # åŠ è½½åŠ¨ç”»
+â”œâ”€â”€ features/
+â”‚   â”œâ”€â”€ overview/                      # æ€»è§ˆé¡µï¼ˆTab0ï¼‰
+â”‚   â”œâ”€â”€ spots/                         # è½¦ä½é¡µï¼ˆTab1ï¼‰+ è½¦ä½è¯¦æƒ…é¡µ
+â”‚   â”œâ”€â”€ alerts/                        # å‘Šè­¦ä¸­å¿ƒï¼ˆTab2ï¼‰
+â”‚   â”œâ”€â”€ stats/                         # æ•°æ®é¡µï¼ˆTab3ï¼‰
+â”‚   â””â”€â”€ profile/                       # æˆ‘çš„é¡µï¼ˆTab4ï¼‰+ å›ºä»¶å‡çº§é¡µ + OTA å¼¹çª—
+â””â”€â”€ main.dart                          # å…¥å£ + MainShellï¼ˆ5 Tab + OTA å…¨å±€å¼¹çª—ï¼‰
 ```
 
 ---
 
-## ¶ş¡¢Android ¹¹½¨ÅäÖÃ£¨×îÖÕ°æ£©
+## äºŒã€è®¾è®¡è§„èŒƒ
 
-### 2.1 Gradle °æ±¾
+### 2.1 æ•´ä½“é£æ ¼
 
-| ÅäÖÃÏî | Öµ        | ËµÃ÷                  |
-| ------ | --------- | --------------------- |
-| Gradle | 9.4.1-bin | Óë AGP 8.x ¼æÈİ       |
-| AGP    | 8.11.1    | Flutter 3.47 ×îµÍÒªÇó |
-| Kotlin | 2.3.0     | ÎÈ¶¨°æ                |
+- è®¾è®¡è¯­è¨€ï¼šMaterial 3 + åä¸ºæ™ºæ…§ç”Ÿæ´»å¼ã€Œé«˜ç«¯ç§‘æŠ€æ„Ÿã€
+- ä¸»è‰²è°ƒï¼šåä¸ºè“ `#007DFF`ï¼ˆPrimaryï¼‰ï¼Œè¾…è‰²æµ…è“ `#E8F4FD`
+- èƒŒæ™¯è‰²ï¼šæµ…ç°ç™½ `#F5F7FA`ï¼ˆéçº¯ç™½ï¼Œå‡å°‘åˆºçœ¼ï¼‰
+- å¼ºè°ƒè‰²ï¼šæˆåŠŸç»¿ `#00C781`ã€è­¦å‘Šæ©™ `#FF9F43`ã€å±é™©çº¢ `#FF5B5B`
+- æ–‡å­—ï¼šä¸»æ–‡å­— `#1A1A1A`ã€æ¬¡è¦æ–‡å­— `#8A8A8A`
+- åœ†è§’ï¼šå¡ç‰‡ 16dpã€æŒ‰é’® 12dpã€å°æ ‡ç­¾ 8dp
+- é˜´å½±ï¼šå¡ç‰‡ `blurRadius=12, offset=(0,2), opacity=0.08`
+- ç•™ç™½ï¼šé¡µé¢è¾¹è· 20dpï¼Œå¡ç‰‡é—´è· 12dp
+- ä¸»é¡µé¡¶æ ï¼šå¤§æ ‡é¢˜é£æ ¼ï¼ˆ28sp w700ï¼‰+ å³ä¾§å›¾æ ‡
+- äºŒçº§é¡µé¡¶æ ï¼š`CustomAppBar` è“è‰²æ¸å˜ + è¿”å›æŒ‰é’®
+- åº•éƒ¨å¯¼èˆªï¼š5 ä¸ª Tabï¼ˆé¦–é¡µ/è½¦ä½/å‘Šè­¦/æ•°æ®/æˆ‘çš„ï¼‰ï¼Œé€‰ä¸­æ€è“è‰²é«˜äº® + å›¾æ ‡æ”¾å¤§
 
-### 2.2 settings.gradle.kts ¹Ø¼üÅäÖÃ
+### 2.2 è®¾è®¡ä»¤ç‰Œ
+
+é¢œè‰²ç»Ÿä¸€èµ° `AppColors`ï¼Œå°ºå¯¸ç»Ÿä¸€èµ° `AppDims`ï¼Œ**ç¦æ­¢ç¡¬ç¼–ç é¢œè‰²å€¼ä¸å°ºå¯¸**ã€‚
+
+```dart
+// lib/core/theme/app_colors.dart
+class AppColors {
+  static const Color primary = Color(0xFF007DFF);
+  static const Color primaryLight = Color(0xFFE8F4FD);
+  static const Color background = Color(0xFFF5F7FA);
+  static const Color surface = Colors.white;
+  static const Color success = Color(0xFF00C781);
+  static const Color warning = Color(0xFFFF9F43);
+  static const Color danger = Color(0xFFFF5B5B);
+  static const Color textPrimary = Color(0xFF1A1A1A);
+  static const Color textSecondary = Color(0xFF8A8A8A);
+  // æš—è‰²ä¸»é¢˜ï¼šdarkBackground/darkSurface/darkTextPrimary/darkTextSecondary
+}
+
+// lib/core/theme/app_dims.dart
+class AppDims {
+  static const double radiusSmall = 8.0;
+  static const double radiusMedium = 12.0;
+  static const double radiusLarge = 16.0;
+  static const double paddingPage = 20.0;
+  static const double gapCard = 12.0;
+  static const double paddingCard = 16.0;
+  static const double gapItem = 12.0;
+}
+```
+
+### 2.3 ç»„ä»¶ä½¿ç”¨è§„èŒƒ
+
+| åœºæ™¯     | ç»„ä»¶                          |
+| -------- | ----------------------------- |
+| å¡ç‰‡     | `CardContainer`ï¼ˆä¼˜å…ˆï¼‰/ `HuaweiCard`ï¼ˆé¢„ç•™ï¼‰ |
+| çŠ¶æ€å¾½ç«  | `StatusBadge`ï¼ˆæ”¯æŒ factory + fromStatusï¼‰ |
+| åˆ—è¡¨é¡¹   | `ListTileBase`                |
+| æŒ‰é’®ç»„   | `ActionButtonGroup`           |
+| åœ†ç¯è¿›åº¦ | `CircleProgress`              |
+| ç©ºçŠ¶æ€   | `EmptyState`                  |
+| åŠ è½½     | `LoadingIndicator`            |
+| å¯¼èˆªæ    | `CustomAppBar`                |
+
+### 2.4 çŠ¶æ€å¾½ç« è‰²
+
+| çŠ¶æ€     | é¢œè‰² | è¯´æ˜     |
+| -------- | ---- | -------- |
+| free     | ç»¿è‰² | ç©ºé—²è½¦ä½ |
+| occupied | æ©™è‰² | å·²å ç”¨   |
+| zombie   | çº¢è‰² | åƒµå°¸è½¦   |
+| offline  | ç°è‰² | è®¾å¤‡ç¦»çº¿ |
+| pending  | é»„è‰² | å¾…å¤„ç†   |
+| resolved | ç»¿è‰² | å·²å¤„ç½®   |
+
+### 2.5 ç¦æ­¢äº‹é¡¹
+
+- ä¸è¦ç”¨ Material 2 é»˜è®¤æ·±ç´«ç²‰ä¸»é¢˜
+- ä¸è¦ç”¨å°–é”ç›´è§’æŒ‰é’®
+- ä¸è¦å †ç ŒåŠŸèƒ½å…¥å£
+- ä¸è¦ç”¨åˆºçœ¼çš„çº¯ç™½èƒŒæ™¯
+- ä¸è¦ç¡¬ç¼–ç é¢œè‰²å€¼ / å°ºå¯¸å€¼ï¼ˆç»Ÿä¸€ `AppColors` / `AppDims`ï¼‰
+- åˆ†å‰²çº¿ç”¨ `0.5dp + 35% é€æ˜åº¦`ï¼Œä¸è¦ç”¨å®çº¿æ·±è‰² Divider
+
+### 2.6 ä¾èµ–åº“
+
+`fl_chart`ï¼ˆç¯å½¢/æŠ˜çº¿å›¾ï¼‰ã€`flutter_slidable`ï¼ˆæ»‘åŠ¨æ“ä½œï¼‰ã€`flutter_spinkit`ï¼ˆåŠ è½½åŠ¨ç”»ï¼‰ã€`crypto`ï¼ˆHMAC-MD5 ç­¾åï¼‰ç­‰ï¼Œè§ 1.2 æŠ€æœ¯æ ˆè¡¨ã€‚
+
+### 2.7 AI æŒ‡ä»¤æ¨¡æ¿ï¼ˆå¯ç›´æ¥å¤åˆ¶ï¼‰
+
+```
+è¯·åŸºäºç°æœ‰çš„Flutteré¡¹ç›®ä»£ç ï¼Œä¿®æ”¹/åˆ›å»º [é¡µé¢åç§°] é¡µé¢ã€‚
+å¿…é¡»ä¸¥æ ¼éµå®ˆä»¥ä¸‹è§„åˆ™ï¼š
+1. ç»„ä»¶å¤ç”¨ï¼šæ‰€æœ‰å¡ç‰‡å¿…é¡»ä½¿ç”¨ CardContainerï¼Œæ‰€æœ‰çŠ¶æ€æ ‡ç­¾å¿…é¡»ä½¿ç”¨ StatusBadgeï¼Œ
+   æ‰€æœ‰åˆ—è¡¨é¡¹å¿…é¡»ä½¿ç”¨ ListTileBaseï¼Œæ‰€æœ‰å¤šæŒ‰é’®æ“ä½œå¿…é¡»ä½¿ç”¨ ActionButtonGroupã€‚
+   ç¦æ­¢åˆ›å»ºæ–°çš„æ ·å¼ç»„ä»¶ã€‚
+2. æ ·å¼é”å®šï¼šé¢œè‰²å¿…é¡»ä½¿ç”¨ AppColors ç±»ä¸­çš„å®šä¹‰ï¼Œé—´è·å¿…é¡»ä½¿ç”¨ AppDims ç±»ä¸­çš„å®šä¹‰ã€‚
+   ä¸¥ç¦ç¡¬ç¼–ç é¢œè‰²å€¼æˆ–å°ºå¯¸ã€‚
+3. è®¾è®¡è¯­è¨€ï¼šæ•´ä½“é£æ ¼å‚è€ƒåä¸ºæ™ºæ…§ç”Ÿæ´»Appï¼Œå¤§æ ‡é¢˜é£æ ¼ï¼ˆ28sp w700ï¼‰ï¼Œ
+   å¡ç‰‡åœ†è§’ç»Ÿä¸€ä¸º radiusLarge (16dp)ï¼Œå¡ç‰‡é˜´å½±å¿…é¡»ä¸¥æ ¼ä½¿ç”¨
+   blurRadius: 12, offset: Offset(0, 2), opacity: 0.08ã€‚
+4. æ•°æ®æ¥æºï¼šæ‰€æœ‰é¡µé¢å¿…é¡»ä» ParkingProvider è¯»å–æ•°æ®ï¼Œç¦æ­¢ç›´æ¥è°ƒç”¨ ApiServiceã€‚
+5. çŠ¶æ€å¤„ç†ï¼šæ•°æ®åŠ è½½æ—¶æ˜¾ç¤º LoadingIndicatorï¼Œæ— æ•°æ®æ—¶æ˜¾ç¤º EmptyStateã€‚
+6. å¯¼èˆªè§„èŒƒï¼šäºŒçº§é¡µï¼ˆè¯¦æƒ…é¡µ/å›ºä»¶å‡çº§é¡µï¼‰ä½¿ç”¨ CustomAppBar è“è‰²æ¸å˜å¯¼èˆªæ ï¼Œ
+   ä¸»é¡µä½¿ç”¨å¤§æ ‡é¢˜é£æ ¼ï¼ˆText 28sp w700 + å›¾æ ‡ï¼‰ã€‚
+7. ç¦æ­¢è¡Œä¸ºï¼šä¸è¦ä½¿ç”¨ Material 2 çš„é»˜è®¤æ ·å¼ï¼Œä¸è¦ä½¿ç”¨å°–é”ç›´è§’ï¼Œä¸è¦å †ç ŒåŠŸèƒ½å…¥å£ï¼Œ
+   èƒŒæ™¯è‰²å¿…é¡»ä¸º AppColors.backgroundã€‚
+å½“å‰ä»»åŠ¡ï¼š[åœ¨æ­¤å¤„æè¿°ä½ è¦AIåšçš„å…·ä½“äº‹æƒ…]
+```
+
+---
+
+## ä¸‰ã€å·¥ç¨‹æ„å»ºé…ç½®
+
+### 3.1 Gradle / AGP / Kotlin ç‰ˆæœ¬
+
+| é…ç½®é¡¹ | å€¼        | è¯´æ˜                 |
+| ------ | --------- | -------------------- |
+| Gradle | 9.4.1-bin | ä¸ AGP 8.x å…¼å®¹      |
+| AGP    | 8.11.1    | Flutter 3.47 æœ€ä½è¦æ±‚ |
+| Kotlin | 2.3.0     | ç¨³å®šç‰ˆ               |
+
+### 3.2 settings.gradle.kts å…³é”®é…ç½®
 
 ```kotlin
 dependencyResolutionManagement {
-    repositoriesMode.set(RepositoriesMode.PREFER_SETTINGS)  // ¹Ø¼ü£ºÔÊĞí²å¼şÌí¼Ó²Ö¿â
+    repositoriesMode.set(RepositoriesMode.PREFER_SETTINGS)  // å…³é”®ï¼šå…è®¸æ’ä»¶æ·»åŠ ä»“åº“
     repositories {
-        maven { url = uri("https://storage.flutter-io.cn/download.flutter.io") }  // Flutter ÒıÇæÖĞ¹ú¾µÏñ
-        maven { url = uri("https://storage.googleapis.com/download.flutter.io") }  // Flutter ÒıÇæ¹Ù·½
+        maven { url = uri("https://storage.flutter-io.cn/download.flutter.io") }  // Flutter å¼•æ“ä¸­å›½é•œåƒ
+        maven { url = uri("https://storage.googleapis.com/download.flutter.io") }  // Flutter å¼•æ“å®˜æ–¹
         maven { url = uri("https://mirrors.cloud.tencent.com/nexus/repository/maven-public/") }
         maven { url = uri("https://maven.aliyun.com/repository/google") }
         maven { url = uri("https://maven.aliyun.com/repository/public") }
@@ -106,61 +211,39 @@ plugins {
 }
 ```
 
-### 2.3 gradle.properties ¹Ø¼üÅäÖÃ
+### 3.3 gradle.properties å…³é”®é…ç½®
 
 ```properties
 org.gradle.jvmargs=-Xmx8G -XX:MaxMetaspaceSize=4G -XX:ReservedCodeCacheSize=512m -XX:+HeapDumpOnOutOfMemoryError
 android.useAndroidX=true
-android.newDsl=false              # ¹Ø¼ü£ºAGP 8.x ±ØĞëÎª false£¬·ñÔò Flutter plugin ÀàĞÍ×ª»»´íÎó
+android.newDsl=false              # å…³é”®ï¼šAGP 8.x å¿…é¡»ä¸º falseï¼Œå¦åˆ™ Flutter plugin ç±»å‹è½¬æ¢é”™è¯¯
 android.builtInKotlin=false
 org.gradle.internal.http.connectionTimeout=30000
 org.gradle.internal.http.socketTimeout=30000
 org.gradle.internal.http.connectionRetries=2
 org.gradle.caching=true
-android.overridePathCheck=true    # ¹Ø¼ü£ºWindows ÖĞÎÄÂ·¾¶±ØĞë¿ªÆô
+android.overridePathCheck=true    # å…³é”®ï¼šWindows ä¸­æ–‡è·¯å¾„å¿…é¡»å¼€å¯
 ```
 
-### 2.4 ¹¹½¨ÒªµãËµÃ÷
+### 3.4 æ„å»ºè¦ç‚¹
 
-1. **PREFER_SETTINGS ¶ø·Ç FAIL_ON_PROJECT_REPOS**
+1. **PREFER_SETTINGS è€Œé FAIL_ON_PROJECT_REPOS**ï¼šFlutter æ’ä»¶ä¼šæ·»åŠ è‡ªå·±çš„ä»“åº“ï¼ŒFAIL_ON_PROJECT_REPOS ä¼šå¯¼è‡´æ„å»ºå¤±è´¥ã€‚
+2. **newDsl=false**ï¼šAGP 9+ æ‰å®Œå…¨æ”¯æŒ newDslï¼ŒAGP 8.x ä¸‹å¼€å¯ä¼šå¯¼è‡´ Flutter Gradle Plugin ç±»å‹è½¬æ¢é”™è¯¯ï¼ˆ`ApplicationExtensionImpl$AgpDecorated_Decorated cannot be cast to AbstractAppExtension`ï¼‰ã€‚
+3. **Flutter å¼•æ“ä»“åº“å¿…é¡»é…ç½®**ï¼š`flutter_embedding_debug` ç­‰ artifact ä¸åœ¨æ™®é€š Maven ä»“åº“ï¼Œå¿…é¡»åŠ  `storage.flutter-io.cn/download.flutter.io` æˆ– `storage.googleapis.com/download.flutter.io`ã€‚
+4. **overridePathCheck=true**ï¼šWindows ä¸‹é¡¹ç›®è·¯å¾„åŒ…å«ä¸­æ–‡å­—ç¬¦æ—¶å¿…é¡»å¼€å¯ã€‚
+5. **ä¸­å›½é•œåƒ**ï¼šé˜¿é‡Œäº‘ `maven.aliyun.com`ã€è…¾è®¯äº‘ `mirrors.cloud.tencent.com`ã€Flutter ä¸­å›½ `storage.flutter-io.cn`ã€‚
 
-   - Flutter ²å¼ş»áÌí¼Ó×Ô¼ºµÄ²Ö¿â£¬FAIL_ON_PROJECT_REPOS »áµ¼ÖÂ¹¹½¨Ê§°Ü
-   - ¸ÄÓÃ PREFER_SETTINGS ºó£¬ÒÔ settings ÖĞÅäÖÃµÄ²Ö¿âÎªÖ÷
-2. **newDsl=false µÄÔ­Òò**
+### 3.5 å¸¸è§æ„å»ºé—®é¢˜ä¸è§£å†³
 
-   - AGP 9+ ²ÅÍêÈ«Ö§³Ö newDsl£¬AGP 8.x ÏÂ¿ªÆô»áµ¼ÖÂ Flutter Gradle Plugin ÀàĞÍ×ª»»´íÎó
-   - ´íÎóĞÅÏ¢£º`ApplicationExtensionImpl$AgpDecorated_Decorated cannot be cast to AbstractAppExtension`
-3. **Flutter ÒıÇæ²Ö¿â±ØĞëÅäÖÃ**
+| é—®é¢˜ | è§£å†³æ–¹æ¡ˆ |
+| ---- | -------- |
+| `The non-ASCII space character U+FEFF can only be used in strings and comments.`ï¼ˆBOM å¤´æ··å…¥ Dart æ–‡ä»¶ï¼‰ | ç”¨ PowerShell æ‰¹é‡ç§»é™¤ BOMï¼ˆè§ä¸‹ï¼‰ |
+| Gradle æ’ä»¶ä¸‹è½½è¶…æ—¶/å¤±è´¥ | é…ç½®ä¸­å›½é•œåƒï¼ˆè§ 3.2ï¼‰ |
+| `AGP version is lower than Flutter's minimum supported version of 8.11.1` | AGP å‡çº§åˆ° 8.11.1 |
+| `Could not find io.flutter:flutter_embedding_debug:1.0.0-xxx` | æ·»åŠ  Flutter å¼•æ“ä»“åº“ |
+| `Your project path contains non-ASCII characters` | `gradle.properties` åŠ  `android.overridePathCheck=true` |
 
-   - `flutter_embedding_debug` µÈ artifact ²»ÔÚÆÕÍ¨ Maven ²Ö¿â
-   - ±ØĞëÌí¼Ó `storage.flutter-io.cn/download.flutter.io` »ò `storage.googleapis.com/download.flutter.io`
-4. **overridePathCheck=true**
-
-   - Windows ÏÂÏîÄ¿Â·¾¶°üº¬ÖĞÎÄ×Ö·ûÊ±±ØĞë¿ªÆô
-   - ±¾ÏîÄ¿Â·¾¶£º`ÎÒµÄ/ÖÇÄÜÍ£³µ³¡`
-5. **ÖĞ¹ú¾µÏñÅäÖÃ**
-
-   - °¢ÀïÔÆ£º`maven.aliyun.com`
-   - ÌÚÑ¶ÔÆ£º`mirrors.cloud.tencent.com`
-   - Flutter ÖĞ¹ú£º`storage.flutter-io.cn`
-
----
-
-## Èı¡¢¹¹½¨ÎÊÌâÓë½â¾ö·½°¸
-
-### 3.1 BOM ±àÂëÎÊÌâ
-
-**ÎÊÌâÃèÊö**£º
-
-```
-Error: The non-ASCII space character U+FEFF can only be used in strings and comments.
-import 'package:flutter/material.dart';
-^
-```
-
-**Ô­Òò**£ºÊ¹ÓÃ Write ¹¤¾ß±£´æ Dart ÎÄ¼şÊ±´øÈëÁË UTF-8 BOM Í·¡£
-
-**½â¾ö·½°¸**£¨PowerShell£©£º
+BOM ç§»é™¤è„šæœ¬ï¼š
 
 ```powershell
 Get-ChildItem -Path "lib" -Recurse -Filter "*.dart" | ForEach-Object {
@@ -173,384 +256,240 @@ Get-ChildItem -Path "lib" -Recurse -Filter "*.dart" | ForEach-Object {
 }
 ```
 
-### 3.2 Gradle ²å¼şÏÂÔØ³¬Ê±
+### 3.6 å¸¸ç”¨å‘½ä»¤
 
-**ÎÊÌâ**£º¹úÄÚÏÂÔØ Gradle ²å¼ş¼«Âı»òÊ§°Ü¡£
-
-**½â¾ö·½°¸**£ºÅäÖÃÖĞ¹ú¾µÏñ£¨¼û 2.2 ½Ú£©¡£
-
-### 3.3 AGP °æ±¾²»¼æÈİ
-
-**ÎÊÌâÃèÊö**£º
-
-```
-AGP version is lower than Flutter's minimum supported version of 8.11.1
+```bash
+flutter pub get              # è·å–ä¾èµ–
+flutter clean                # æ¸…ç†æ„å»º
+flutter run -d <è®¾å¤‡ID>      # è¿è¡Œï¼ˆdebugï¼‰
+flutter devices              # æŸ¥çœ‹è®¾å¤‡åˆ—è¡¨
+flutter build apk --release  # æ„å»º release APK
+flutter pub outdated         # æ£€æŸ¥ä¾èµ–æ›´æ–°
 ```
 
-**½â¾ö·½°¸**£ºAGP Éı¼¶µ½ 8.11.1£¨settings.gradle.kts ÖĞÅäÖÃ£©¡£
+### 3.7 æ³¨æ„äº‹é¡¹
 
-### 3.4 Flutter ÒıÇæ artifact ÕÒ²»µ½
-
-**ÎÊÌâÃèÊö**£º
-
-```
-Could not find io.flutter:flutter_embedding_debug:1.0.0-xxx
-```
-
-**½â¾ö·½°¸**£ºÌí¼Ó Flutter ÒıÇæ²Ö¿â `storage.flutter-io.cn/download.flutter.io`¡£
-
-### 3.5 ÖĞÎÄÂ·¾¶ÎÊÌâ
-
-**ÎÊÌâÃèÊö**£º
-
-```
-Your project path contains non-ASCII characters
-```
-
-**½â¾ö·½°¸**£º`gradle.properties` Ìí¼Ó `android.overridePathCheck=true`¡£
+1. **ä¸è¦ç”¨ PowerShell å†™ Dart æ–‡ä»¶** â€” ä½¿ç”¨ Write å·¥å…·ï¼Œé¿å… BOM é—®é¢˜ã€‚
+2. **Windows ä¸­æ–‡è·¯å¾„** â€” ç¡®ä¿ `android.overridePathCheck=true`ã€‚
+3. **ä¸­å›½ç½‘ç»œç¯å¢ƒ** â€” ç¡®ä¿é•œåƒé…ç½®æ­£ç¡®ã€‚
+4. **Gradle ç‰ˆæœ¬** â€” ä½¿ç”¨ 9.4.1-binï¼ˆå·²ç¼“å­˜ï¼‰ã€‚
+5. **çƒ­é‡è½½** â€” ä¿®æ”¹ `main.dart` ä¸»é¢˜ / é™æ€å¸¸é‡ / æ–°å¢åˆ é™¤æ–‡ä»¶æ—¶çƒ­é‡è½½ä¸ç”Ÿæ•ˆï¼Œéœ€æŒ‰ `R` å®Œå…¨é‡å¯ã€‚
 
 ---
 
-## ËÄ¡¢¿ª·¢Á÷³Ì
+## å››ã€å½“å‰æ¶æ„å®ç°
 
-### ½×¶Î 1£ºÏîÄ¿³õÊ¼»¯£¨0.5 Ìì£©¡¤ ÒÑÍê³É
+### 4.1 å¯¼èˆªç»“æ„ï¼ˆ5 Tabï¼‰
 
-| ²½Öè | ÈÎÎñ                 | ×´Ì¬ | Êä³öÎÄ¼ş     |
-| ---- | -------------------- | ---- | ------------ |
-| 1.1  | ´´½¨ Flutter ÏîÄ¿    | ?    | ÏîÄ¿¸ùÄ¿Â¼   |
-| 1.2  | ÅäÖÃ pubspec.yaml    | ?    | pubspec.yaml |
-| 1.3  | ½¨Á¢Ä¿Â¼½á¹¹         | ?    | lib/         |
-| 1.4  | ÅäÖÃ Material 3 Ö÷Ìâ | ?    | main.dart    |
+```
+MaterialAppï¼ˆChangeNotifierProvider<ParkingProvider>ï¼Œroutes: {'/alerts': AlertsPage}ï¼‰
+â””â”€â”€ MainShellï¼ˆScaffold + è‡ªå®šä¹‰åº•éƒ¨å¯¼èˆªï¼‰
+    â”œâ”€â”€ [0] é¦–é¡µ OverviewPage
+    â”œâ”€â”€ [1] è½¦ä½ SpotsPage â”€â”€pushâ”€â”€> SpotDetailPageï¼ˆè½¦ä½è¯¦æƒ…ï¼‰
+    â”œâ”€â”€ [2] å‘Šè­¦ AlertsPageï¼ˆå‘Šè­¦ä¸­å¿ƒï¼‰
+    â”œâ”€â”€ [3] æ•°æ® StatsPageï¼ˆæ•°æ®å¤ç›˜ï¼‰
+    â””â”€â”€ [4] æˆ‘çš„ ProfilePage â”€â”€> FirmwareUpgradePageï¼ˆå›ºä»¶å‡çº§ï¼‰
+    å…¨å±€ï¼šOTA å‡çº§å¼¹çª—ï¼ˆOtaUpgradeDialogï¼ŒMainShell ç»Ÿä¸€è§¦å‘ï¼‰
+```
 
-### ½×¶Î 2£ººËĞÄÄ£¿é¿ª·¢£¨1 Ìì£©¡¤ ÒÑÍê³É
+### 4.2 å…¨å±€çŠ¶æ€ ParkingProvider
 
-| ²½Öè | ÈÎÎñ            | ×´Ì¬ | Êä³öÎÄ¼ş             |
-| ---- | --------------- | ---- | -------------------- |
-| 2.1  | ÊµÏÖ AppColors  | ?    | `app_colors.dart`  |
-| 2.2  | ÊµÏÖ AppDims    | ?    | `app_dims.dart`    |
-| 2.3  | ÊµÏÖ SpotModel  | ?    | `spot_model.dart`  |
-| 2.4  | ÊµÏÖ AlertModel | ?    | `alert_model.dart` |
-| 2.5  | ÊµÏÖ StatsModel | ?    | `stats_model.dart` |
-| 2.6  | ÊµÏÖ ApiService | ?    | `api_service.dart` |
+`lib/core/providers/parking_provider.dart` â€” **å”¯ä¸€çš„å…¨å±€æ•°æ®å±‚**ï¼Œæ‰€æœ‰é¡µé¢ä»å®ƒè¯»å–ï¼Œç¦æ­¢ç›´æ¥è°ƒ ApiServiceã€‚
 
-### ½×¶Î 3£º¹«¹²×é¼ş¿ª·¢£¨1 Ìì£©¡¤ ÒÑÍê³É
+- å”¯ä¸€æŒæœ‰è½¦ä½æ•°æ® `spots` + **å”¯ä¸€ 3s è½®è¯¢å®šæ—¶å™¨**
+- **çœŸå®/æœ¬åœ°æ¨¡å¼**ï¼ˆ`realOnly`ï¼ŒSharedPreferences æŒä¹…åŒ–ï¼‰ï¼šæœ¬åœ°æ¨¡å¼ = çœŸå®è®¾å¤‡ + mock è¡¥é½ 9 å°ï¼›çœŸå®æ¨¡å¼ = ä»…çœŸå®è®¾å¤‡ã€‚è½¦ä½é¡µç‚¹ã€Œè½¦ä½ã€æ ‡é¢˜åˆ‡æ¢
+- **å‘Šè­¦æ´¾ç”Ÿ**ï¼šä»è½¦ä½æ•°æ®æ´¾ç”Ÿï¼ˆå ç”¨ â‰¥24h å‘Šè­¦ã€â‰¥72h åƒµå°¸è½¦ï¼‰ï¼Œç»´æŠ¤å¤„ç†/å¿½ç•¥çŠ¶æ€
+- **å¤„ç†è®°å½•ç®¡ç†**ï¼šåƒµå°¸è½¦ç¦»å¼€è½¦ä½è‡ªåŠ¨æ ‡è®°ã€Œå·²å¤„ç†ã€ï¼ˆå¿«ç…§è½¦ç‰Œ+å¤„ç†æ—¶é—´ï¼‰ï¼›æ–°è½¦è¿›å…¥ç©ºä½æ¸…é™¤æ—§å¤„ç†è®°å½•ï¼›å·²å¤„ç†/å·²å¿½ç•¥ä¸å‚ä¸é¦–é¡µæ¨é€ä½†ä¿ç•™å†å²
+- **æ‰¹é‡é€‰ä¸­é›†åˆ**ï¼ˆè·¨é¡µåŒæ­¥ï¼‰
+- **OTA æ£€æµ‹**ï¼šçŸ­çª—å£ç­–ç•¥ï¼ˆå¯åŠ¨/å‰å° 1 æ¬¡ + 5sÃ—9 å…± 10 æ¬¡åè‡ªåŠ¨åœæ­¢ï¼‰ï¼Œæ£€æµ‹åˆ°å¾…å‡çº§ä»»åŠ¡ï¼ˆæœªå¿½ç•¥ï¼‰æ—¶ç½® `otaPromptVisible`
+- ä¸€å‘¨è¶‹åŠ¿ä¸ºæ¼”ç¤ºç”¨é™æ€æ•°æ®ï¼ˆå›¾è¡¨å ä½ï¼Œéå¹³å°çœŸå®ç»Ÿè®¡ï¼‰
 
-| ²½Öè | ÈÎÎñ                   | ×´Ì¬ | Êä³öÎÄ¼ş                     |
-| ---- | ---------------------- | ---- | ---------------------------- |
-| 3.1  | ÊµÏÖ CustomAppBar      | ?    | `custom_app_bar.dart`      |
-| 3.2  | ÊµÏÖ CardContainer     | ?    | `card_container.dart`      |
-| 3.3  | ÊµÏÖ ListTileBase      | ?    | `list_tile_base.dart`      |
-| 3.4  | ÊµÏÖ ActionButtonGroup | ?    | `action_button_group.dart` |
-| 3.5  | ÊµÏÖ StatCard          | ?    | `stat_card.dart`           |
-| 3.6  | ÊµÏÖ StatusBadge       | ?    | `status_badge.dart`        |
-| 3.7  | ÊµÏÖ CircleProgress    | ?    | `circle_progress.dart`     |
-| 3.8  | ÊµÏÖ EmptyState        | ?    | `empty_state.dart`         |
-| 3.9  | ÊµÏÖ LoadingIndicator  | ?    | `loading_indicator.dart`   |
+### 4.3 é¡µé¢è¦ç‚¹
 
-### ½×¶Î 4£ºÒ³Ãæ¿ª·¢£¨2.5 Ìì£©¡¤ ÒÑÍê³É
+| é¡µé¢ | è¦ç‚¹ |
+| ---- | ---- |
+| æ€»è§ˆ OverviewPage | é—®å€™å¡ã€è½¦ä½æ¦‚è§ˆå››æ ¼ã€é¥¼å›¾ï¼ˆç©ºé—²/å ç”¨/åƒµå°¸ï¼‰ã€æœ€æ–°åƒµå°¸è½¦å‘Šè­¦å¡ã€ä¸‹æ‹‰åˆ·æ–° |
+| è½¦ä½ SpotsPage | A/B åŒºç­›é€‰ï¼ˆä¸æ˜¾ç¤º C åŒºï¼‰ã€éšè—æ¨¡å¼å¼€å…³ï¼ˆç‚¹ã€Œè½¦ä½ã€æ ‡é¢˜ï¼‰ã€ç¦»çº¿è®¾å¤‡ç°æ˜¾+äº‘å›¾æ ‡+éšè—3ç‚¹èœå•ã€3ç‚¹èœå•ä»…åƒµå°¸è½¦ï¼ˆæŸ¥çœ‹è¯¦æƒ…ï¼‰ã€ç‚¹å‡»è¿›è¯¦æƒ… |
+| è½¦ä½è¯¦æƒ… SpotDetailPage | å‚ç›´åˆ†åŒºï¼šè½¦ä½ä¿¡æ¯ â†’ è½¦è¾†ä¿¡æ¯ â†’ è®¾å¤‡ä¿¡æ¯ â†’ å‘Šè­¦è¯¦æƒ… â†’ å¤„ç†æ“ä½œåŒºï¼›å¤„ç†æ“ä½œåŒºä»…åƒµå°¸è½¦æ˜¾ç¤ºï¼Œå«[é€šçŸ¥è½¦ä¸»][æ´¾å•â†’å¤„ç†äººé€‰æ‹© Dialog] |
+| å‘Šè­¦ AlertsPage | çŠ¶æ€ç­›é€‰ï¼ˆå…¨éƒ¨/å¾…å¤„ç†/å¤„ç†ä¸­/å·²å¤„ç†/å·²å¿½ç•¥ï¼‰ã€å‘Šè­¦å¡ç‰‡ã€åˆ é™¤+å¤„ç†æŒ‰é’®ã€ç©ºçŠ¶æ€/åŠ è½½/ä¸‹æ‹‰åˆ·æ–° |
+| æ•°æ® StatsPage | é¡¶éƒ¨æ¦‚è§ˆåŒå¡ã€è½¦ä½å ç”¨é¥¼å›¾ã€ä¸€å‘¨è¶‹åŠ¿æŠ˜çº¿å›¾ï¼ˆmockï¼‰ã€å‘Šè­¦æ€»æ•°å¡ |
+| æˆ‘çš„ ProfilePage | ç”¨æˆ·å¡ã€å¿«æ·æ“ä½œã€åŠŸèƒ½åˆ†ç»„ï¼ˆç³»ç»Ÿ/è¿ç»´/è´¦æˆ·ï¼‰ï¼›å›ºä»¶å‡çº§å…¥å£ â†’ FirmwareUpgradePage |
 
-| ²½Öè | ÈÎÎñ                          | ÓÅÏÈ¼¶ | ×´Ì¬ | Êä³öÎÄ¼ş                  |
-| ---- | ----------------------------- | ------ | ---- | ------------------------- |
-| 4.1  | ÊµÏÖµ×²¿µ¼º½À¸                | P0     | ?    | main.dart                 |
-| 4.2  | ÊµÏÖ×ÜÀÀÒ³ OverviewPage       | P0     | ?    | `overview_page.dart`    |
-| 4.3  | ÊµÏÖ³µÎ»ÏêÇéÒ³ SpotDetailPage | P1     | ?    | `spot_detail_page.dart` |
-| 4.4  | ÊµÏÖÔ¤¾¯Ò³ AlertsPage         | P1     | ?    | `alerts_page.dart`      |
-| 4.5  | ÊµÏÖÊı¾İ·ÖÎöÒ³ StatsPage      | P2     | ?    | `stats_page.dart`       |
-| 4.6  | ÊµÏÖÎÒµÄÒ³ ProfilePage        | P2     | ?    | `profile_page.dart`     |
-| 4.7  | ÊµÏÖ³µÎ»Ò³ SpotsPage          | P1     | ?    | `spots_page.dart`       |
+### 4.4 æ•°æ®æ¨¡å‹
 
-### ½×¶Î 5£ºÊı¾İÁªµ÷Óë²âÊÔ£¨1.5 Ìì£©¡¤ ½øĞĞÖĞ
+**SpotModel**ï¼ˆè½¦ä½/èŠ‚ç‚¹è®¾å¤‡ï¼‰
+- å­—æ®µï¼š`id / zone(A/B/C) / status(free|occupied|zombie|offline) / occupiedHours / batteryLevel / signalStrength / plateNumber / lastUpdated / isOnline` + æœ¬åœ°æ¨¡æ‹Ÿå­—æ®µï¼ˆnotifyStatus/handlerName/handledAtï¼‰
+- åˆ†åŒºæ˜ å°„ï¼šè®¾å¤‡ç¼–å· â‰¤3=AåŒºï¼Œâ‰¤6=BåŒºï¼Œå…¶ä½™=CåŒº
+- çŠ¶æ€åˆ¤å®šï¼šç¦»çº¿ â†’ `offline`ï¼›`ParkStatus=1` â†’ occupiedï¼›`ParkStatus=2` â†’ zombieï¼›å¦åˆ™ free
+- âš ï¸ `batteryLevel / signalStrength` ä»ä¸ºç¡¬ç¼–ç ï¼ˆåœ¨çº¿ 85.0/-65ï¼Œç¦»çº¿ 0ï¼‰ï¼Œè§å¾…åŠ
 
-| ²½Öè | ÈÎÎñ         | ×´Ì¬ | ËµÃ÷                      |
-| ---- | ------------ | ---- | ------------------------- |
-| 5.1  | Ä£ÄâÊı¾İÑéÖ¤ | ?    | Ê¹ÓÃ Mock Êı¾İÑéÖ¤ UI     |
-| 5.2  | API ½Ó¿Ú¶Ô½Ó | ?    | ´ıºó¶Ë¾ÍĞ÷                |
-| 5.3  | ×´Ì¬¹ÜÀíÍêÉÆ | ?    | ÒÑÊµÏÖ¼ÓÔØ/´íÎó/¿Õ×´Ì¬    |
-| 5.4  | Ò³ÃæÂ·ÓÉµ¼º½ | ?    | ³µÎ»ÏêÇéÒ³Ìø×ª            |
-| 5.5  | ĞÔÄÜÓÅ»¯     | ?    | ÁĞ±íÊ¹ÓÃ ListView.builder |
-| 5.6  | UI Ï¸½Ú´òÄ¥  | ?    | »ªÎª·ç¸ñÍ³Ò»              |
+**AlertModel**ï¼ˆå‘Šè­¦/å·¥å•ï¼‰
+- å­—æ®µï¼š`id / plateNumber / spotId / occupiedHours / status(pending|dispatched|resolved) / imageUrl? / createdAt?`
+- ç”± `ParkingProvider` ä»è½¦ä½æ•°æ®æœ¬åœ°åˆæˆï¼Œéç‹¬ç«‹åç«¯æ¥å£
 
-### ½×¶Î 6£º´ò°ü·¢²¼£¨1 Ìì£©¡¤ ´ı¿ªÊ¼
+**StatsModel**ï¼ˆç»Ÿè®¡ï¼‰
+- å­—æ®µï¼š`totalSpots / occupiedSpots / zombieSpots / occupancyRate / weeklyTrend(List<DailyTrend>)`
+- `weeklyTrend` ä¸ºæ¼”ç¤ºé™æ€æ•°æ®ï¼ˆ7 å¤© mockï¼‰ï¼Œéå¹³å°çœŸå®ç»Ÿè®¡
 
-| ²½Öè | ÈÎÎñ         | ×´Ì¬ | ËµÃ÷          |
-| ---- | ------------ | ---- | ------------- |
-| 6.1  | Android Ç©Ãû | ?    | ´´½¨ keystore |
-| 6.2  | APK/AAB ´ò°ü | ?    | release ¹¹½¨  |
-| 6.3  | °æ±¾ºÅ¹ÜÀí   | ?    | ÅäÖÃ version  |
-| 6.4  | Ó¦ÓÃÉÌµê·¢²¼ | ?    | ¸÷Æ½Ì¨ÉÏ¼Ü    |
+### 4.5 API æœåŠ¡ï¼ˆOneNET å¯¹æ¥å±‚ï¼‰
+
+`lib/core/services/api_service.dart`
+
+| æ–¹æ³• | å®ç° |
+| ---- | ---- |
+| `getSpots({realOnly})` | `/device/list`ï¼ˆèŠ‚ç‚¹äº§å“ `04kjwU9TC7`ï¼Œç½‘å…³äº§å“ä¸çº³å…¥è½¦ä½ï¼‰â†’ `/thingmodel/query-device-property` é€ä¸ªæŸ¥å±æ€§ â†’ æ’åº/å»é‡ â†’ æŒ‰æ¨¡å¼è¡¥ mock æˆ–ä»…çœŸå® |
+| `_generateAuthorization()` | âœ… å·²æ­£ç¡®å®ç°ï¼š`StringToSign = et\nmethod\nres\nversion`ï¼Œ`res=userid/528332`ï¼ˆæœ«å°¾æ— æ–œæ ã€æ— å°¾æ¢è¡Œï¼‰ï¼ŒHMAC-MD5 + base64ï¼Œå®Œæ•´æ‹¼è¿› Authorization å¤´ |
+| `getDeviceDetail()` | è®¾å¤‡è¯¦æƒ…æŸ¥è¯¢ï¼Œå¤±è´¥èµ° mock |
+| `setProperty()` | `/thingmodel/set-device-property` ä¸‹å‘ï¼ˆå¦‚ OtaAllow/LEDï¼‰ |
+| `getAlerts()` | ç”± getSpots æœ¬åœ°åˆæˆï¼ˆâ‰¥24h å‘Šè­¦ï¼‰ |
+| `dispatchAlert/notifyOwner/resolveAlert` | æœ¬åœ°åŠ¨ä½œï¼ˆå†…å­˜æ€ï¼‰ï¼Œæ— åç«¯æŒä¹…åŒ– |
+| `getStats()` | åŠåˆæˆï¼šç»Ÿè®¡æ¥è‡ª getSpotsï¼ŒweeklyTrend ä¸º mock |
+| `getOtaTaskStatus()` | `/fuse-ota/{pro_id}/{dev_name}/{tid}/check` è½®è¯¢å‡çº§çŠ¶æ€ |
+
+ç½‘å…³ï¼šäº§å“ `9YIs0S7V11`ï¼Œè®¾å¤‡ `PGW001`ï¼ˆæ‰¿è½½ OtaAllow å…¨ç½‘å‡çº§ç¡®è®¤é—¨æ§ï¼‰ã€‚
+è®¾å¤‡åä½¿ç”¨ OneNET `name` å­—æ®µçœŸå®åç§°ï¼›mock ç”¨ `Park001~009` å‘½åã€‚
 
 ---
 
-## Îå¡¢×é¼şÇåµ¥ÓëÒÀÀµ¹ØÏµ
+## äº”ã€OneNET å¹³å°å¯¹æ¥
 
-### 5.1 ×é¼şÇåµ¥
+### 5.1 æœ¬é¡¹ç›®å®é™…ä½¿ç”¨çš„æ¥å£
 
-| ÎÄ¼şÂ·¾¶                                                        | ½×¶Î   | ×´Ì¬ | ËµÃ÷         |
-| --------------------------------------------------------------- | ------ | ---- | ------------ |
-| `lib/core/theme/app_colors.dart`                              | ½×¶Î 2 | ?    | ÑÕÉ«³£Á¿     |
-| `lib/core/theme/app_dims.dart`                                | ½×¶Î 2 | ?    | ³ß´ç³£Á¿     |
-| `lib/core/models/spot_model.dart`                             | ½×¶Î 2 | ?    | ³µÎ»Êı¾İÄ£ĞÍ |
-| `lib/core/models/alert_model.dart`                            | ½×¶Î 2 | ?    | Ô¤¾¯Êı¾İÄ£ĞÍ |
-| `lib/core/models/stats_model.dart`                            | ½×¶Î 2 | ?    | Í³¼ÆÊı¾İÄ£ĞÍ |
-| `lib/core/services/api_service.dart`                          | ½×¶Î 2 | ?    | API ·şÎñ·â×° |
-| `lib/shared/widgets/custom_app_bar.dart`                      | ½×¶Î 3 | ?    | ×Ô¶¨Òåµ¼º½À¸ |
-| `lib/shared/widgets/card_container.dart`                      | ½×¶Î 3 | ?    | ¿¨Æ¬ÈİÆ÷     |
-| `lib/shared/widgets/list_tile_base.dart`                      | ½×¶Î 3 | ?    | ÁĞ±íÏî»ùÀà   |
-| `lib/shared/widgets/action_button_group.dart`                 | ½×¶Î 3 | ?    | ²Ù×÷°´Å¥×é   |
-| `lib/shared/widgets/stat_card.dart`                           | ½×¶Î 3 | ?    | Í³¼Æ¿¨Æ¬     |
-| `lib/shared/widgets/huawei_card.dart`                         | ½×¶Î 3 | ?    | »ªÎª·ç¸ñ¿¨Æ¬ |
-| `lib/shared/widgets/status_badge.dart`                        | ½×¶Î 3 | ?    | ×´Ì¬»ÕÕÂ     |
-| `lib/shared/widgets/circle_progress.dart`                     | ½×¶Î 3 | ?    | Ô²»·½ø¶È     |
-| `lib/shared/widgets/empty_state.dart`                         | ½×¶Î 3 | ?    | ¿Õ×´Ì¬       |
-| `lib/shared/widgets/loading_indicator.dart`                   | ½×¶Î 3 | ?    | ¼ÓÔØÖ¸Ê¾Æ÷   |
-| `lib/features/overview/presentation/pages/overview_page.dart` | ½×¶Î 4 | ?    | ×ÜÀÀÒ³       |
-| `lib/features/spots/presentation/pages/spots_page.dart`       | ½×¶Î 4 | ?    | ³µÎ»ÁĞ±íÒ³   |
-| `lib/features/spots/presentation/pages/spot_detail_page.dart` | ½×¶Î 4 | ?    | ³µÎ»ÏêÇéÒ³   |
-| `lib/features/alerts/presentation/pages/alerts_page.dart`     | ½×¶Î 4 | ?    | Ô¤¾¯Ò³       |
-| `lib/features/stats/presentation/pages/stats_page.dart`       | ½×¶Î 4 | ?    | Êı¾İ·ÖÎöÒ³   |
-| `lib/features/profile/presentation/pages/profile_page.dart`   | ½×¶Î 4 | ?    | ÎÒµÄÒ³       |
-| `lib/main.dart`                                               | ½×¶Î 1 | ?    | Ó¦ÓÃÈë¿Ú     |
+| åˆ†ç±» | URL | ç”¨é€” |
+| ---- | --- | ---- |
+| è®¾å¤‡ç®¡ç† | `/device/list` | è¯»å–å…¨éƒ¨è½¦ä½è®¾å¤‡ï¼ˆå«ç¦»çº¿ï¼‰ |
+| ç‰©æ¨¡å‹ä½¿ç”¨ | `/thingmodel/query-device-property` | è¯»å– ParkStatus/Ultrasonic/OccupiedTime ç­‰å±æ€§ï¼ˆæ”¯æŒç¦»çº¿è®¾å¤‡è¯»å­˜å‚¨æ•°æ®ï¼‰ |
+| ç‰©æ¨¡å‹ä½¿ç”¨ | `/thingmodel/set-device-property` | ä¸‹å‘å±æ€§ï¼ˆLED/LedEnable/OtaAllow ç­‰ï¼‰ |
+| OTA å—å‘ | `/fuse-ota/{pro_id}/{dev_name}/{tid}/check` | æŸ¥è¯¢å‡çº§ä»»åŠ¡çŠ¶æ€ |
+| OTA å—å‘ | `/fuse-ota/{pro_id}/{dev_name}/version` | ä¸ŠæŠ¥/æŸ¥çœ‹èŠ‚ç‚¹å›ºä»¶ç‰ˆæœ¬ |
 
-### 5.2 ÒÀÀµ¹ØÏµ
+> å…¨é‡ OneNET å¹³å°æ¥å£æ¸…å•è§å½’æ¡£æ–‡æ¡£ `User/archive/APPæ¶æ„æ–‡æ¡£_æ—§ç‰ˆ.md`ï¼ˆ4.1 èŠ‚ï¼‰ã€‚
 
+### 5.2 OTA å‡çº§çŠ¶æ€æ¥å£è¯¦è§£
+
+**æ¥å£**ï¼š`GET https://iot-api.heclouds.com/fuse-ota/{pro_id}/{dev_name}/{tid}/check`
+
+**è¯·æ±‚å¤´**ï¼š`Authorization: version=2022-05-01&res=userid%2F{userId}&et=...&method=sha1&sign=...`ï¼ˆç”¨æˆ·çº§ç­¾åï¼‰
+
+**å“åº”**ï¼š
+```json
+{ "code": 0, "msg": "succ", "data": { "status": 1 } }
 ```
-main.dart
-  ©À©¤©¤ overview_page.dart
-  ©À©¤©¤ spots_page.dart
-  ©¦   ©¸©¤©¤ spot_detail_page.dart
-  ©À©¤©¤ alerts_page.dart
-  ©À©¤©¤ stats_page.dart
-  ©¸©¤©¤ profile_page.dart
-       ©¦
-       ©À©¤©¤ [¹²Ïí×é¼ş²ã]
-       ©¦   ©À©¤©¤ custom_app_bar.dart
-       ©¦   ©À©¤©¤ card_container.dart
-       ©¦   ©À©¤©¤ list_tile_base.dart
-       ©¦   ©À©¤©¤ action_button_group.dart
-       ©¦   ©À©¤©¤ stat_card.dart
-       ©¦   ©À©¤©¤ huawei_card.dart
-       ©¦   ©À©¤©¤ status_badge.dart
-       ©¦   ©À©¤©¤ circle_progress.dart
-       ©¦   ©À©¤©¤ empty_state.dart
-       ©¦   ©¸©¤©¤ loading_indicator.dart
-       ©¦
-       ©À©¤©¤ [ºËĞÄ²ã]
-       ©¦   ©À©¤©¤ app_colors.dart
-       ©¦   ©À©¤©¤ app_dims.dart
-       ©¦   ©À©¤©¤ spot_model.dart
-       ©¦   ©À©¤©¤ alert_model.dart
-       ©¦   ©À©¤©¤ stats_model.dart
-       ©¦   ©¸©¤©¤ api_service.dart
-```
+`status`ï¼š1=å¾…å‡çº§ã€2=ä¸‹è½½ä¸­ã€3=å‡çº§ä¸­ã€4=å‡çº§æˆåŠŸã€5=å‡çº§å¤±è´¥ã€6=å‡çº§å–æ¶ˆ
+
+**App å®ç°å¯¹ç…§**ï¼ˆ`getOtaTaskStatus`ï¼‰ï¼š
+- URL ä¸æ–‡æ¡£ä¸€è‡´ï¼›Authorization ä½¿ç”¨ç”¨æˆ·çº§ç­¾å
+- æ­£ç¡®è§£åŒ… `data.status`ï¼Œä¾› ParkingProvider è½®è¯¢é©±åŠ¨å¼¹çª— / å›ºä»¶å‡çº§é¡µçŠ¶æ€æ˜¾ç¤º
+- âš ï¸ å®æµ‹ï¼š`status` åœ¨æ‰§è¡ŒæœŸé—´å¯èƒ½ä¸€ç›´ä¸º 1ï¼ˆå¾…å‡çº§ï¼‰ï¼Œç›´åˆ°ä»»åŠ¡å®Œæˆæ‰å˜ 4ï¼Œä¸è¿”å›å®æ—¶è¿›åº¦ step
 
 ---
 
-## Áù¡¢UI Éè¼Æ¹æ·¶
+## å…­ã€å¼€å‘è¿›åº¦
 
-### 6.1 Éè¼Æ·ç¸ñ
+### 6.1 å·²å®ŒæˆåŠŸèƒ½
 
-- **²Î¿¼**£º»ªÎªÖÇ»ÛÉú»î APP
-- **Ö÷É«µ÷**£º`#007DFF`£¨»ªÎªÀ¶£©
-- **Éè¼ÆÓïÑÔ**£ºMaterial Design 3
-- **¿¨Æ¬Ô²½Ç**£º16dp
-- **°´Å¥Ô²½Ç**£º12dp
+**æ•°æ® & å¹³å°å¯¹æ¥**
+- [x] OneNET ç­¾åé‰´æƒæ­£ç¡®ï¼ˆStringToSign = et\nmethod\nres\nversionï¼Œres æ— å°¾æ–œæ ã€æ— å°¾æ¢è¡Œï¼‰
+- [x] çœŸå®è¯»å–è®¾å¤‡åˆ—è¡¨ + è®¾å¤‡å±æ€§ï¼Œç¦»çº¿è®¾å¤‡è¯»å¹³å°å­˜å‚¨æ•°æ®
+- [x] çœŸå®/æœ¬åœ°æ¨¡å¼åˆ‡æ¢ï¼ˆSharedPreferences æŒä¹…åŒ–ï¼‰ï¼ŒçœŸå®+æ¨¡æ‹Ÿè¡¥é½ 9 å°
+- [x] è®¾å¤‡åç”¨ OneNET çœŸå® `name`ï¼›mock ç”¨ Park001~009
+- [x] ç½‘å…³ï¼ˆPGW001ï¼‰æ‰¿è½½ OtaAllow å…¨ç½‘å‡çº§é—¨æ§ï¼Œä¸çº³å…¥è½¦ä½åˆ—è¡¨
 
-### 6.2 Ò³Ãæ½á¹¹
+**å…¨å±€çŠ¶æ€**
+- [x] ParkingProvider å•ä¸€æ•°æ®å±‚ï¼Œå”¯ä¸€ 3s è½®è¯¢ï¼Œè·¨é¡µå®æ—¶åŒæ­¥
+- [x] å‘Šè­¦æ´¾ç”Ÿï¼ˆâ‰¥24h å‘Šè­¦ / â‰¥72h åƒµå°¸è½¦ï¼‰ä¸å¤„ç†/å¿½ç•¥çŠ¶æ€ç»´æŠ¤
+- [x] åƒµå°¸è½¦ç¦»å¼€è½¦ä½è‡ªåŠ¨æ ‡è®°å·²å¤„ç†ï¼ˆå¿«ç…§è½¦ç‰Œ+æ—¶é—´ï¼‰ï¼›æ–°è½¦è¿›å…¥æ¸…é™¤æ—§å¤„ç†è®°å½•
+- [x] é¦–é¡µæ¨é€æ’é™¤å·²å¤„ç†/å·²å¿½ç•¥å‘Šè­¦ï¼Œå†å²ä¿ç•™åœ¨å‘Šè­¦ä¸­å¿ƒ
 
-| Ò³Ãæ       | ÌØÉ«                         | Ö÷Òª×é¼ş                              |
-| ---------- | ---------------------------- | ------------------------------------- |
-| ×ÜÀÀÒ³     | KPI ¿¨Æ¬ + Ô²»·Í¼ + ×îĞÂÔ¤¾¯ | StatCard, CircleProgress, StatusBadge |
-| ³µÎ»Ò³     | ÇøÓòÉ¸Ñ¡ + ³µÎ»Íø¸ñ          | StatusBadge, CardContainer            |
-| Ô¤¾¯Ò³     | »¬¶¯²Ù×÷£¨ÅÉµ¥/Í¨Öª/´¦ÖÃ£©   | ActionButtonGroup, flutter_slidable   |
-| Êı¾İ·ÖÎöÒ³ | ÕÛÏßÍ¼ + Öù×´Í¼ + ±ıÍ¼       | fl_chart                              |
-| ÎÒµÄÒ³     | ÓÃ»§¿¨Æ¬ + ¹¦ÄÜ·Ö×é + ÁĞ±íÏî | ListTileBase, CardContainer           |
+**é¡µé¢åŠŸèƒ½**
+- [x] 5 Tab å¯¼èˆªï¼ˆé¦–é¡µ/è½¦ä½/å‘Šè­¦/æ•°æ®/æˆ‘çš„ï¼‰
+- [x] è½¦ä½é¡µï¼šA/B åŒºç­›é€‰ã€éšè—æ¨¡å¼å¼€å…³ã€ç¦»çº¿ç°æ˜¾+äº‘å›¾æ ‡ã€3ç‚¹èœå•ä»…åƒµå°¸è½¦
+- [x] è½¦ä½è¯¦æƒ…é¡µï¼šå‚ç›´åˆ†åŒºå¸ƒå±€ï¼Œå¤„ç†æ“ä½œåŒºä»…åƒµå°¸è½¦ï¼ˆé€šçŸ¥/æ´¾å•+å¤„ç†äººé€‰æ‹©ï¼‰
+- [x] å‘Šè­¦ä¸­å¿ƒï¼šçŠ¶æ€ç­›é€‰ï¼ˆå…¨éƒ¨/å¾…å¤„ç†/å¤„ç†ä¸­/å·²å¤„ç†/å·²å¿½ç•¥ï¼‰
+- [x] æ•°æ®é¡µï¼šé¥¼å›¾ + è¶‹åŠ¿å›¾ï¼ˆè¶‹åŠ¿ä¸º mock å ä½ï¼‰
+- [x] è·¯ç”± `/alerts` å·²æ³¨å†Œ
 
-### 6.3 ×´Ì¬»ÕÕÂÀàĞÍ
+**OTA å‡çº§**
+- [x] çŸ­çª—å£æ£€æµ‹ï¼šå¯åŠ¨/å‰å° 1 æ¬¡ + 5sÃ—9 å…± 10 æ¬¡åè‡ªåŠ¨åœæ­¢
+- [x] å…¨å±€å¼¹çª—ï¼ˆMainShell è§¦å‘ï¼‰ï¼šåŠ¨æ€æ ‡é¢˜ï¼ˆæ£€æµ‹åˆ°æ–°å›ºä»¶/å›ºä»¶å‡çº§ä¸­/å›ºä»¶å‡çº§å®Œæˆï¼‰ã€å®ŒæˆæŒ‰é’®ã€å¿½ç•¥åˆ—è¡¨é˜²é‡å¤
+- [x] å‡çº§çŠ¶æ€è½®è¯¢è‡³ statusâ‰¥4 å¤ä½ï¼›ä»»æ„æ“ä½œå³å–æ¶ˆæ£€æµ‹è½®è¯¢
+- [x] å›ºä»¶å‡çº§é¡µï¼ˆFirmwareUpgradePageï¼‰
 
-| ×´Ì¬     | ÑÕÉ« | ËµÃ÷     |
-| -------- | ---- | -------- |
-| free     | ÂÌÉ« | ¿ÕÏĞ³µÎ» |
-| occupied | À¶É« | ÒÑÕ¼ÓÃ   |
-| zombie   | ³ÈÉ« | ½©Ê¬³µ   |
-| pending  | »ÆÉ« | ´ı´¦Àí   |
-| resolved | »ÒÉ« | ÒÑ´¦ÖÃ   |
+### 6.2 æœªå®Œæˆ / å¾…åŠæ¸…å•
 
----
+**P0 å®‰å…¨**
+- [ ] **AccessKey æ˜æ–‡ç¡¬ç¼–ç **åœ¨ `api_service.dart`ï¼ˆ`_accessKey`ï¼‰â†’ åç¼–è¯‘ APK å³å¯æå–ï¼Œç­‰äºäº¤å‡º OneNET è´¦æˆ·æƒé™ã€‚åº”è‡ªå»ºåç«¯ä¸­è½¬ï¼ˆMobile â†’ HTTPS â†’ Backend â†’ OneNETï¼‰ï¼Œå‰ç«¯åªæŒæœ‰ç”¨æˆ·çº§ä»¤ç‰Œ
 
-## Æß¡¢±àÂë¹æ·¶
+**P1 æ•°æ®çœŸå®æ€§**
+- [ ] `batteryLevel / signalStrength` ç¡¬ç¼–ç ï¼ˆåœ¨çº¿ 85.0/-65ï¼‰â†’ ä» OneNET å±æ€§è¯»å–æˆ–æ”¹ã€ŒæœªçŸ¥ã€æ ·å¼
+- [ ] ä¸€å‘¨è¶‹åŠ¿ä¸ºé™æ€ mock â†’ æ¥å¹³å°å†å²ç»Ÿè®¡æˆ–æ”¹å ä½ã€Œæš‚æ— å†å²æ•°æ®ã€
+- [ ] å‘Šè­¦å¤„ç†è®°å½•ä»…å†…å­˜ï¼Œé‡å¯ä¸¢å¤± â†’ éœ€åç«¯æŒä¹…åŒ–ï¼ˆæˆ– OneNET Data Streamï¼‰
 
-### 7.1 ÃüÃû¹æ·¶
+**P2 åŠŸèƒ½å®Œå–„**
+- [ ] Profile é¡µ 14 ä¸ªå…¥å£ç©ºå®ç°ï¼ˆå¿«æ·æ“ä½œ/ç³»ç»Ÿ/è¿ç»´/è´¦æˆ·åˆ†ç»„ï¼‰
+- [ ] è½¦ä½é¡µ C åŒºï¼šæ¨¡å‹åˆ†åŒºæ˜ å°„ä»å« Cï¼Œå‰ç«¯å·²éšè—ï¼Œéœ€ç¡®è®¤åˆ†åŒºç­–ç•¥
+- [ ] è®¾å¤‡å±æ€§æŸ¥è¯¢ä¸ºé€ä¸ªä¸²è¡Œ HTTPï¼Œè®¾å¤‡å¤šæ—¶é¦–å±æ…¢ â†’ æ”¹ä¸ºå¹¶å‘æˆ–æ‰¹é‡æ¥å£
 
-1. **ÎÄ¼şÃüÃû**
+**å·¥ç¨‹è´¨é‡**
+- [ ] å•å…ƒæµ‹è¯• / Widget æµ‹è¯•ç¼ºå¤±ï¼ˆSpotModel.fromJsonã€24h/72h åˆ¤å®šã€åˆ†åŒºæ˜ å°„é€‚åˆå•æµ‹ï¼‰
+- [ ] `flutter analyze` / `dart format` æœªçº³å…¥ CI å¡ç‚¹
 
-   - ÎÄ¼şÃû£º`snake_case`£¬Èç `spot_model.dart`
-2. **ÀàÃüÃû**
-
-   - ÀàÃû£º`PascalCase`£¬Èç `SpotModel`
-3. **·½·¨/º¯ÊıÃüÃû**
-
-   - ·½·¨Ãû£º`camelCase`£¬Èç `getSpots()`
-4. **³£Á¿ÃüÃû**
-
-   - ³£Á¿£º`camelCase`£¬Èç `AppColors.primary`
-
-### 7.2 ÑùÊ½¹æ·¶
-
-- ÑÕÉ«Í³Ò»Ê¹ÓÃ `AppColors` Àà
-- ³ß´çÍ³Ò»Ê¹ÓÃ `AppDims` Àà
-- ½ûÖ¹Ó²±àÂëÑÕÉ«Öµ
-- ½ûÖ¹Ó²±àÂë³ß´çÖµ
-
-### 7.3 ×é¼şÊ¹ÓÃ¹æ·¶
-
-- ¿¨Æ¬ ¡ú `CardContainer` »ò `HuaweiCard`
-- ×´Ì¬»ÕÕÂ ¡ú `StatusBadge`
-- Ô²»·½ø¶È ¡ú `CircleProgress`
-- ¿Õ×´Ì¬ ¡ú `EmptyState`
-- ¼ÓÔØ ¡ú `LoadingIndicator`
-- ÁĞ±íÏî ¡ú `ListTileBase`
-- µ¼º½À¸ ¡ú `CustomAppBar`
+**é•¿æœŸæ–¹å‘**
+- [ ] çœŸæ¨é€ï¼ˆOneNET å‘Šè­¦ â†’ åç«¯ â†’ å‚å•†æ¨é€é€šé“ï¼‰
+- [ ] å›½é™…åŒ– i18n
+- [ ] ç¦»çº¿æ¨¡å¼ï¼ˆHive/isar ç¼“å­˜æœ€è¿‘è½¦ä½å¿«ç…§ï¼‰
+- [ ] å·¥å•æ“ä½œå®¡è®¡æµæ°´ï¼ˆè°ä½•æ—¶æ”¹äº†ä»€ä¹ˆçŠ¶æ€ï¼‰
 
 ---
 
-## °Ë¡¢Git Ìá½»¹æ·¶
+## ä¸ƒã€ä»£ç è§„èŒƒ & Git æäº¤è§„èŒƒ
 
-### Ìá½»ĞÅÏ¢¸ñÊ½
+### 7.1 å‘½åè§„èŒƒ
 
-```
-<type>: <¼òÒª¸ÅÊöºËĞÄ¸Ä¶¯>
+- æ–‡ä»¶åï¼š`snake_case`ï¼ˆå¦‚ `spot_model.dart`ï¼‰
+- ç±»åï¼š`PascalCase`ï¼ˆå¦‚ `SpotModel`ï¼‰
+- æ–¹æ³•/å˜é‡ï¼š`camelCase`ï¼ˆå¦‚ `getSpots()`ï¼‰
+- å¸¸é‡ï¼š`camelCase`ï¼ˆå¦‚ `AppColors.primary`ï¼‰
 
-<Ä£¿é>:
-- <×öÁËÊ²Ã´>
-```
-
-### ÀàĞÍ
-
-- `feat`: ĞÂ¹¦ÄÜ
-- `fix`: ĞŞ¸´ bug
-- `refactor`: ÖØ¹¹
-- `docs`: ÎÄµµ±ä¸ü
-- `chore`: ÔÓÏî/¹¹½¨ÅäÖÃ
-
-### Ê¾Àı
+### 7.2 Git æäº¤è§„èŒƒ
 
 ```
-feat: ÊµÏÖ³µÎ»ÏêÇéÒ³ÓëÔ¤¾¯´¦ÖÃ¹¦ÄÜ
+<ç±»å‹>: <ç®€è¦æ¦‚è¿°æ ¸å¿ƒæ”¹åŠ¨>
+
+<æ¨¡å—>:
+- <åšäº†ä»€ä¹ˆ>ï¼ˆåŠ¨è¯å¼€å¤´ï¼Œä¸€å¥è¯è¯´æ¸…åšäº†ä»€ä¹ˆ + è§£å†³ä»€ä¹ˆé—®é¢˜ï¼‰
+```
+
+**ç±»å‹**ï¼š`feat`ï¼ˆæ–°åŠŸèƒ½ï¼‰/ `fix`ï¼ˆä¿®å¤ bugï¼‰/ `refactor`ï¼ˆé‡æ„ï¼‰/ `docs`ï¼ˆæ–‡æ¡£å˜æ›´ï¼‰/ `chore`ï¼ˆæ‚é¡¹/æ„å»ºé…ç½®ï¼‰
+
+**ç¤ºä¾‹**ï¼š
+```
+feat: å®ç°è½¦ä½è¯¦æƒ…é¡µä¸é¢„è­¦å¤„ç½®åŠŸèƒ½
 
 components:
-- ÊµÏÖ SpotDetailPage£¬Õ¹Ê¾³µÎ»ÏêÏ¸ĞÅÏ¢
-- ÊµÏÖ ActionButtonGroup£¬Ö§³ÖÅÉµ¥/Í¨Öª/´¦ÖÃ²Ù×÷
-- ½ÓÈë flutter_slidable ÊµÏÖ»¬¶¯É¾³ı
+- å®ç° SpotDetailPageï¼Œå±•ç¤ºè½¦ä½è¯¦ç»†ä¿¡æ¯
+- å®ç° ActionButtonGroupï¼Œæ”¯æŒæ´¾å•/é€šçŸ¥/å¤„ç½®æ“ä½œ
+- æ¥å…¥ flutter_slidable å®ç°æ»‘åŠ¨åˆ é™¤
 ```
 
 ---
 
-## ¾Å¡¢ÔËĞĞÓëµ÷ÊÔ
+## å…«ã€å…³é”®æ–‡ä»¶ç´¢å¼•
 
-### 9.1 ³£ÓÃÃüÁî
-
-```bash
-# »ñÈ¡ÒÀÀµ
-flutter pub get
-
-# ÇåÀí¹¹½¨
-flutter clean
-
-# ÔËĞĞ£¨debug Ä£Ê½£©
-flutter run -d <Éè±¸ID>
-
-# ²é¿´Éè±¸ÁĞ±í
-flutter devices
-
-# ¹¹½¨ release APK
-flutter build apk --release
-
-# ¼ì²éÒÀÀµ¸üĞÂ
-flutter pub outdated
-```
-
-### 9.2 ÈÈÖØÔØ
-
-- ±£´æ Dart ÎÄ¼şºó×Ô¶¯´¥·¢ÈÈÖØÔØ
-- ÈçĞèÍêÈ«ÖØÆô£¬ÔÚÖÕ¶Ë°´ `R`£¨´óĞ´£©
-- ÈÈÖØÔØÎŞ·¨ÉúĞ§µÄÇé¿ö£º
-  - ĞŞ¸ÄÁË `main.dart` µÄÖ÷ÌâÅäÖÃ
-  - ĞŞ¸ÄÁË¾²Ì¬³£Á¿
-  - ĞÂÔö/É¾³ıÁËÎÄ¼ş
-
-### 9.3 ×¢ÒâÊÂÏî
-
-1. **²»ÒªÓÃ PowerShell Ğ´ Dart ÎÄ¼ş** ¡ª Ê¹ÓÃ Write ¹¤¾ß£¬±ÜÃâ BOM ÎÊÌâ
-2. **Windows ÖĞÎÄÂ·¾¶** ¡ª È·±£ `android.overridePathCheck=true`
-3. **ÖĞ¹úÍøÂç»·¾³** ¡ª È·±£¾µÏñÅäÖÃÕıÈ·£¨¼ûµÚ¶ş½Ú£©
-4. **Gradle °æ±¾** ¡ª Ê¹ÓÃ 9.4.1-bin£¨ÒÑ»º´æ£©
-
----
-
-## Ê®¡¢Íê³ÉÇåµ¥
-
-### ¹¦ÄÜÍê³É
-
-- ? ×ÜÀÀÒ³£ºÍ³¼Æ¿¨Æ¬ + ³µÎ»»ã×Ü
-- ? ³µÎ»Ò³£ºÇøÓòÉ¸Ñ¡ A/B/C
-- ? ³µÎ»ÏêÇéÒ³£ºÏêÏ¸ĞÅÏ¢ + ²Ù×÷°´Å¥
-- ? Ô¤¾¯Ò³£º»¬¶¯²Ù×÷´¦ÖÃ
-- ? Êı¾İ·ÖÎöÒ³£ºÍ¼±íÕ¹Ê¾
-- ? ÎÒµÄÒ³£ºÓÃ»§ĞÅÏ¢ + ÉèÖÃ
-- ? µ×²¿µ¼º½À¸£º5 ¸ö Tab
-- ? ¼ÓÔØ×´Ì¬ / ¿Õ×´Ì¬´¦Àí
-
-### UI Íê³É
-
-- ? »ªÎªÀ¶É«Ö÷ÌâÉ«
-- ? ¿¨Æ¬ÒõÓ°¹æ·¶
-- ? Ô²½ÇÍ³Ò»£¨¿¨Æ¬ 16dp£¬°´Å¥ 12dp£©
-- ? ·Ö¸îÏß¿É¼ûĞÔ
-- ? ×´Ì¬»ÕÕÂÑÕÉ«Çø·Ö
-- ? fl_chart Í¼±íÕ¹Ê¾
-
-### ¹¹½¨Íê³É
-
-- ? AGP 8.11.1 + Gradle 9.4.1
-- ? ÖĞ¹ú¾µÏñÅäÖÃ
-- ? BOM ÎÊÌâĞŞ¸´
-- ? ÖĞÎÄÂ·¾¶Ö§³Ö
-- ? Flutter ÒıÇæ²Ö¿âÅäÖÃ
-
-### ´ıÍê³É
-
-- ? OneNET API ÕæÊµ¶Ô½Ó
-- ? CORS ¿çÓòÎÊÌâ£¨Web ¶Ë£©
-- ? UI ÔÚ²»Í¬ÆÁÄ»³ß´çÊÊÅä
-- ? Android Ç©ÃûÓë·¢²¼
-
----
-
-## ¸½Â¼ A£º¿ìËÙ¿ªÊ¼
-
-```bash
-# 1. ½øÈëÏîÄ¿Ä¿Â¼
-cd path/to/User
-
-# 2. »ñÈ¡ÒÀÀµ
-flutter pub get
-
-# 3. ÔËĞĞÏîÄ¿
-flutter run -d <Éè±¸ID>
-
-# 4. »òÔËĞĞ Chrome
-flutter run -d chrome
-```
-
-## ¸½Â¼ B£ºÉè±¸µ÷ÊÔ
-
-```bash
-# ²é¿´Éè±¸ÁĞ±í
-flutter devices
-
-# ÔËĞĞµ½ÌØ¶¨Éè±¸
-flutter run -d 25102RKBEC
-
-# ¹¹½¨ APK
-flutter build apk --release
-```
+| ç±»å‹ | æ–‡ä»¶ |
+| ---- | ---- |
+| å…¥å£ & å¯¼èˆª | `lib/main.dart` |
+| å…¨å±€æ•°æ®å±‚ | `lib/core/providers/parking_provider.dart` |
+| API æœåŠ¡ | `lib/core/services/api_service.dart` |
+| æ¨¡å‹ | `lib/core/models/spot_model.dart` / `alert_model.dart` / `stats_model.dart` |
+| ä¸»é¢˜ | `lib/core/theme/app_colors.dart` / `app_dims.dart` |
+| æ€»è§ˆé¡µ | `lib/features/overview/presentation/pages/overview_page.dart` |
+| è½¦ä½é¡µ | `lib/features/spots/presentation/pages/spots_page.dart` |
+| è½¦ä½è¯¦æƒ…é¡µ | `lib/features/spots/presentation/pages/spot_detail_page.dart` |
+| å‘Šè­¦ä¸­å¿ƒ | `lib/features/alerts/presentation/pages/alerts_page.dart` |
+| æ•°æ®é¡µ | `lib/features/stats/presentation/pages/stats_page.dart` |
+| æˆ‘çš„é¡µ | `lib/features/profile/presentation/pages/profile_page.dart` |
+| å›ºä»¶å‡çº§é¡µ | `lib/features/profile/presentation/pages/firmware_upgrade_page.dart` |
+| OTA å¼¹çª— | `lib/features/profile/presentation/widgets/ota_upgrade_dialog.dart` |
+| å…¬å…±ç»„ä»¶ | `lib/shared/widgets/*` |
+| ä¾èµ–é…ç½® | `pubspec.yaml` |
