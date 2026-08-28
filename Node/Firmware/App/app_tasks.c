@@ -1,4 +1,4 @@
-﻿/****************************************************************************
+/****************************************************************************
  * 应用层周期任务实现 - app_tasks.c
  * 
  * 功能描述:
@@ -41,6 +41,11 @@
 /* -------- 车位状态判定阈值 -------- */
 #define DIST_THRESHOLD_CM       10      /* 超声波判断有车的距离阈值(cm) */
 
+/* ⭐ 车离去抖: 连续 N 次检测(每次 PARK_CHECK_INTERVAL=200ms)无车,
+ * 才判定车真正离开. 防止单次传感器毛刺(超声波假回波/地磁波动)瞬断
+ * "车在"信号, 导致僵尸车占用计时被清零重计 */
+#define CAR_ABSENT_DEBOUNCE     3       /* 3 × 200ms = 600ms */
+
 /* -------- OTA 升级 -------- */
 #include "app_version.h"    /* 版本单一源头: NODE_FW_VERSION */
 #define OTA_FLAG_ADDR           0x0800FC00  /* 升级标志页地址 */
@@ -61,6 +66,7 @@ volatile uint8_t StatusChanged = 1;     /* 车位状态变化标志
                                          * 置位1: 有人/无人状态切换时
                                          * 触发立即上传, 不用等定时
                                          * 周期, 保证状态变化实时可见 */
+uint32_t g_zombieThreshold = 3600;      /* ⭐ 僵尸车判定阈值(秒), 默认1小时 */
 
 /****************************************************************************
  * 函数名: US_Task
@@ -100,6 +106,13 @@ void US_Task(void)
         }
 
         Distance = smoothDist;
+
+        /* ⭐ 诊断: 有车状态下距离出现异常尖峰(单次毛刺即可推越 10cm 阈值
+         * 导致"车在"瞬断), 用于定位僵尸计时清零的根因是超声波还是地磁 */
+        if (ParkStatus != PARK_IDLE && raw > (uint16_t)Distance + 10)
+            Usart_Printf(USART_DEBUG, "[US][毛刺] raw=%dcm smooth=%dcm\r\n",
+                         raw, Distance);
+
         lastUpdateTick = Get_Tick();
     }
 }
@@ -144,8 +157,11 @@ void QMC_Task(void)
                     MagCarPresent = 0;
             }
 
-            /* 调试打印 */
-            //Usart_Printf(USART_DEBUG, "QMC: Z=%.2f, zSq=%.1f, cnt=%d, car=%d\r\n",z, zSq, debounceCnt, MagCarPresent);
+            /* ⭐ 诊断: 有车状态下地磁Z跌破阈值(当前仍判有车),
+             * 可能触发"车在"瞬断, 用于定位根因是超声波还是地磁 */
+            if (ParkStatus != PARK_IDLE && !triggered && MagCarPresent)
+                Usart_Printf(USART_DEBUG, "[QMC][异常] z=%.2f zSq=%.2f (阈值%.1f) cnt=%d\r\n",
+                             z, zSq, MAG_Z_SQ_THRESH, debounceCnt);
         }
         else
         {
@@ -168,10 +184,25 @@ void QMC_Task(void)
 void ParkingStatus_Check(void)
 {
     static uint32_t lastCheckTick = 0;
+    static uint8_t absentCnt = 0;       /* ⭐ 车离连续计数(去抖) */
 
     if (Get_Tick() - lastCheckTick >= PARK_CHECK_INTERVAL)
     {
         uint8_t carPresent = (Distance > 0 && Distance < DIST_THRESHOLD_CM) && MagCarPresent;
+
+        /* ⭐ 车离去抖: 连续 CAR_ABSENT_DEBOUNCE 次检测无车才判定车离开.
+         * 单次毛刺只累加计数不触发切换, 计时继续, 不再被清零 */
+        if (carPresent)
+            absentCnt = 0;
+        else if (absentCnt < CAR_ABSENT_DEBOUNCE)
+            absentCnt++;
+        uint8_t carAbsent = (absentCnt >= CAR_ABSENT_DEBOUNCE);
+
+        /* ⭐ 诊断: 有车状态下"车在"瞬断(去抖正保住计时不重置),
+         * 打印是哪路信号掉下去, 用于确认根因 */
+        if (ParkStatus != PARK_IDLE && !carPresent)
+            Usart_Printf(USART_DEBUG, "[DBG] 车在瞬断: dist=%dcm mag=%d absent=%d/%d (去抖中)\r\n",
+                         Distance, MagCarPresent, absentCnt, CAR_ABSENT_DEBOUNCE);
 
         switch (ParkStatus)
         {
@@ -186,7 +217,7 @@ void ParkingStatus_Check(void)
                 break;
 
             case PARK_OCCUPIED:
-                if (!carPresent)
+                if (carAbsent)
                 {
                     ParkStatus = PARK_IDLE;             /* 状态: 无车 */
                     LastStatusChangeTick = Get_Tick();
@@ -196,7 +227,7 @@ void ParkingStatus_Check(void)
                 else
                 {
                     OccupiedTime = (Get_Tick() - LastStatusChangeTick) / 1000;
-                    if (OccupiedTime > 5)               /* 僵尸判定: 5秒后进入 */
+                    if (OccupiedTime >= g_zombieThreshold)  /* ⭐ 动态阈值判定僵尸车 (秒级) */
                     {
                         ParkStatus = PARK_ZOMBIE;
                         StatusChanged = 1;              /* 标记状态变化 */
@@ -206,11 +237,19 @@ void ParkingStatus_Check(void)
 
             case PARK_ZOMBIE:
                 OccupiedTime = (Get_Tick() - LastStatusChangeTick) / 1000;
-                if (!carPresent)
+                if (carAbsent)
                 {
                     ParkStatus = PARK_IDLE;             /* 状态: 无车 */
                     LastStatusChangeTick = Get_Tick();
                     OccupiedTime = 0;
+                    StatusChanged = 1;                  /* 标记状态变化 */
+                }
+                else if (OccupiedTime < g_zombieThreshold)
+                {
+                    /* ⭐ 阈值被调大后, 当前占用时长不再达到阈值:
+                     * 僵尸 → 退回"有车占用"(LED 熄灭), 计时连续不重置,
+                     * 时长继续累计; 之后阈值再调小时会立即重新判定僵尸 */
+                    ParkStatus = PARK_OCCUPIED;
                     StatusChanged = 1;                  /* 标记状态变化 */
                 }
                 break;
@@ -260,6 +299,7 @@ static void PackNodeData(void)
     NodeDataCache.OccupiedTime  = OccupiedTime;
     NodeDataCache.LED           = LED_GetState() ? 1 : 0;
     NodeDataCache.LedEnable     = LEDEnable;
+    NodeDataCache.ZombieThreshold = g_zombieThreshold;   /* ⭐ 当前生效阈值上报给平台观看 */
     strncpy(NodeDataCache.FwVersion, NODE_FW_VERSION, sizeof(NodeDataCache.FwVersion) - 1);
     NodeDataCache.FwVersion[sizeof(NodeDataCache.FwVersion) - 1] = '\0';   /* 固件版本串, 网关据此更新 OTA 版本 */
 }
@@ -340,6 +380,21 @@ static void LoRa_CmdCallback(const char *cmd, const char *value)
             Usart_Printf(USART_DEBUG, "[CTRL] LED 使能 -> %d\r\n", LEDEnable);
         }
         LoRa_Node_SendAck("AT+LedEnable");
+    }
+    /* ⭐ 网关下发僵尸车判定阈值: AT+ZombieThreshold=<秒数>
+     * 默认3600秒(1小时), APP端可动态下发覆盖, 支持演示用短阈值 */
+    else if (strcmp(cmd, "AT+ZombieThreshold") == 0)
+    {
+        if (value != NULL)
+        {
+            long v = strtol(value, NULL, 10);
+            if (v >= 5 && v <= 2592000)  /* 允许范围: 5秒 ~ 30天 */
+            {
+                g_zombieThreshold = (uint32_t)v;
+                Usart_Printf(USART_DEBUG, "[CTRL] 僵尸车阈值 -> %lu秒\n", (unsigned long)g_zombieThreshold);
+            }
+        }
+        LoRa_Node_SendAck("AT+ZombieThreshold");
     }
     /* 网关心跳查询: AT+PING -> 回复 PONG */
     else if (strcmp(cmd, "AT+PING") == 0)

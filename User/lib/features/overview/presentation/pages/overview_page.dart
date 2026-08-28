@@ -345,7 +345,8 @@ class _OverviewPageState extends State<OverviewPage> {
   Widget _buildDeviceStatusCard(List<SpotModel> spots) {
     final total = spots.length;
     final normal = spots.where((s) => s.isFree).length;
-    final abnormal = total - normal;
+    final disabled = spots.where((s) => s.isDisabledSpot).length;
+    final abnormal = total - normal - disabled;  /* 异常/告警设备: 停用单独列为"停用" */
 
     return CardContainer(
       child: Column(
@@ -425,6 +426,35 @@ class _OverviewPageState extends State<OverviewPage> {
                       const SizedBox(height: 2),
                       const Text(
                         '异常',
+                        style: TextStyle(fontSize: 12, color: AppColors.textSecondary),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Container(
+                  padding: const EdgeInsets.symmetric(vertical: 10),
+                  decoration: BoxDecoration(
+                    color: disabled > 0
+                        ? AppColors.textSecondary.withValues(alpha: 0.08)
+                        : AppColors.textSecondary.withValues(alpha: 0.05),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Column(
+                    children: [
+                      Text(
+                        '$disabled',
+                        style: const TextStyle(
+                          fontSize: 22,
+                          fontWeight: FontWeight.w700,
+                          color: AppColors.textSecondary,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      const Text(
+                        '停用',
                         style: TextStyle(fontSize: 12, color: AppColors.textSecondary),
                       ),
                     ],

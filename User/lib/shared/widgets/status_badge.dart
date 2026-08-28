@@ -17,12 +17,13 @@ class StatusBadge extends StatelessWidget {
   factory StatusBadge.zombie() => const StatusBadge(text: '僵尸车', color: AppColors.danger);
 
   factory StatusBadge.pending() => const StatusBadge(text: '待处理', color: AppColors.danger);
+  factory StatusBadge.notified() => const StatusBadge(text: '已通知', color: AppColors.primary);
   factory StatusBadge.dispatched() => const StatusBadge(text: '处理中', color: AppColors.warning);
   factory StatusBadge.resolved() => const StatusBadge(text: '已处理', color: AppColors.success);
-  factory StatusBadge.ignored() => const StatusBadge(text: '已忽略', color: AppColors.textSecondary);
 
   factory StatusBadge.online() => const StatusBadge(text: '在线', color: AppColors.success);
   factory StatusBadge.offline() => const StatusBadge(text: '离线', color: AppColors.textSecondary);
+  factory StatusBadge.disabled() => const StatusBadge(text: '已停用', color: AppColors.textSecondary);
 
   factory StatusBadge.fromStatus(String status) {
     switch (status) {
@@ -34,12 +35,12 @@ class StatusBadge extends StatelessWidget {
         return StatusBadge.zombie();
       case 'pending':
         return StatusBadge.pending();
+      case 'notified':
+        return StatusBadge.notified();
       case 'dispatched':
         return StatusBadge.dispatched();
       case 'resolved':
         return StatusBadge.resolved();
-      case 'ignored':
-        return StatusBadge.ignored();
       case 'online':
         return StatusBadge.online();
       case 'offline':

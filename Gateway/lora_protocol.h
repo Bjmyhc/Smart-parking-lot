@@ -44,7 +44,7 @@ extern "C" {
 #define LORA_PACKED
 #endif
 
-/* 节点传感器数据帧(8 字段, 共 12 字节)
+/* 节点传感器数据帧(9 字段, 共 30 字节)
  * LORA_FRAME_DATA + 下面结构体 */
 typedef struct LORA_PACKED {
     uint8_t  ParkStatus;      /* 0=空闲, 1=有车, 2=僵尸车 */
@@ -53,6 +53,7 @@ typedef struct LORA_PACKED {
     uint32_t OccupiedTime;    /* 秒, 小端 */
     uint8_t  LED;             /* 当前LED状态 0/1 */
     uint8_t  LedEnable;       /* LED使能开关 0/1 */
+    uint32_t ZombieThreshold; /* ⭐ 僵尸车判定阈值(秒), 节点当前生效值, 网关据此上报只读属性观看 */
     char     FwVersion[16];   /* 节点固件版本字符串(如 "v2.321"), 与 STM32 端一致 */
 } LoraNodeData_t;
 

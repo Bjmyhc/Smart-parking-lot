@@ -23,13 +23,11 @@ class _AlertsPageState extends State<AlertsPage> {
   List<AlertModel> _filteredAlerts(List<AlertModel> alerts) {
     switch (_filterIndex) {
       case 1:
-        return alerts.where((a) => a.status == 'pending').toList();
+        return alerts.where((a) => a.status == 'notified').toList();
       case 2:
         return alerts.where((a) => a.status == 'dispatched').toList();
       case 3:
         return alerts.where((a) => a.status == 'resolved').toList();
-      case 4:
-        return alerts.where((a) => a.status == 'ignored').toList();
       default:
         return alerts;
     }
@@ -121,7 +119,7 @@ class _AlertsPageState extends State<AlertsPage> {
   }
 
   Widget _buildFilterTabs() {
-    final tabs = ['全部', '待处理', '处理中', '已处理', '已忽略'];
+    final tabs = ['全部', '已通知', '处理中', '已处理'];
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: AppDims.paddingPage),
       child: SingleChildScrollView(
@@ -164,11 +162,39 @@ class _AlertsPageState extends State<AlertsPage> {
     );
   }
 
+  /// 轻量自定义勾选框: 避免 Material Checkbox 在 Web 端触发 ink/circle shader
+  /// 编译导致渲染卡死/空白. 仅用 Container + 常规 Icon, 不引入新的渲染路径.
+  Widget _buildSelectBox({required bool selected, required VoidCallback onTap}) {
+    return GestureDetector(
+      onTap: onTap,
+      behavior: HitTestBehavior.opaque,
+      child: Container(
+        width: 22,
+        height: 22,
+        decoration: BoxDecoration(
+          color: selected ? AppColors.primary : Colors.transparent,
+          borderRadius: BorderRadius.circular(6),
+          border: Border.all(
+            color: selected
+                ? AppColors.primary
+                : AppColors.textSecondary.withValues(alpha: 0.5),
+            width: 1.5,
+          ),
+        ),
+        child: selected
+            ? const Icon(Icons.check, size: 16, color: Colors.white)
+            : null,
+      ),
+    );
+  }
+
   /// 顶部批量操作栏: [全选] [批量派单] [批量通知], 选中集合收在 Provider.
+  /// 全选仅选中当前标签下【可被批量操作】的告警(未通知/已通知), 处理中/已处理不参与.
   Widget _buildBatchBar(BuildContext context, ParkingProvider provider, List<AlertModel> alerts) {
     final list = _filteredAlerts(alerts);
+    final actionable = _actionableAlerts(list);
     final selected = provider.selectedAlertIds;
-    final allSelected = list.isNotEmpty && selected.containsAll(list.map((a) => a.id));
+    final allSelected = actionable.isNotEmpty && selected.containsAll(actionable.map((a) => a.id));
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: AppDims.paddingPage),
       child: Container(
@@ -191,24 +217,22 @@ class _AlertsPageState extends State<AlertsPage> {
                 if (allSelected) {
                   provider.clearAlertSelection();
                 } else {
-                  provider.selectAllAlerts(list);
+                  provider.selectAllAlerts(actionable);
                 }
               },
               behavior: HitTestBehavior.opaque,
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Checkbox(
-                    value: allSelected,
-                    onChanged: (_) {
+                  _buildSelectBox(
+                    selected: allSelected,
+                    onTap: () {
                       if (allSelected) {
                         provider.clearAlertSelection();
                       } else {
-                        provider.selectAllAlerts(list);
+                        provider.selectAllAlerts(actionable);
                       }
                     },
-                    activeColor: AppColors.primary,
-                    visualDensity: VisualDensity.compact,
                   ),
                   const Text(
                     '全选',
@@ -262,13 +286,30 @@ class _AlertsPageState extends State<AlertsPage> {
     );
   }
 
-  /// 把选中的告警映射到对应车位 (在 Provider.spots 中按 spotId 查找).
-  List<SpotModel> _selectedSpots(ParkingProvider provider, List<AlertModel> alerts) {
+  /// 当前标签下可被批量操作(通知/派单)的告警子集:
+  /// 全部=未通知+已通知, 已通知=仅已通知, 处理中/已处理=无.
+  List<AlertModel> _actionableAlerts(List<AlertModel> list) {
+    final Set<String> statuses;
+    if (_filterIndex == 1) {
+      statuses = {'notified'};
+    } else if (_filterIndex == 2 || _filterIndex == 3) {
+      statuses = {};
+    } else {
+      statuses = {'pending', 'notified'};
+    }
+    return list.where((a) => statuses.contains(a.status)).toList();
+  }
+
+  /// 把【选中且处于指定阶段】的告警映射到对应车位 (在 Provider.spots 中按 spotId 查找).
+  /// 批量操作严格按阶段执行: 通知只作用于未通知, 派单只作用于已通知.
+  List<SpotModel> _selectedSpotsByStatus(
+      ParkingProvider provider, List<AlertModel> alerts, Set<String> statuses) {
     final selected = provider.selectedAlertIds;
     final spotsById = {for (final s in provider.spots) s.id: s};
     final result = <SpotModel>[];
     for (final a in alerts) {
       if (!selected.contains(a.id)) continue;
+      if (!statuses.contains(a.status)) continue;
       final spot = spotsById[a.spotId];
       if (spot != null) result.add(spot);
     }
@@ -276,26 +317,26 @@ class _AlertsPageState extends State<AlertsPage> {
   }
 
   Future<void> _onBatchDispatch(BuildContext context, ParkingProvider provider, List<AlertModel> list) async {
-    final targets = _selectedSpots(provider, list).where((s) => s.isZombie).toList();
+    final targets = _selectedSpotsByStatus(provider, list, {'notified'});
     if (targets.isEmpty) {
-      _showSnackBar('未选择可派单的僵尸车位告警');
+      _showSnackBar('未选择可派单的已通知告警');
       return;
     }
     await provider.dispatchSpots(targets);
     provider.clearAlertSelection();
+    if (mounted) setState(() => _batchMode = false); // 批量操作完成: 自动退出多选模式
     _showSnackBar('已批量派单 ${targets.length} 条');
   }
 
   Future<void> _onBatchNotify(BuildContext context, ParkingProvider provider, List<AlertModel> list) async {
-    final targets = _selectedSpots(provider, list)
-        .where((s) => s.isOccupied || s.isZombie)
-        .toList();
+    final targets = _selectedSpotsByStatus(provider, list, {'pending'});
     if (targets.isEmpty) {
-      _showSnackBar('未选择可通知的车位告警');
+      _showSnackBar('未选择可通知的未通知告警');
       return;
     }
     await provider.notifySpots(targets);
     provider.clearAlertSelection();
+    if (mounted) setState(() => _batchMode = false); // 批量操作完成: 自动退出多选模式
     _showSnackBar('已批量通知 ${targets.length} 条');
   }
 
@@ -341,15 +382,15 @@ class _AlertsPageState extends State<AlertsPage> {
         iconColor = AppColors.danger;
         iconData = Icons.warning_amber;
         break;
+      case 'notified':
+        iconBgColor = AppColors.primary.withValues(alpha: 0.1);
+        iconColor = AppColors.primary;
+        iconData = Icons.notifications_active;
+        break;
       case 'dispatched':
         iconBgColor = AppColors.warning.withValues(alpha: 0.1);
         iconColor = AppColors.warning;
         iconData = Icons.assignment;
-        break;
-      case 'ignored':
-        iconBgColor = AppColors.textSecondary.withValues(alpha: 0.1);
-        iconColor = AppColors.textSecondary;
-        iconData = Icons.not_interested;
         break;
       case 'resolved':
       default:
@@ -360,7 +401,9 @@ class _AlertsPageState extends State<AlertsPage> {
     }
 
     final isSelected = provider.selectedAlertIds.contains(alert.id);
-    final showActions = alert.status == 'pending' || alert.status == 'dispatched';
+    final showActions = alert.status == 'pending' ||
+        alert.status == 'notified' ||
+        alert.status == 'dispatched';
 
     return Container(
       margin: const EdgeInsets.only(bottom: AppDims.gapCard),
@@ -378,12 +421,9 @@ class _AlertsPageState extends State<AlertsPage> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 if (_batchMode) ...[
-                  Checkbox(
-                    value: isSelected,
-                    onChanged: (_) => provider.toggleAlertSelection(alert.id),
-                    activeColor: AppColors.primary,
-                    visualDensity: VisualDensity.compact,
-                    materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  _buildSelectBox(
+                    selected: isSelected,
+                    onTap: () => provider.toggleAlertSelection(alert.id),
                   ),
                   const SizedBox(width: 4),
                 ],
@@ -444,9 +484,7 @@ class _AlertsPageState extends State<AlertsPage> {
               Row(
                 mainAxisAlignment: MainAxisAlignment.end,
                 children: [
-                  _buildIgnoreButton(context, alert),
-                  const SizedBox(width: 12),
-                  _buildProcessButton(context, alert),
+                  _buildStatusActionButton(context, provider, alert),
                 ],
               ),
             ],
@@ -456,148 +494,46 @@ class _AlertsPageState extends State<AlertsPage> {
     );
   }
 
-  Widget _buildIgnoreButton(BuildContext context, AlertModel alert) {
+  /// 按告警状态自适应的操作按钮: 未通知→通知 / 已通知→派单 / 处理中→查看详情.
+  Widget _buildStatusActionButton(
+      BuildContext context, ParkingProvider provider, AlertModel alert) {
+    switch (alert.status) {
+      case 'pending':
+        return _buildNotifyButton(context, provider, alert);
+      case 'notified':
+        return _buildDispatchButton(context, provider, alert);
+      case 'dispatched':
+      default:
+        return _buildViewButton(context, alert);
+    }
+  }
+
+  /// 通知车主: 标记已通知, 卡片转入"已通知"分类.
+  Widget _buildNotifyButton(
+      BuildContext context, ParkingProvider provider, AlertModel alert) {
     return GestureDetector(
       onTap: () async {
-        final provider = context.read<ParkingProvider>();
-        final confirmed = await showModalBottomSheet<bool>(
-          context: context,
-          backgroundColor: Colors.transparent,
-          isScrollControlled: true,
-          builder: (ctx) => Container(
-            decoration: const BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-            ),
-            padding: EdgeInsets.only(
-              left: 24,
-              right: 24,
-              top: 20,
-              bottom: MediaQuery.of(ctx).padding.bottom + 20,
-            ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Container(
-                  width: 40,
-                  height: 4,
-                  decoration: BoxDecoration(
-                    color: AppColors.textSecondary.withValues(alpha: 0.2),
-                    borderRadius: BorderRadius.circular(2),
-                  ),
-                ),
-                const SizedBox(height: 20),
-                const Text(
-                  '确认忽略',
-                  style: TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.w700,
-                    color: AppColors.textPrimary,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                const Text(
-                  '确定要忽略该告警吗？忽略后将归入"已忽略"，可在筛选标签中查看。',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    fontSize: 14,
-                    color: AppColors.textSecondary,
-                    height: 1.5,
-                  ),
-                ),
-                const SizedBox(height: 28),
-                GestureDetector(
-                  onTap: () => Navigator.pop(ctx, true),
-                  child: Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.symmetric(vertical: 15),
-                    decoration: BoxDecoration(
-                      color: AppColors.primary,
-                      borderRadius: BorderRadius.circular(14),
-                    ),
-                    child: const Text(
-                      '确认忽略',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                        fontSize: 15,
-                        fontWeight: FontWeight.w600,
-                        color: Colors.white,
-                      ),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 12),
-                GestureDetector(
-                  onTap: () => Navigator.pop(ctx, false),
-                  child: Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.symmetric(vertical: 15),
-                    decoration: BoxDecoration(
-                      color: AppColors.textSecondary.withValues(alpha: 0.08),
-                      borderRadius: BorderRadius.circular(14),
-                    ),
-                    child: const Text(
-                      '取消',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                        fontSize: 15,
-                        fontWeight: FontWeight.w500,
-                        color: AppColors.textSecondary,
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        );
-        if (confirmed == true) {
-          _showSnackBar('已忽略');
-          provider.ignoreAlert(alert);
+        final spot = _spotById(alert.spotId);
+        if (spot == null) {
+          _showSnackBar('未找到对应车位');
+          return;
         }
+        await provider.notifyOwner(spot);
+        _showSnackBar('已通知车主挪车');
       },
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
         decoration: BoxDecoration(
-          color: AppColors.textSecondary.withValues(alpha: 0.08),
+          color: AppColors.warning,
           borderRadius: BorderRadius.circular(AppDims.radiusMedium),
         ),
         child: const Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.not_interested, color: AppColors.textSecondary, size: 18),
+            Icon(Icons.notifications_outlined, color: Colors.white, size: 18),
             SizedBox(width: 6),
             Text(
-              '忽略',
-              style: TextStyle(
-                fontSize: 13,
-                fontWeight: FontWeight.w600,
-                color: AppColors.textSecondary,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  /// 处理按钮: 唯一处理入口在车位详情页, 这里只做跳转.
-  Widget _buildProcessButton(BuildContext context, AlertModel alert) {
-    return GestureDetector(
-      onTap: () => _goToDetail(alert),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-        decoration: BoxDecoration(
-          color: AppColors.primary,
-          borderRadius: BorderRadius.circular(AppDims.radiusMedium),
-        ),
-        child: const Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.arrow_forward, color: Colors.white, size: 18),
-            SizedBox(width: 6),
-            Text(
-              '处理',
+              '通知',
               style: TextStyle(
                 fontSize: 13,
                 fontWeight: FontWeight.w600,
@@ -608,6 +544,141 @@ class _AlertsPageState extends State<AlertsPage> {
         ),
       ),
     );
+  }
+
+  /// 派单: 弹出处理人选择, 派单后卡片转入"处理中"分类.
+  Widget _buildDispatchButton(
+      BuildContext context, ParkingProvider provider, AlertModel alert) {
+    return GestureDetector(
+      onTap: () async {
+        final spot = _spotById(alert.spotId);
+        if (spot == null) {
+          _showSnackBar('未找到对应车位');
+          return;
+        }
+        await _showHandlerPicker(provider, spot);
+      },
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+        decoration: BoxDecoration(
+          color: AppColors.primary,
+          borderRadius: BorderRadius.circular(AppDims.radiusMedium),
+        ),
+        child: const Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.send_outlined, color: Colors.white, size: 18),
+            SizedBox(width: 6),
+            Text(
+              '派单',
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: Colors.white,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 查看详情: 处理中/已处理车位仅提供详情入口.
+  Widget _buildViewButton(BuildContext context, AlertModel alert) {
+    return GestureDetector(
+      onTap: () => _goToDetail(alert),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+        decoration: BoxDecoration(
+          color: AppColors.primary.withValues(alpha: 0.1),
+          borderRadius: BorderRadius.circular(AppDims.radiusMedium),
+        ),
+        child: const Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.arrow_forward, color: AppColors.primary, size: 18),
+            SizedBox(width: 6),
+            Text(
+              '查看详情',
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: AppColors.primary,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 处理人选择弹窗 (与车位详情页交互一致).
+  Future<void> _showHandlerPicker(ParkingProvider provider, SpotModel spot) async {
+    const handlers = ['张师傅', '李师傅', '王师傅'];
+    final picked = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (ctx) => Container(
+        margin: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(16),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 20, 20, 8),
+              child: Row(
+                children: [
+                  const Text(
+                    '选择处理人',
+                    style: TextStyle(
+                      fontSize: 17,
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.textPrimary,
+                    ),
+                  ),
+                  const Spacer(),
+                  GestureDetector(
+                    onTap: () => Navigator.pop(ctx),
+                    child: const Icon(Icons.close, size: 22, color: AppColors.textSecondary),
+                  ),
+                ],
+              ),
+            ),
+            const Divider(height: 1),
+            ...handlers.map(
+              (h) => ListTile(
+                leading: const Icon(Icons.person_outline, color: AppColors.primary, size: 22),
+                title: Text(
+                  h,
+                  style: const TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.textPrimary,
+                  ),
+                ),
+                trailing: const Icon(Icons.chevron_right, size: 20, color: AppColors.textSecondary),
+                onTap: () => Navigator.pop(ctx, h),
+              ),
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+    if (picked != null) {
+      await provider.dispatchSpot(spot, handlerName: picked);
+      _showSnackBar('已派单给$picked');
+    }
+  }
+
+  SpotModel? _spotById(String spotId) {
+    final spotsById = {for (final s in context.read<ParkingProvider>().spots) s.id: s};
+    return spotsById[spotId];
   }
 
   void _goToDetail(AlertModel alert) {

@@ -1,0 +1,112 @@
+{
+  "version": "1.0",
+  "profile": {
+    "industryId": "2",
+    "sceneId": "19",
+    "categoryId": "46",
+    "productId": "这里替换成ParkCamera新产品的实际产品ID"
+  },
+  "properties": [
+    {
+      "identifier": "PlateNumber",
+      "name": "车牌号码",
+      "functionType": "u",
+      "accessMode": "r",
+      "desc": "百度OCR识别结果，如京Q06666",
+      "dataType": {
+        "type": "string",
+        "specs": {
+          "length": "16"
+        }
+      },
+      "functionMode": "property",
+      "required": false
+    },
+    {
+      "identifier": "PlateColor",
+      "name": "车牌颜色",
+      "functionType": "u",
+      "accessMode": "r",
+      "desc": "blue/green/yellow/black/white",
+      "dataType": {
+        "type": "string",
+        "specs": {
+          "length": "16"
+        }
+      },
+      "functionMode": "property",
+      "required": false
+    },
+    {
+      "identifier": "PlateConfidence",
+      "name": "识别置信度",
+      "functionType": "u",
+      "accessMode": "r",
+      "desc": "百度API返回的识别可信度，范围0~1",
+      "dataType": {
+        "type": "float",
+        "specs": {
+          "max": "1",
+          "min": "0",
+          "step": "0.01"
+        }
+      },
+      "functionMode": "property",
+      "required": false
+    },
+    {
+      "identifier": "CaptureTime",
+      "name": "拍照时间",
+      "functionType": "u",
+      "accessMode": "r",
+      "desc": "格式：2026-08-28 16:30:00",
+      "dataType": {
+        "type": "string",
+        "specs": {
+          "length": "32"
+        }
+      },
+      "functionMode": "property",
+      "required": false
+    },
+    {
+      "identifier": "CaptureCmd",
+      "name": "拍照触发命令",
+      "functionType": "u",
+      "accessMode": "rw",
+      "desc": "0=空闲  1=触发拍照（APP写入，设备读取后清零）",
+      "dataType": {
+        "type": "int32",
+        "specs": {
+          "max": "1",
+          "min": "0",
+          "step": "1"
+        }
+      },
+      "functionMode": "property",
+      "required": false
+    },
+    {
+      "identifier": "DeviceStatus",
+      "name": "设备状态",
+      "functionType": "u",
+      "accessMode": "r",
+      "desc": "0=空闲  1=拍照中  2=识别中  3=成功  4=失败",
+      "dataType": {
+        "type": "enum",
+        "specs": {
+          "0": "空闲",
+          "1": "拍照中",
+          "2": "识别中",
+          "3": "识别成功",
+          "4": "识别失败"
+        }
+      },
+      "functionMode": "property",
+      "required": false
+    }
+  ],
+  "events": [],
+  "services": [],
+  "combs": []
+}

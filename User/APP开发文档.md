@@ -1,3 +1,4 @@
+
 # 路边僵尸车检测系统 · APP 开发文档（合并版 v3.0）
 
 > **版本**：v3.0（合并版，整合设计/开发/架构三份旧文档）
@@ -15,21 +16,21 @@
 
 ### 1.2 技术栈
 
-| 类别     | 技术              | 版本    |
-| -------- | ----------------- | ------- |
-| 框架     | Flutter           | 3.47.0  |
-| 语言     | Dart              | 3.13.0  |
-| 状态管理 | Provider          | ^6.1.0  |
-| 网络请求 | http              | ^1.2.0  |
-| 图表     | fl_chart          | ^0.68.0 |
-| 滑动列表 | flutter_slidable  | ^3.1.0  |
-| 错位网格 | flutter_staggered_grid_view | ^0.7.0 |
-| 轮播     | flutter_swiper_view | ^1.1.8 |
-| 动画文字 | animated_text_kit | ^4.2.2  |
-| 加载动画 | flutter_spinkit   | ^5.2.0  |
-| 加密     | crypto            | ^3.0.3  |
-| 本地存储 | shared_preferences | 2.2.2  |
-| 后端平台 | 中国移动 OneNET（REST + HMAC-MD5 签名鉴权） | — |
+| 类别     | 技术                                        | 版本    |
+| -------- | ------------------------------------------- | ------- |
+| 框架     | Flutter                                     | 3.47.0  |
+| 语言     | Dart                                        | 3.13.0  |
+| 状态管理 | Provider                                    | ^6.1.0  |
+| 网络请求 | http                                        | ^1.2.0  |
+| 图表     | fl_chart                                    | ^0.68.0 |
+| 滑动列表 | flutter_slidable                            | ^3.1.0  |
+| 错位网格 | flutter_staggered_grid_view                 | ^0.7.0  |
+| 轮播     | flutter_swiper_view                         | ^1.1.8  |
+| 动画文字 | animated_text_kit                           | ^4.2.2  |
+| 加载动画 | flutter_spinkit                             | ^5.2.0  |
+| 加密     | crypto                                      | ^3.0.3  |
+| 本地存储 | shared_preferences                          | 2.2.2   |
+| 后端平台 | 中国移动 OneNET（REST + HMAC-MD5 签名鉴权） | —      |
 
 ### 1.3 项目结构（最新）
 
@@ -119,16 +120,16 @@ class AppDims {
 
 ### 2.3 组件使用规范
 
-| 场景     | 组件                          |
-| -------- | ----------------------------- |
+| 场景     | 组件                                              |
+| -------- | ------------------------------------------------- |
 | 卡片     | `CardContainer`（优先）/ `HuaweiCard`（预留） |
-| 状态徽章 | `StatusBadge`（支持 factory + fromStatus） |
-| 列表项   | `ListTileBase`                |
-| 按钮组   | `ActionButtonGroup`           |
-| 圆环进度 | `CircleProgress`              |
-| 空状态   | `EmptyState`                  |
-| 加载     | `LoadingIndicator`            |
-| 导航栏   | `CustomAppBar`                |
+| 状态徽章 | `StatusBadge`（支持 factory + fromStatus）      |
+| 列表项   | `ListTileBase`                                  |
+| 按钮组   | `ActionButtonGroup`                             |
+| 圆环进度 | `CircleProgress`                                |
+| 空状态   | `EmptyState`                                    |
+| 加载     | `LoadingIndicator`                              |
+| 导航栏   | `CustomAppBar`                                  |
 
 ### 2.4 状态徽章色
 
@@ -182,11 +183,11 @@ class AppDims {
 
 ### 3.1 Gradle / AGP / Kotlin 版本
 
-| 配置项 | 值        | 说明                 |
-| ------ | --------- | -------------------- |
-| Gradle | 9.4.1-bin | 与 AGP 8.x 兼容      |
+| 配置项 | 值        | 说明                  |
+| ------ | --------- | --------------------- |
+| Gradle | 9.4.1-bin | 与 AGP 8.x 兼容       |
 | AGP    | 8.11.1    | Flutter 3.47 最低要求 |
-| Kotlin | 2.3.0     | 稳定版               |
+| Kotlin | 2.3.0     | 稳定版                |
 
 ### 3.2 settings.gradle.kts 关键配置
 
@@ -235,13 +236,13 @@ android.overridePathCheck=true    # 关键：Windows 中文路径必须开启
 
 ### 3.5 常见构建问题与解决
 
-| 问题 | 解决方案 |
-| ---- | -------- |
-| `The non-ASCII space character U+FEFF can only be used in strings and comments.`（BOM 头混入 Dart 文件） | 用 PowerShell 批量移除 BOM（见下） |
-| Gradle 插件下载超时/失败 | 配置中国镜像（见 3.2） |
-| `AGP version is lower than Flutter's minimum supported version of 8.11.1` | AGP 升级到 8.11.1 |
-| `Could not find io.flutter:flutter_embedding_debug:1.0.0-xxx` | 添加 Flutter 引擎仓库 |
-| `Your project path contains non-ASCII characters` | `gradle.properties` 加 `android.overridePathCheck=true` |
+| 问题                                                                                                       | 解决方案                                                    |
+| ---------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------- |
+| `The non-ASCII space character U+FEFF can only be used in strings and comments.`（BOM 头混入 Dart 文件） | 用 PowerShell 批量移除 BOM（见下）                          |
+| Gradle 插件下载超时/失败                                                                                   | 配置中国镜像（见 3.2）                                      |
+| `AGP version is lower than Flutter's minimum supported version of 8.11.1`                                | AGP 升级到 8.11.1                                           |
+| `Could not find io.flutter:flutter_embedding_debug:1.0.0-xxx`                                            | 添加 Flutter 引擎仓库                                       |
+| `Your project path contains non-ASCII characters`                                                        | `gradle.properties` 加 `android.overridePathCheck=true` |
 
 BOM 移除脚本：
 
@@ -306,28 +307,31 @@ MaterialApp（ChangeNotifierProvider<ParkingProvider>，routes: {'/alerts': Aler
 
 ### 4.3 页面要点
 
-| 页面 | 要点 |
-| ---- | ---- |
-| 总览 OverviewPage | 问候卡、车位概览四格、饼图（空闲/占用/僵尸）、最新僵尸车告警卡、下拉刷新 |
-| 车位 SpotsPage | A/B 区筛选（不显示 C 区）、隐藏模式开关（点「车位」标题）、离线设备灰显+云图标+隐藏3点菜单、3点菜单仅僵尸车（查看详情）、点击进详情 |
+| 页面                    | 要点                                                                                                                                |
+| ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| 总览 OverviewPage       | 问候卡、车位概览四格、饼图（空闲/占用/僵尸）、最新僵尸车告警卡、下拉刷新                                                            |
+| 车位 SpotsPage          | A/B 区筛选（不显示 C 区）、隐藏模式开关（点「车位」标题）、离线设备灰显+云图标+隐藏3点菜单、3点菜单仅僵尸车（查看详情）、点击进详情 |
 | 车位详情 SpotDetailPage | 垂直分区：车位信息 → 车辆信息 → 设备信息 → 告警详情 → 处理操作区；处理操作区仅僵尸车显示，含[通知车主][派单→处理人选择 Dialog] |
-| 告警 AlertsPage | 状态筛选（全部/待处理/处理中/已处理/已忽略）、告警卡片、删除+处理按钮、空状态/加载/下拉刷新 |
-| 数据 StatsPage | 顶部概览双卡、车位占用饼图、一周趋势折线图（mock）、告警总数卡 |
-| 我的 ProfilePage | 用户卡、快捷操作、功能分组（系统/运维/账户）；固件升级入口 → FirmwareUpgradePage |
+| 告警 AlertsPage         | 状态筛选（全部/待处理/处理中/已处理/已忽略）、告警卡片、删除+处理按钮、空状态/加载/下拉刷新                                         |
+| 数据 StatsPage          | 顶部概览双卡、车位占用饼图、一周趋势折线图（mock）、告警总数卡                                                                      |
+| 我的 ProfilePage        | 用户卡、快捷操作、功能分组（系统/运维/账户）；固件升级入口 → FirmwareUpgradePage                                                   |
 
 ### 4.4 数据模型
 
 **SpotModel**（车位/节点设备）
+
 - 字段：`id / zone(A/B/C) / status(free|occupied|zombie|offline) / occupiedHours / batteryLevel / signalStrength / plateNumber / lastUpdated / isOnline` + 本地模拟字段（notifyStatus/handlerName/handledAt）
 - 分区映射：设备编号 ≤3=A区，≤6=B区，其余=C区
 - 状态判定：离线 → `offline`；`ParkStatus=1` → occupied；`ParkStatus=2` → zombie；否则 free
 - ⚠️ `batteryLevel / signalStrength` 仍为硬编码（在线 85.0/-65，离线 0），见待办
 
 **AlertModel**（告警/工单）
+
 - 字段：`id / plateNumber / spotId / occupiedHours / status(pending|dispatched|resolved) / imageUrl? / createdAt?`
 - 由 `ParkingProvider` 从车位数据本地合成，非独立后端接口
 
 **StatsModel**（统计）
+
 - 字段：`totalSpots / occupiedSpots / zombieSpots / occupancyRate / weeklyTrend(List<DailyTrend>)`
 - `weeklyTrend` 为演示静态数据（7 天 mock），非平台真实统计
 
@@ -335,16 +339,16 @@ MaterialApp（ChangeNotifierProvider<ParkingProvider>，routes: {'/alerts': Aler
 
 `lib/core/services/api_service.dart`
 
-| 方法 | 实现 |
-| ---- | ---- |
-| `getSpots({realOnly})` | `/device/list`（节点产品 `04kjwU9TC7`，网关产品不纳入车位）→ `/thingmodel/query-device-property` 逐个查属性 → 排序/去重 → 按模式补 mock 或仅真实 |
-| `_generateAuthorization()` | ✅ 已正确实现：`StringToSign = et\nmethod\nres\nversion`，`res=userid/528332`（末尾无斜杠、无尾换行），HMAC-MD5 + base64，完整拼进 Authorization 头 |
-| `getDeviceDetail()` | 设备详情查询，失败走 mock |
-| `setProperty()` | `/thingmodel/set-device-property` 下发（如 OtaAllow/LED） |
-| `getAlerts()` | 由 getSpots 本地合成（≥24h 告警） |
-| `dispatchAlert/notifyOwner/resolveAlert` | 本地动作（内存态），无后端持久化 |
-| `getStats()` | 半合成：统计来自 getSpots，weeklyTrend 为 mock |
-| `getOtaTaskStatus()` | `/fuse-ota/{pro_id}/{dev_name}/{tid}/check` 轮询升级状态 |
+| 方法                                       | 实现                                                                                                                                                      |
+| ------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `getSpots({realOnly})`                   | `/device/list`（节点产品 `04kjwU9TC7`，网关产品不纳入车位）→ `/thingmodel/query-device-property` 逐个查属性 → 排序/去重 → 按模式补 mock 或仅真实 |
+| `_generateAuthorization()`               | ✅ 已正确实现：`StringToSign = et\nmethod\nres\nversion`，`res=userid/528332`（末尾无斜杠、无尾换行），HMAC-MD5 + base64，完整拼进 Authorization 头   |
+| `getDeviceDetail()`                      | 设备详情查询，失败走 mock                                                                                                                                 |
+| `setProperty()`                          | `/thingmodel/set-device-property` 下发（如 OtaAllow/LED）                                                                                               |
+| `getAlerts()`                            | 由 getSpots 本地合成（≥24h 告警）                                                                                                                        |
+| `dispatchAlert/notifyOwner/resolveAlert` | 本地动作（内存态），无后端持久化                                                                                                                          |
+| `getStats()`                             | 半合成：统计来自 getSpots，weeklyTrend 为 mock                                                                                                            |
+| `getOtaTaskStatus()`                     | `/fuse-ota/{pro_id}/{dev_name}/{tid}/check` 轮询升级状态                                                                                                |
 
 网关：产品 `9YIs0S7V11`，设备 `PGW001`（承载 OtaAllow 全网升级确认门控）。
 设备名使用 OneNET `name` 字段真实名称；mock 用 `Park001~009` 命名。
@@ -355,13 +359,13 @@ MaterialApp（ChangeNotifierProvider<ParkingProvider>，routes: {'/alerts': Aler
 
 ### 5.1 本项目实际使用的接口
 
-| 分类 | URL | 用途 |
-| ---- | --- | ---- |
-| 设备管理 | `/device/list` | 读取全部车位设备（含离线） |
-| 物模型使用 | `/thingmodel/query-device-property` | 读取 ParkStatus/Ultrasonic/OccupiedTime 等属性（支持离线设备读存储数据） |
-| 物模型使用 | `/thingmodel/set-device-property` | 下发属性（LED/LedEnable/OtaAllow 等） |
-| OTA 南向 | `/fuse-ota/{pro_id}/{dev_name}/{tid}/check` | 查询升级任务状态 |
-| OTA 南向 | `/fuse-ota/{pro_id}/{dev_name}/version` | 上报/查看节点固件版本 |
+| 分类       | URL                                           | 用途                                                                     |
+| ---------- | --------------------------------------------- | ------------------------------------------------------------------------ |
+| 设备管理   | `/device/list`                              | 读取全部车位设备（含离线）                                               |
+| 物模型使用 | `/thingmodel/query-device-property`         | 读取 ParkStatus/Ultrasonic/OccupiedTime 等属性（支持离线设备读存储数据） |
+| 物模型使用 | `/thingmodel/set-device-property`           | 下发属性（LED/LedEnable/OtaAllow 等）                                    |
+| OTA 南向   | `/fuse-ota/{pro_id}/{dev_name}/{tid}/check` | 查询升级任务状态                                                         |
+| OTA 南向   | `/fuse-ota/{pro_id}/{dev_name}/version`     | 上报/查看节点固件版本                                                    |
 
 > 全量 OneNET 平台接口清单见归档文档 `User/archive/APP架构文档_旧版.md`（4.1 节）。
 
@@ -372,12 +376,15 @@ MaterialApp（ChangeNotifierProvider<ParkingProvider>，routes: {'/alerts': Aler
 **请求头**：`Authorization: version=2022-05-01&res=userid%2F{userId}&et=...&method=sha1&sign=...`（用户级签名）
 
 **响应**：
+
 ```json
 { "code": 0, "msg": "succ", "data": { "status": 1 } }
 ```
+
 `status`：1=待升级、2=下载中、3=升级中、4=升级成功、5=升级失败、6=升级取消
 
 **App 实现对照**（`getOtaTaskStatus`）：
+
 - URL 与文档一致；Authorization 使用用户级签名
 - 正确解包 `data.status`，供 ParkingProvider 轮询驱动弹窗 / 固件升级页状态显示
 - ⚠️ 实测：`status` 在执行期间可能一直为 1（待升级），直到任务完成才变 4，不返回实时进度 step
@@ -389,52 +396,61 @@ MaterialApp（ChangeNotifierProvider<ParkingProvider>，routes: {'/alerts': Aler
 ### 6.1 已完成功能
 
 **数据 & 平台对接**
-- [x] OneNET 签名鉴权正确（StringToSign = et\nmethod\nres\nversion，res 无尾斜杠、无尾换行）
-- [x] 真实读取设备列表 + 设备属性，离线设备读平台存储数据
-- [x] 真实/本地模式切换（SharedPreferences 持久化），真实+模拟补齐 9 台
-- [x] 设备名用 OneNET 真实 `name`；mock 用 Park001~009
-- [x] 网关（PGW001）承载 OtaAllow 全网升级门控，不纳入车位列表
+
+- [X] OneNET 签名鉴权正确（StringToSign = et\nmethod\nres\nversion，res 无尾斜杠、无尾换行）
+- [X] 真实读取设备列表 + 设备属性，离线设备读平台存储数据
+- [X] 真实/本地模式切换（SharedPreferences 持久化），真实+模拟补齐 9 台
+- [X] 设备名用 OneNET 真实 `name`；mock 用 Park001~009
+- [X] 网关（PGW001）承载 OtaAllow 全网升级门控，不纳入车位列表
 
 **全局状态**
-- [x] ParkingProvider 单一数据层，唯一 3s 轮询，跨页实时同步
-- [x] 告警派生（≥24h 告警 / ≥72h 僵尸车）与处理/忽略状态维护
-- [x] 僵尸车离开车位自动标记已处理（快照车牌+时间）；新车进入清除旧处理记录
-- [x] 首页推送排除已处理/已忽略告警，历史保留在告警中心
+
+- [X] ParkingProvider 单一数据层，唯一 3s 轮询，跨页实时同步
+- [X] 告警派生（≥24h 告警 / ≥72h 僵尸车）与处理/忽略状态维护
+- [X] 僵尸车离开车位自动标记已处理（快照车牌+时间）；新车进入清除旧处理记录
+- [X] 首页推送排除已处理/已忽略告警，历史保留在告警中心
 
 **页面功能**
-- [x] 5 Tab 导航（首页/车位/告警/数据/我的）
-- [x] 车位页：A/B 区筛选、隐藏模式开关、离线灰显+云图标、3点菜单仅僵尸车
-- [x] 车位详情页：垂直分区布局，处理操作区仅僵尸车（通知/派单+处理人选择）
-- [x] 告警中心：状态筛选（全部/待处理/处理中/已处理/已忽略）
-- [x] 数据页：饼图 + 趋势图（趋势为 mock 占位）
-- [x] 路由 `/alerts` 已注册
+
+- [X] 5 Tab 导航（首页/车位/告警/数据/我的）
+- [X] 车位页：A/B 区筛选、隐藏模式开关、离线灰显+云图标、3点菜单仅僵尸车
+- [X] 车位详情页：垂直分区布局，处理操作区仅僵尸车（通知/派单+处理人选择）
+- [X] 告警中心：状态筛选（全部/待处理/处理中/已处理/已忽略）
+- [X] 数据页：饼图 + 趋势图（趋势为 mock 占位）
+- [X] 路由 `/alerts` 已注册
 
 **OTA 升级**
-- [x] 短窗口检测：启动/前台 1 次 + 5s×9 共 10 次后自动停止
-- [x] 全局弹窗（MainShell 触发）：动态标题（检测到新固件/固件升级中/固件升级完成）、完成按钮、忽略列表防重复
-- [x] 升级状态轮询至 status≥4 复位；任意操作即取消检测轮询
-- [x] 固件升级页（FirmwareUpgradePage）
+
+- [X] 短窗口检测：启动/前台 1 次 + 5s×9 共 10 次后自动停止
+- [X] 全局弹窗（MainShell 触发）：动态标题（检测到新固件/固件升级中/固件升级完成）、完成按钮、忽略列表防重复
+- [X] 升级状态轮询至 status≥4 复位；任意操作即取消检测轮询
+- [X] 固件升级页（FirmwareUpgradePage）
 
 ### 6.2 未完成 / 待办清单
 
 **P0 安全**
+
 - [ ] **AccessKey 明文硬编码**在 `api_service.dart`（`_accessKey`）→ 反编译 APK 即可提取，等于交出 OneNET 账户权限。应自建后端中转（Mobile → HTTPS → Backend → OneNET），前端只持有用户级令牌
 
 **P1 数据真实性**
+
 - [ ] `batteryLevel / signalStrength` 硬编码（在线 85.0/-65）→ 从 OneNET 属性读取或改「未知」样式
 - [ ] 一周趋势为静态 mock → 接平台历史统计或改占位「暂无历史数据」
 - [ ] 告警处理记录仅内存，重启丢失 → 需后端持久化（或 OneNET Data Stream）
 
 **P2 功能完善**
+
 - [ ] Profile 页 14 个入口空实现（快捷操作/系统/运维/账户分组）
 - [ ] 车位页 C 区：模型分区映射仍含 C，前端已隐藏，需确认分区策略
 - [ ] 设备属性查询为逐个串行 HTTP，设备多时首屏慢 → 改为并发或批量接口
 
 **工程质量**
+
 - [ ] 单元测试 / Widget 测试缺失（SpotModel.fromJson、24h/72h 判定、分区映射适合单测）
 - [ ] `flutter analyze` / `dart format` 未纳入 CI 卡点
 
 **长期方向**
+
 - [ ] 真推送（OneNET 告警 → 后端 → 厂商推送通道）
 - [ ] 国际化 i18n
 - [ ] 离线模式（Hive/isar 缓存最近车位快照）
@@ -463,6 +479,7 @@ MaterialApp（ChangeNotifierProvider<ParkingProvider>，routes: {'/alerts': Aler
 **类型**：`feat`（新功能）/ `fix`（修复 bug）/ `refactor`（重构）/ `docs`（文档变更）/ `chore`（杂项/构建配置）
 
 **示例**：
+
 ```
 feat: 实现车位详情页与预警处置功能
 
@@ -476,20 +493,20 @@ components:
 
 ## 八、关键文件索引
 
-| 类型 | 文件 |
-| ---- | ---- |
-| 入口 & 导航 | `lib/main.dart` |
-| 全局数据层 | `lib/core/providers/parking_provider.dart` |
-| API 服务 | `lib/core/services/api_service.dart` |
-| 模型 | `lib/core/models/spot_model.dart` / `alert_model.dart` / `stats_model.dart` |
-| 主题 | `lib/core/theme/app_colors.dart` / `app_dims.dart` |
-| 总览页 | `lib/features/overview/presentation/pages/overview_page.dart` |
-| 车位页 | `lib/features/spots/presentation/pages/spots_page.dart` |
-| 车位详情页 | `lib/features/spots/presentation/pages/spot_detail_page.dart` |
-| 告警中心 | `lib/features/alerts/presentation/pages/alerts_page.dart` |
-| 数据页 | `lib/features/stats/presentation/pages/stats_page.dart` |
-| 我的页 | `lib/features/profile/presentation/pages/profile_page.dart` |
-| 固件升级页 | `lib/features/profile/presentation/pages/firmware_upgrade_page.dart` |
-| OTA 弹窗 | `lib/features/profile/presentation/widgets/ota_upgrade_dialog.dart` |
-| 公共组件 | `lib/shared/widgets/*` |
-| 依赖配置 | `pubspec.yaml` |
+| 类型        | 文件                                                                              |
+| ----------- | --------------------------------------------------------------------------------- |
+| 入口 & 导航 | `lib/main.dart`                                                                 |
+| 全局数据层  | `lib/core/providers/parking_provider.dart`                                      |
+| API 服务    | `lib/core/services/api_service.dart`                                            |
+| 模型        | `lib/core/models/spot_model.dart` / `alert_model.dart` / `stats_model.dart` |
+| 主题        | `lib/core/theme/app_colors.dart` / `app_dims.dart`                            |
+| 总览页      | `lib/features/overview/presentation/pages/overview_page.dart`                   |
+| 车位页      | `lib/features/spots/presentation/pages/spots_page.dart`                         |
+| 车位详情页  | `lib/features/spots/presentation/pages/spot_detail_page.dart`                   |
+| 告警中心    | `lib/features/alerts/presentation/pages/alerts_page.dart`                       |
+| 数据页      | `lib/features/stats/presentation/pages/stats_page.dart`                         |
+| 我的页      | `lib/features/profile/presentation/pages/profile_page.dart`                     |
+| 固件升级页  | `lib/features/profile/presentation/pages/firmware_upgrade_page.dart`            |
+| OTA 弹窗    | `lib/features/profile/presentation/widgets/ota_upgrade_dialog.dart`             |
+| 公共组件    | `lib/shared/widgets/*`                                                          |
+| 依赖配置    | `pubspec.yaml`                                                                  |

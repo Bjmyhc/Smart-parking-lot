@@ -5,6 +5,7 @@ import '../models/spot_model.dart';
 import '../models/alert_model.dart';
 import '../models/stats_model.dart';
 import '../models/operation_log_model.dart';
+import '../models/policy_config.dart';
 import '../services/api_service.dart';
 
 /// 全局数据源 (单一数据层): 唯一持有车位数据 + 唯一的轮询刷新定时器 +
@@ -25,14 +26,31 @@ class ParkingProvider extends ChangeNotifier {
   final ApiService _apiService;
   Timer? _refreshTimer;
   bool _refreshing = false;
+  bool _gatewayOnline = false;  /* ⭐ 网关在线状态 */
+  String? _policyError;         /* ⭐ 最近一次策略下发失败原因 */
+  bool _policyPartial = false;  /* ⭐ 上次下发是否部分成功 (UI 琥珀色提示) */
 
   List<SpotModel> _spots = [];
-  bool _realOnly = false; // false=本地模式(真实+模拟), true=真实模式(仅真实设备)
+  bool _realOnly = true; // true=真实模式(仅真实设备), 需模拟车位再切换本地模式
   bool _isLoading = true;
   int _layoutMode = 0; // 0=列表, 1=网格, 2=流式
 
-  /* 告警处理记录 (按车位 spotId): 忽略为手动; 已处理由"僵尸车离开车位"自动派生 */
-  final Set<String> _ignoredAlertIds = {};
+  /* 策略配置: 集中管理告警/传感器/刷新/OTA 判定规则, 修改即时生效并持久化 */
+  PolicyConfig _policy = const PolicyConfig();
+
+  PolicyConfig get policy => _policy;
+  int get alertSec => _policy.alertSec; // 停车超时告警阈值(秒)
+  int get zombieThresholdSec => _policy.zombieThresholdSec; // ⭐ 僵尸车判定阈值(秒)
+  int get sensorDistanceCm => _policy.sensorDistanceCm; // 传感器矛盾判定距离阈值(cm)
+  int get refreshSec => _policy.refreshSec; // 数据刷新间隔(秒)
+  bool get otaEnabled => _policy.otaEnabled; // OTA 自动检测开关
+  int get otaIntervalSec => _policy.otaIntervalSec; // OTA 检测间隔(秒)
+  int get otaCheckCount => _policy.otaCheckCount; // OTA 每轮检测次数
+  bool get gatewayOnline => _gatewayOnline;  /* ⭐ 网关是否在线 */
+  String? get policyError => _policyError;   /* ⭐ 策略下发失败原因 */
+  bool get policyPartial => _policyPartial;  /* ⭐ 上次下发部分成功 */
+
+  /* 告警处理记录 (按车位 spotId): 已处理由"僵尸车离开车位"自动派生 */
   /// 已自动处理的僵尸车快照 (spotId -> 告警): 车辆离开车位后自动标记为已处理, 供告警中心查看历史.
   final Map<String, AlertModel> _resolvedAlerts = {};
 
@@ -41,6 +59,10 @@ class ParkingProvider extends ChangeNotifier {
   final Set<String> _dispatchedSpotIds = {};
   final Map<String, String> _handlerNames = {}; // spotId -> 处理人
   final Map<String, DateTime> _handledAts = {}; // spotId -> 完成时间
+
+  /* 模拟车位本地状态切换覆盖 (spotId -> 状态/占用时长, 内存态, 3s 刷新后回写) */
+  final Map<String, String> _mockStatusOverrides = {};
+  final Map<String, int> _mockOccupiedOverrides = {};
 
   /* 批量选中集合 (收进 Provider, 跨页同步) */
   final Set<String> _selectedSpotIds = {};
@@ -75,30 +97,33 @@ class ParkingProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  /* 一周趋势为演示用静态数据 (图表占位, 非平台真实统计) */
-  static final List<DailyTrend> _mockWeeklyTrend = [
-    DailyTrend(date: '周一', avgOccupancy: 45, alertsCount: 2),
-    DailyTrend(date: '周二', avgOccupancy: 52, alertsCount: 1),
-    DailyTrend(date: '周三', avgOccupancy: 48, alertsCount: 3),
-    DailyTrend(date: '周四', avgOccupancy: 60, alertsCount: 0),
-    DailyTrend(date: '周五', avgOccupancy: 55, alertsCount: 2),
-    DailyTrend(date: '周六', avgOccupancy: 68, alertsCount: 1),
-    DailyTrend(date: '周日', avgOccupancy: 58, alertsCount: 2),
-  ];
+  /* 小时级快照: 记录今天每小时的占用率 (0-100), 用于数据统计页折线图 */
+  static const _hourlySnapshotKey = 'hourly_occupancy_snapshot';
+  List<int> _hourlyOccupancy = List.filled(24, 0);
+  int _lastSnapshotHour = -1;
 
-  /// 启动流程: 先加载持久化的模式, 再首次拉取, 最后启动全局轮询.
+  /// 启动流程: 先加载持久化的模式与策略, 再首次拉取, 最后启动全局轮询.
   Future<void> _init() async {
     await _loadMode();
+    await _loadHourlySnapshot();
     await refresh();
-    _refreshTimer = Timer.periodic(const Duration(seconds: 3), (_) => refresh());
+    _restartRefreshTimer();
     // 固件升级为低频操作: 不常驻轮询, 由 MainShell 在每次进入前台时触发
     // 一轮短检测(beginOtaCheckSession), 检测到待升级任务时弹窗提示
   }
 
   Future<void> _loadMode() async {
     final prefs = await SharedPreferences.getInstance();
-    _realOnly = prefs.getBool(_modeKey) ?? false;
+    _realOnly = prefs.getBool(_modeKey) ?? true;  /* 默认真实模式(仅真实设备) */
     _layoutMode = prefs.getInt(_layoutKey) ?? 0;
+    _policy = await PolicyConfig.load();
+  }
+
+  /// 按当前刷新策略重建全局轮询定时器 (刷新间隔变化时立即生效).
+  void _restartRefreshTimer() {
+    _refreshTimer?.cancel();
+    _refreshTimer =
+        Timer.periodic(Duration(seconds: _policy.refreshSec), (_) => refresh());
   }
 
   /* ==================== 只读数据 ==================== */
@@ -115,6 +140,67 @@ class ParkingProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// 更新策略配置: 需要下发的节点策略(僵尸车阈值)走 OneNET 同步服务调用
+  /// (SetZombieThreshold, 定义在节点产品物模型上), 全部成功才提交持久化.
+  /// 返回值: true=提交成功(全部成功/部分成功), false=网关离线或全部下发失败 (不提交, UI 回退).
+  /// 部分成功时 [policyPartial]=true, 汇总原因在 [policyError], UI 用琥珀色提示.
+  Future<bool> updatePolicy(PolicyConfig config) async {
+    _policyPartial = false;  /* 每次下发重置部分成功标志 */
+    final needDispatchZombie = config.zombieThresholdSec != _policy.zombieThresholdSec;
+
+    /* ⭐ 需要网关下发的策略: 先查网关在线, 再逐节点同步服务调用 */
+    if (needDispatchZombie) {
+      final gatewayOnline = await _apiService.isGatewayOnline();
+      if (!gatewayOnline) {
+        _gatewayOnline = false;
+        _policyError = '网关离线';
+        notifyListeners();
+        debugPrint('⚠️ 网关离线, 无法下发节点策略');
+        return false;
+      }
+
+      /* 同步服务调用: 遍历所有【真实且未停用】节点下发 (模拟车位不参与平台下发,
+       * 平台停用的设备也不再下发, 不参与成功/失败计数) */
+      int successCount = 0;
+      final failedSpots = <String>[];
+      for (final spot in _spots.where((s) => s.isReal && !s.isDisabledSpot)) {
+        final output = await _apiService.callService(
+          spot.id,  // 节点设备名 (如 Park001, park2)
+          'SetZombieThreshold',
+          {'ThresholdValue': config.zombieThresholdSec},
+          productId: ApiService.nodeProductId,  // 节点产品ID
+        );
+        final ok = output != null && output['Result'] == 1;
+        debugPrint('${ok ? "✅" : "❌"} 节点 ${spot.id} 阈值下发: $output');
+        if (ok) {
+          successCount++;
+        } else {
+          failedSpots.add(spot.id);
+        }
+      }
+
+      if (failedSpots.isNotEmpty && successCount == 0) {
+        /* 全部失败: 不提交, UI 回退保持原值 */
+        _policyError = '下发失败（${failedSpots.join('、')}），成功 0 个';
+        notifyListeners();
+        return false;
+      }
+      if (failedSpots.isNotEmpty) {
+        /* 部分成功: 保存策略, 离线节点由网关在上线后自动补发 */
+        _policyPartial = true;
+        _policyError = '成功 $successCount 个，失败 ${failedSpots.length} 个'
+            '（${failedSpots.join('、')}），离线节点上线后自动补发';
+      }
+    }
+
+    _policy = config;
+    await _policy.save();
+    _restartRefreshTimer();
+    if (!_policyPartial) _policyError = null;  /* 部分成功时保留汇总提示 */
+    notifyListeners();
+    return true;  /* 成功 */
+  }
+
   int get totalSpots => _spots.length;
   List<SpotModel> get freeSpots => _spots.where((s) => s.isFree).toList();
   List<SpotModel> get occupiedSpots => _spots.where((s) => s.isOccupied).toList();
@@ -123,12 +209,12 @@ class ParkingProvider extends ChangeNotifier {
   int get occupiedCount => _spots.where((s) => s.status == 'occupied').length;
   int get zombieCount => zombieSpots.length;
 
-  /// 全部告警 (含已忽略/已自动处理的历史), 供告警中心状态筛选使用.
+  /// 全部告警 (含已自动处理的历史), 供告警中心状态筛选使用.
   List<AlertModel> get allAlerts {
     final list = <AlertModel>[];
     for (final spot in _spots) {
-      // 僵尸车本身就是"占用≥24h"派生而来, 必须纳入; 普通占用需 >=24h 才产生告警
-      final hasAlert = spot.isZombie || (spot.isOccupied && spot.occupiedHours >= 24);
+      // 告警只在车位成为僵尸车(占用≥僵尸阈值)时产生; 普通占用不生成告警
+      final hasAlert = spot.isZombie;
       if (!hasAlert) continue;
       list.add(_buildAlert(spot));
     }
@@ -138,18 +224,18 @@ class ParkingProvider extends ChangeNotifier {
     return list;
   }
 
-  /// 活动告警 (排除已忽略/已处理), 供概览等推送场景使用.
+  /// 活动告警 (排除已处理), 供概览等推送场景使用.
   /// 已处理的僵尸车不再推送, 但仍保留在 allAlerts 中供告警中心筛选查看历史.
   List<AlertModel> get alerts => allAlerts
-      .where((a) => a.status != 'ignored' && a.status != 'resolved')
+      .where((a) => a.status != 'resolved')
       .toList();
 
-  /// 由当前占用车位派生告警: pending=待处理 / dispatched=处理中 / ignored=已忽略.
+  /// 由当前占用车位派生告警: pending=未通知 / notified=已通知 / dispatched=处理中.
   AlertModel _buildAlert(SpotModel spot) {
-    final status = _ignoredAlertIds.contains(spot.id)
-        ? 'ignored'
-        : _dispatchedSpotIds.contains(spot.id)
-            ? 'dispatched'
+    final status = _dispatchedSpotIds.contains(spot.id)
+        ? 'dispatched'
+        : _notifiedSpotIds.contains(spot.id)
+            ? 'notified'
             : 'pending';
     return AlertModel(
       id: 'alert_${spot.id}',
@@ -162,31 +248,104 @@ class ParkingProvider extends ChangeNotifier {
   }
 
   /// 统计模型: 占用率/僵尸车数由 spots 派生, 一周趋势为演示数据.
-  StatsModel get stats => StatsModel(
-        totalSpots: totalSpots,
-        occupiedSpots: occupiedCount,
-        zombieSpots: zombieCount,
-        occupancyRate: totalSpots > 0 ? occupiedCount / totalSpots : 0.0,
-        weeklyTrend: _mockWeeklyTrend,
-      );
+  StatsModel get stats {
+    final rate = totalSpots > 0 ? occupiedCount / totalSpots : 0.0;
+    return StatsModel(
+      totalSpots: totalSpots,
+      occupiedSpots: occupiedCount,
+      zombieSpots: zombieCount,
+      occupancyRate: rate,
+      hourlyTrend: _buildHourlyTrend(),
+    );
+  }
+
+  List<HourlyTrend> _buildHourlyTrend() {
+    final now = DateTime.now();
+    final currentHour = now.hour;
+    final rate = totalSpots > 0 ? (occupiedCount * 100 / totalSpots).round() : 0;
+    _hourlyOccupancy[currentHour] = rate;
+    return List.generate(24, (h) => HourlyTrend(
+      hour: h,
+      occupancyRate: _hourlyOccupancy[h],
+    ));
+  }
+
+  Future<void> _loadHourlySnapshot() async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString(_hourlySnapshotKey);
+    if (raw != null) {
+      try {
+        final list = raw.split(',').map((e) => int.tryParse(e) ?? 0).toList();
+        if (list.length == 24) {
+          _hourlyOccupancy = list;
+        }
+      } catch (_) {}
+    }
+  }
+
+  Future<void> _saveHourlySnapshot() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_hourlySnapshotKey, _hourlyOccupancy.join(','));
+  }
 
   /* ==================== 数据刷新 ==================== */
 
   /// 唯一的数据拉取入口: 从 OneNET 拉取 (按当前模式过滤), 失败保留上次数据.
+  /// 仅当数据真正变化时才 notifyListeners, 避免 3s 定时无条件触发全 APP 重建
+  /// (每次重建都会重新绘制阴影/圆角/图标 → CanvasKit 着色器反复编译 → 卡顿/刷屏).
   Future<void> refresh() async {
     if (_refreshing) return;
     _refreshing = true;
+    bool changed = false;
     try {
       final prevById = {for (final s in _spots) s.id: s};
+      final prevGatewayOnline = _gatewayOnline;
       _spots = await _apiService.getSpots(realOnly: _realOnly);
+      _syncLocalState(); // 先回写本地模拟状态(含手动切换), 让自动处理看到一致的当前状态
       _handleAutoResolve(prevById); // 检测"僵尸车离开车位"→自动标记已处理
-      _syncLocalState(); // 把本地模拟状态回写到刷新后的新 spot 实例
+      
+      /* ⭐ 同时检查网关在线状态 */
+      _gatewayOnline = await _apiService.isGatewayOnline();
+      changed = _gatewayOnline != prevGatewayOnline || _spotsChanged(prevById);
     } catch (_) {
       // 拉取失败保留上次数据
     }
+    final prevLoading = _isLoading;
     _isLoading = false;
     _refreshing = false;
-    notifyListeners();
+    if (_recordHourlySnapshot()) changed = true; // 整点快照记录也算一次数据变化
+    if (prevLoading || changed) notifyListeners();
+  }
+
+  /// 对比本轮刷新前后车位数据, 判断是否真的有内容变化 (避免无谓重建).
+  bool _spotsChanged(Map<String, SpotModel> prevById) {
+    if (prevById.length != _spots.length) return true;
+    for (final s in _spots) {
+      final prev = prevById[s.id];
+      if (prev == null) return true;
+      if (prev.status != s.status ||
+          prev.occupiedHours != s.occupiedHours ||
+          prev.notifyStatus != s.notifyStatus ||
+          prev.handlerName != s.handlerName ||
+          prev.plateNumber != s.plateNumber) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /// 记录每小时占用率快照; 返回是否产生了新快照 (供 refresh 判断是否需要通知).
+  bool _recordHourlySnapshot() {
+    final now = DateTime.now();
+    final currentHour = now.hour;
+    if (currentHour != _lastSnapshotHour) {
+      _lastSnapshotHour = currentHour;
+      final rate = totalSpots > 0 ? (occupiedCount * 100 / totalSpots).round() : 0;
+      _hourlyOccupancy[currentHour] = rate;
+      _saveHourlySnapshot();
+      return true;
+    }
+    return false;
   }
 
   /* ==================== 模式 & 告警动作 ==================== */
@@ -205,8 +364,32 @@ class ParkingProvider extends ChangeNotifier {
     await refresh();
   }
 
-  void ignoreAlert(AlertModel alert) {
-    _ignoredAlertIds.add(alert.spotId);
+  /***** 模拟车位本地状态切换 (仅内存态, 不落库, 用于本地演示) *****/
+  /// 点击模拟车位图标循环切换其显示状态: 空闲→占用→僵尸车→空闲.
+  /// 仅对模拟车位(isReal==false)生效; 真实/停用设备不参与.
+  void cycleMockStatus(String id) {
+    final idx = _spots.indexWhere((s) => s.id == id && !s.isReal);
+    if (idx < 0) return;
+    final spot = _spots[idx];
+    String next;
+    int occ;
+    switch (spot.status) {
+      case 'free':
+        next = 'occupied';
+        occ = 1;
+        break;
+      case 'occupied':
+        next = 'zombie';
+        occ = 2;
+        break;
+      default:
+        next = 'free';
+        occ = 0;
+    }
+    _spots[idx] = spot.copyWith(status: next, occupiedHours: occ);
+    /* 记录覆盖值, 供 3s 刷新后回写, 防止模拟车位状态被刷新打回默认 */
+    _mockStatusOverrides[id] = next;
+    _mockOccupiedOverrides[id] = occ;
     notifyListeners();
   }
 
@@ -242,27 +425,25 @@ class ParkingProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// 批量通知: 遍历调 stub + 本地标记"已通知".
+  /// 批量通知: 并行调 stub + 本地标记"已通知" (避免逐台串行等待放大延迟).
   Future<void> notifySpots(Iterable<SpotModel> spots) async {
-    for (final s in spots) {
-      await _apiService.notifyOwner(s.id);
-    }
-    _notifiedSpotIds.addAll(spots.map((s) => s.id));
+    final list = spots.toList();
+    await Future.wait(list.map((s) => _apiService.notifyOwner(s.id)));
+    _notifiedSpotIds.addAll(list.map((s) => s.id));
     _syncLocalState();
     _addLog(
       type: 'notify',
       title: '批量通知车主',
-      detail: '已通知 ${spots.length} 个车位的车主挪车',
+      detail: '已通知 ${list.length} 个车位的车主挪车',
     );
     notifyListeners();
   }
 
-  /// 批量派单: 遍历调 stub + 默认处理人 + 标记"处理中".
+  /// 批量派单: 并行调 stub + 默认处理人 + 标记"处理中" (避免逐台串行等待放大延迟).
   Future<void> dispatchSpots(Iterable<SpotModel> spots) async {
-    for (final s in spots) {
-      await _apiService.dispatchAlert(s.id);
-    }
-    for (final s in spots) {
+    final list = spots.toList();
+    await Future.wait(list.map((s) => _apiService.dispatchAlert(s.id)));
+    for (final s in list) {
       _dispatchedSpotIds.add(s.id);
       _handlerNames.putIfAbsent(s.id, () => '张师傅');
       _handledAts.remove(s.id);
@@ -271,7 +452,7 @@ class ParkingProvider extends ChangeNotifier {
     _addLog(
       type: 'dispatch',
       title: '批量派单',
-      detail: '已派单 ${spots.length} 个车位',
+      detail: '已派单 ${list.length} 个车位',
     );
     notifyListeners();
   }
@@ -282,11 +463,11 @@ class ParkingProvider extends ChangeNotifier {
   Set<String> get selectedAlertIds => Set.unmodifiable(_selectedAlertIds);
   bool isSpotDispatched(String spotId) => _dispatchedSpotIds.contains(spotId);
 
-  /// 车位当前告警处理状态: pending/dispatched/resolved/ignored.
+  /// 车位当前告警处理状态: pending=未通知 / notified=已通知 / dispatched=处理中 / resolved=已处理.
   String spotAlertStatus(String spotId) {
-    if (_ignoredAlertIds.contains(spotId)) return 'ignored';
     if (_resolvedAlerts.containsKey(spotId)) return 'resolved';
     if (_dispatchedSpotIds.contains(spotId)) return 'dispatched';
+    if (_notifiedSpotIds.contains(spotId)) return 'notified';
     return 'pending';
   }
 
@@ -325,28 +506,44 @@ class ParkingProvider extends ChangeNotifier {
   }
 
   /// 把本地模拟状态回写到当前 spots, 保证 3s 刷新后新实例仍保持 (内存态, 重启即丢).
+  /// status/occupiedHours 为不可变字段, 用 copyWith 重建; 其余可变字段直接赋值.
   void _syncLocalState() {
-    for (final spot in _spots) {
-      if (_notifiedSpotIds.contains(spot.id)) {
-        spot.notifyStatus = 'notified';
-      }
-      final name = _handlerNames[spot.id];
-      if (name != null) {
-        spot.handlerName = name;
-      }
-      final handledAt = _handledAts[spot.id];
-      if (handledAt != null) {
-        spot.handledAt = handledAt;
+    _spots = [
+      for (final spot in _spots) _applyLocalStateToSpot(spot),
+    ];
+  }
+
+  SpotModel _applyLocalStateToSpot(SpotModel spot) {
+    var s = spot;
+    /* 模拟车位: 回写用户手动切换的状态, 防止 3s 刷新打回默认 */
+    if (!s.isReal) {
+      final status = _mockStatusOverrides[s.id];
+      if (status != null) {
+        s = s.copyWith(
+          status: status,
+          occupiedHours: _mockOccupiedOverrides[s.id] ?? s.occupiedHours,
+        );
       }
     }
+    if (_notifiedSpotIds.contains(s.id)) {
+      s.notifyStatus = 'notified';
+    }
+    final name = _handlerNames[s.id];
+    if (name != null) {
+      s.handlerName = name;
+    }
+    final handledAt = _handledAts[s.id];
+    if (handledAt != null) {
+      s.handledAt = handledAt;
+    }
+    return s;
   }
 
   /// 检测车位状态转换并自动处理 (每次刷新后调用):
   /// - 僵尸车/超时占用车离开车位 → 自动标记为"已处理" (记录快照供告警中心查看历史)
   /// - 新车进场开始占用 → 开启新一轮, 清空上一轮的 已处理/忽略/通知/派单 记录
   void _handleAutoResolve(Map<String, SpotModel> prevById) {
-    bool wasAlert(SpotModel s) =>
-        s.isZombie || (s.isOccupied && s.occupiedHours >= 24);
+    bool wasAlert(SpotModel s) => s.isZombie; // 告警仅在成为僵尸车时产生
 
     for (final spot in _spots) {
       final prev = prevById[spot.id];
@@ -367,11 +564,9 @@ class ParkingProvider extends ChangeNotifier {
         _handlerNames.putIfAbsent(spot.id, () => '自动处理');
         _dispatchedSpotIds.remove(spot.id);
         _notifiedSpotIds.remove(spot.id);
-        _ignoredAlertIds.remove(spot.id);
       } else if (!prevHadAlert && nowHasAlert) {
         // 新车进场开始占用 → 上一轮记录作废, 重新从待处理开始
         _resolvedAlerts.remove(spot.id);
-        _ignoredAlertIds.remove(spot.id);
         _dispatchedSpotIds.remove(spot.id);
         _notifiedSpotIds.remove(spot.id);
         _handlerNames.remove(spot.id);
@@ -432,14 +627,17 @@ class ParkingProvider extends ChangeNotifier {
   }
 
   /// 每次进入前台(或App启动)触发一轮 OTA 检测:
-  /// 立即查 1 次 + 每 5s 再查 9 次(共 10 次, 约 45~50s), 之后自动停止.
+  /// 立即查 1 次 + 每 [otaIntervalSec]s 再查 [otaCheckCount]-1 次(共 [otaCheckCount] 次),
+  /// 之后自动停止. 检测间隔/次数/开关来自策略配置, 修改即时生效.
   /// 固件升级是低频操作, 无需常驻轮询, 避免长期占用 OneNET 请求配额.
   void beginOtaCheckSession() {
     if (_otaConfirming) return; // 升级进行中不重启检测会话, 避免再次触发升级弹窗
+    if (!_policy.otaEnabled) return; // 关闭 OTA 自动检测: 不启动检测会话
     _otaCheckTimer?.cancel();
-    _otaChecksLeft = 9;
+    _otaChecksLeft = _policy.otaCheckCount - 1;
     _checkOtaTask(); // 进入前台立即查一次
-    _otaCheckTimer = Timer.periodic(const Duration(seconds: 5), (_) {
+    _otaCheckTimer = Timer.periodic(
+        Duration(seconds: _policy.otaIntervalSec), (_) {
       if (_otaChecksLeft <= 0) {
         _otaCheckTimer?.cancel();
         return;

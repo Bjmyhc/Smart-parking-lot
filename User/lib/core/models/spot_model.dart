@@ -9,6 +9,15 @@ class SpotModel {
   final String? lastUpdated;
   final bool isOnline;
 
+  /* 是否已在 OneNET 平台停用(enable_status=false):
+   * 停用设备同样是"不上线", 但语义与纯粹离线区分(离线可能是网络/断电,
+   * 停用是平台主动禁用). 用于 UI 显示"已停用"而非"离线" */
+  final bool isDisabled;
+
+  /* 是否真实设备: true=平台真实节点, false=本地模拟车位.
+   * 平台下发(服务调用/属性设置)只针对真实设备, 模拟车位不参与下发. */
+  final bool isReal;
+
   /* 传感器原始数据 (OneNET 物模型属性, 用于传感器矛盾诊断) */
   final int geoMagnetic; // 地磁检测值: 0=未感应 / 1=感应到车
   final int ultrasonic;  // 超声波距离(cm)
@@ -30,6 +39,8 @@ class SpotModel {
     this.plateNumber,
     this.lastUpdated,
     this.isOnline = true,
+    this.isDisabled = false,
+    this.isReal = true,  /* 真实设备默认 true, 模拟车位显式传 false */
     this.notifyStatus = 'none',
     this.handlerName,
     this.handledAt,
@@ -43,12 +54,18 @@ class SpotModel {
         ? Map<String, dynamic>.from(rawProperties)
         : <String, dynamic>{};
     final isOnline = json['online'] as bool? ?? (json['status'] as String? ?? 'offline') == 'online';
+    // 平台停用: enable_status=false 或上游已归一 is_disabled=true
+    final isDisabled = json['is_disabled'] == true ||
+        json['enable_status'] == false ||
+        json['enable_status'] == 'false';
 
     // 车位状态以节点端上报的 ParkStatus 为准: 0=空闲, 1=有车, 2=僵尸车
     final parkStatus = properties['ParkStatus'] as int? ?? 0;
 
     String status;
-    if (!isOnline) {
+    if (isDisabled) {
+      status = 'disabled';
+    } else if (!isOnline) {
       status = 'offline';
     } else if (parkStatus == 1) {
       status = 'occupied';
@@ -79,6 +96,7 @@ class SpotModel {
       plateNumber: json['plate_number'] as String?,
       lastUpdated: json['updated_at'] as String?,
       isOnline: isOnline,
+      isDisabled: isDisabled,
     );
   }
 
@@ -100,15 +118,55 @@ class SpotModel {
       'plate_number': plateNumber,
       'last_updated': lastUpdated,
       'is_online': isOnline,
+      'is_real': isReal,
       'notify_status': notifyStatus,
       'handler_name': handlerName,
       'handled_at': handledAt?.toIso8601String(),
     };
   }
 
+  /// 基于当前车位重建, 仅改动提供参数字段.
+  /// 用于本地模拟车位点击图标循环切换状态(内存态, 不落库).
+  SpotModel copyWith({
+    String? status,
+    int? occupiedHours,
+    String? plateNumber,
+    String? lastUpdated,
+    bool? isOnline,
+    bool? isDisabled,
+    bool? isReal,
+    String? notifyStatus,
+    String? handlerName,
+    DateTime? handledAt,
+    double? batteryLevel,
+    int? signalStrength,
+    int? geoMagnetic,
+    int? ultrasonic,
+  }) {
+    return SpotModel(
+      id: id,
+      zone: zone,
+      status: status ?? this.status,
+      occupiedHours: occupiedHours ?? this.occupiedHours,
+      batteryLevel: batteryLevel ?? this.batteryLevel,
+      signalStrength: signalStrength ?? this.signalStrength,
+      geoMagnetic: geoMagnetic ?? this.geoMagnetic,
+      ultrasonic: ultrasonic ?? this.ultrasonic,
+      plateNumber: plateNumber ?? this.plateNumber,
+      lastUpdated: lastUpdated ?? this.lastUpdated,
+      isOnline: isOnline ?? this.isOnline,
+      isDisabled: isDisabled ?? this.isDisabled,
+      isReal: isReal ?? this.isReal,
+      notifyStatus: notifyStatus ?? this.notifyStatus,
+      handlerName: handlerName ?? this.handlerName,
+      handledAt: handledAt ?? this.handledAt,
+    );
+  }
+
   bool get isFree => status == 'free';
   bool get isOccupied => status == 'occupied';
   bool get isZombie => status == 'zombie';
   bool get isOffline => status == 'offline';
+  bool get isDisabledSpot => status == 'disabled';
   bool get isNotified => notifyStatus == 'notified';
 }

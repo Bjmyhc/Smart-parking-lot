@@ -54,7 +54,7 @@ class _StatsPageState extends State<StatsPage> {
                           ),
                           const SizedBox(height: 8),
                           Text(
-                            '截至 ${_formatDate(DateTime.now())} 的统计数据',
+                            '截至 ${_formatDate(DateTime.now())} 的实时统计数据',
                             style: const TextStyle(
                               fontSize: 14,
                               color: AppColors.textSecondary,
@@ -63,7 +63,7 @@ class _StatsPageState extends State<StatsPage> {
                           const SizedBox(height: 24),
                           _buildOccupancyChart(stats),
                           const SizedBox(height: 24),
-                          _buildWeeklyTrend(stats),
+                          _buildHourlyTrend(stats),
                           const SizedBox(height: 100),
                         ],
                       ),
@@ -118,8 +118,8 @@ class _StatsPageState extends State<StatsPage> {
 
   Widget _buildOccupancyChart(StatsModel stats) {
     final occupancyRate = stats.occupancyRate;
-    final zombieRate = stats.totalSpots > 0 
-        ? stats.zombieSpots / stats.totalSpots 
+    final zombieRate = stats.totalSpots > 0
+        ? stats.zombieSpots / stats.totalSpots
         : 0.0;
     final freeRate = 1.0 - occupancyRate - zombieRate;
 
@@ -252,15 +252,17 @@ class _StatsPageState extends State<StatsPage> {
     );
   }
 
-  Widget _buildWeeklyTrend(StatsModel stats) {
-    final trend = stats.weeklyTrend;
+  Widget _buildHourlyTrend(StatsModel stats) {
+    final trend = stats.hourlyTrend;
+    final now = DateTime.now();
+    final currentHour = now.hour;
 
     return CardContainer(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const Text(
-            '一周趋势',
+            '今日实时趋势',
             style: TextStyle(
               fontSize: 16,
               fontWeight: FontWeight.w600,
@@ -269,7 +271,7 @@ class _StatsPageState extends State<StatsPage> {
           ),
           const SizedBox(height: 8),
           const Text(
-            '平均占用率和告警数量',
+            '每小时占用率变化',
             style: TextStyle(
               fontSize: 13,
               color: AppColors.textSecondary,
@@ -278,134 +280,128 @@ class _StatsPageState extends State<StatsPage> {
           const SizedBox(height: 24),
           SizedBox(
             height: 200,
-            child: trend.isEmpty
-                ? const Center(
-                    child: Text(
-                      '暂无趋势数据',
-                      style: TextStyle(color: AppColors.textSecondary),
-                    ),
-                  )
-                : LineChart(
-                    LineChartData(
-                      gridData: FlGridData(
-                        show: true,
-                        drawVerticalLine: false,
-                        horizontalInterval: 20,
-                        getDrawingHorizontalLine: (value) {
-                          return FlLine(
-                            color: AppColors.textSecondary.withValues(alpha: 0.2),
-                            strokeWidth: 1,
+            child: LineChart(
+              LineChartData(
+                gridData: FlGridData(
+                  show: true,
+                  drawVerticalLine: false,
+                  horizontalInterval: 25,
+                  getDrawingHorizontalLine: (value) {
+                    return FlLine(
+                      color: AppColors.textSecondary.withValues(alpha: 0.2),
+                      strokeWidth: 1,
+                    );
+                  },
+                ),
+                titlesData: FlTitlesData(
+                  show: true,
+                  rightTitles: const AxisTitles(
+                    sideTitles: SideTitles(showTitles: false),
+                  ),
+                  topTitles: const AxisTitles(
+                    sideTitles: SideTitles(showTitles: false),
+                  ),
+                  bottomTitles: AxisTitles(
+                    sideTitles: SideTitles(
+                      showTitles: true,
+                      interval: 3,
+                      getTitlesWidget: (value, meta) {
+                        final h = value.toInt();
+                        if (h >= 0 && h < 24 && h % 3 == 0) {
+                          return Padding(
+                            padding: const EdgeInsets.only(top: 8),
+                            child: Text(
+                              '${h.toString().padLeft(2, '0')}:00',
+                              style: const TextStyle(
+                                fontSize: 10,
+                                color: AppColors.textSecondary,
+                              ),
+                            ),
                           );
-                        },
-                      ),
-                      titlesData: FlTitlesData(
-                        show: true,
-                        rightTitles: const AxisTitles(
-                          sideTitles: SideTitles(showTitles: false),
-                        ),
-                        topTitles: const AxisTitles(
-                          sideTitles: SideTitles(showTitles: false),
-                        ),
-                        bottomTitles: AxisTitles(
-                          sideTitles: SideTitles(
-                            showTitles: true,
-                            interval: 1,
-                            getTitlesWidget: (value, meta) {
-                              if (value.toInt() >= 0 && value.toInt() < trend.length) {
-                                return Padding(
-                                  padding: const EdgeInsets.only(top: 8),
-                                  child: Text(
-                                    trend[value.toInt()].date,
-                                    style: const TextStyle(
-                                      fontSize: 11,
-                                      color: AppColors.textSecondary,
-                                    ),
-                                  ),
-                                );
-                              }
-                              return const SizedBox.shrink();
-                            },
-                          ),
-                        ),
-                        leftTitles: AxisTitles(
-                          sideTitles: SideTitles(
-                            showTitles: true,
-                            interval: 20,
-                            getTitlesWidget: (value, meta) {
-                              return Text(
-                                '${value.toInt()}%',
-                                style: const TextStyle(
-                                  fontSize: 11,
-                                  color: AppColors.textSecondary,
-                                ),
-                              );
-                            },
-                          ),
-                        ),
-                      ),
-                      borderData: FlBorderData(
-                        show: true,
-                        border: Border.all(
-                          color: AppColors.textSecondary.withValues(alpha: 0.2),
-                          width: 1,
-                        ),
-                      ),
-                      minX: 0,
-                      maxX: trend.length.toInt() - 1,
-                      minY: 0,
-                      maxY: 100,
-                      lineTouchData: LineTouchData(
-                        touchTooltipData: LineTouchTooltipData(
-                          getTooltipItems: (touchedSpots) {
-                            return touchedSpots.map((spot) {
-                              final index = spot.x.toInt();
-                              if (index >= 0 && index < trend.length) {
-                                return LineTooltipItem(
-                                  '${trend[index].date}: ${spot.y.toStringAsFixed(0)}%',
-                                  const TextStyle(
-                                    color: AppColors.textPrimary,
-                                    fontWeight: FontWeight.w600,
-                                  ),
-                                );
-                              }
-                              return null;
-                            }).toList();
-                          },
-                        ),
-                      ),
-                      lineBarsData: [
-                        LineChartBarData(
-                          spots: trend.asMap().entries.map((entry) {
-                            return FlSpot(
-                              entry.key.toDouble(),
-                              entry.value.avgOccupancy.toDouble(),
-                            );
-                          }).toList(),
-                          isCurved: true,
-                          color: AppColors.primary,
-                          barWidth: 3,
-                          isStrokeCapRound: true,
-                          dotData: const FlDotData(
-                            show: true,
-                          ),
-                        ),
-                      ],
+                        }
+                        return const SizedBox.shrink();
+                      },
                     ),
                   ),
+                  leftTitles: AxisTitles(
+                    sideTitles: SideTitles(
+                      showTitles: true,
+                      interval: 25,
+                      getTitlesWidget: (value, meta) {
+                        return Text(
+                          '${value.toInt()}%',
+                          style: const TextStyle(
+                            fontSize: 11,
+                            color: AppColors.textSecondary,
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                ),
+                borderData: FlBorderData(
+                  show: true,
+                  border: Border.all(
+                    color: AppColors.textSecondary.withValues(alpha: 0.2),
+                    width: 1,
+                  ),
+                ),
+                minX: 0,
+                maxX: 23,
+                minY: 0,
+                maxY: 100,
+                lineTouchData: LineTouchData(
+                  touchTooltipData: LineTouchTooltipData(
+                    getTooltipItems: (touchedSpots) {
+                      return touchedSpots.map((spot) {
+                        final h = spot.x.toInt();
+                        return LineTooltipItem(
+                          '${h.toString().padLeft(2, '0')}:00 ${spot.y.toStringAsFixed(0)}%',
+                          const TextStyle(
+                            color: AppColors.textPrimary,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        );
+                      }).toList();
+                    },
+                  ),
+                ),
+                lineBarsData: [
+                  LineChartBarData(
+                    spots: trend.map((t) {
+                      return FlSpot(
+                        t.hour.toDouble(),
+                        t.occupancyRate.toDouble(),
+                      );
+                    }).toList(),
+                    isCurved: true,
+                    color: AppColors.primary,
+                    barWidth: 2,
+                    isStrokeCapRound: true,
+                    dotData: FlDotData(
+                      show: true,
+                      checkToShowDot: (spot, data) {
+                        return spot.x == currentHour || spot.y > 0;
+                      },
+                    ),
+                  ),
+                ],
+              ),
+            ),
           ),
           const SizedBox(height: 16),
-          _buildAlertsList(trend),
+          _buildCurrentStatus(stats, currentHour),
         ],
       ),
     );
   }
 
-  Widget _buildAlertsList(List<DailyTrend> trend) {
-    final totalAlerts = trend.fold<int>(0, (sum, item) => sum + item.alertsCount);
+  Widget _buildCurrentStatus(StatsModel stats, int currentHour) {
+    final occupiedRate = stats.occupancyRate;
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: AppColors.warning.withValues(alpha: 0.1),
+        color: AppColors.primary.withValues(alpha: 0.08),
         borderRadius: BorderRadius.circular(AppDims.radiusMedium),
       ),
       child: Row(
@@ -414,10 +410,10 @@ class _StatsPageState extends State<StatsPage> {
             width: 40,
             height: 40,
             decoration: BoxDecoration(
-              color: AppColors.warning.withValues(alpha: 0.2),
+              color: AppColors.primary.withValues(alpha: 0.2),
               borderRadius: BorderRadius.circular(8),
             ),
-            child: const Icon(Icons.notifications_active, color: AppColors.warning),
+            child: const Icon(Icons.update, color: AppColors.primary),
           ),
           const SizedBox(width: 12),
           Expanded(
@@ -425,7 +421,7 @@ class _StatsPageState extends State<StatsPage> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 const Text(
-                  '本周告警总数',
+                  '当前占用率',
                   style: TextStyle(
                     fontSize: 14,
                     color: AppColors.textSecondary,
@@ -433,14 +429,22 @@ class _StatsPageState extends State<StatsPage> {
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  '$totalAlerts 起',
+                  '${(occupiedRate * 100).toStringAsFixed(1)}% · ${stats.occupiedSpots}/${stats.totalSpots} 车位',
                   style: const TextStyle(
                     fontSize: 20,
                     fontWeight: FontWeight.w700,
-                    color: AppColors.warning,
+                    color: AppColors.primary,
                   ),
                 ),
               ],
+            ),
+          ),
+          Text(
+            '${currentHour.toString().padLeft(2, '0')}:00',
+            style: const TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w600,
+              color: AppColors.textSecondary,
             ),
           ),
         ],

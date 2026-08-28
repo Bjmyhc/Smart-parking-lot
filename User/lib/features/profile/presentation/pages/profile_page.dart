@@ -5,6 +5,7 @@ import '../../../../core/theme/app_dims.dart';
 import 'firmware_upgrade_page.dart';
 import 'diagnosis_page.dart';
 import 'operation_log_page.dart';
+import 'policy_config_page.dart';
 
 class ProfilePage extends StatelessWidget {
   const ProfilePage({super.key});
@@ -31,7 +32,7 @@ class ProfilePage extends StatelessWidget {
                 children: [
                   _buildUserCard(),
                   const SizedBox(height: 12),
-                  _buildSystemGroup(),
+                  _buildSystemGroup(context),
                   const SizedBox(height: 12),
                   _buildDeviceGroup(context),
                   const SizedBox(height: 12),
@@ -173,7 +174,7 @@ class ProfilePage extends StatelessWidget {
     );
   }
 
-  Widget _buildSystemGroup() {
+  Widget _buildSystemGroup(BuildContext context) {
     return CardContainer(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
       child: Column(
@@ -191,6 +192,19 @@ class ProfilePage extends StatelessWidget {
           _buildGroupItem(
             icon: Icons.policy_outlined,
             title: '策略配置',
+            onTap: () {
+              // 与固件升级页一致的纯淡入转场
+              Navigator.push(
+                context,
+                PageRouteBuilder(
+                  transitionDuration: const Duration(milliseconds: 200),
+                  pageBuilder: (context, animation, secondaryAnimation) =>
+                      const PolicyConfigPage(),
+                  transitionsBuilder: (context, animation, secondaryAnimation, child) =>
+                      FadeTransition(opacity: animation, child: child),
+                ),
+              );
+            },
           ),
         ],
       ),

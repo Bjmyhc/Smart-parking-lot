@@ -17,6 +17,7 @@
 #include "app_cfg.h"      /* 轮询范围/超时/发现间隔/DBG */
 #include "node_data.h"
 #include "ota_handler.h"  /* OTA 响应字节转发 */
+#include "onenet_handler.h" /* ⭐ 阈值下发结果补回服务调用回复 */
 
 #if defined(ESP32)
   #include <HardwareSerial.h>
@@ -33,7 +34,7 @@
 /* ---------- 接收状态机 ----------
  * 从 LoRa 串口读到的字节 (定点传输会自动剥掉 3 字节地址头)
  * 格式: [帧头字节] + payload
- * - LORA_FRAME_DATA: payload = LoraNodeData_t (10字节)
+ * - LORA_FRAME_DATA: payload = LoraNodeData_t (30字节)
  * - LORA_FRAME_CERT: payload = LoraNodeCert_t
  * - LORA_FRAME_ACK:  payload = ASCII命令字符串 (非固定长度, 以\r结尾) */
 enum RxState {
@@ -189,6 +190,19 @@ static bool handleCompleteFrame(uint8_t header)
         rxBuf[rxGot] = '\0';
         DBG_PRINTF("[LoRa] 收到<- 节点%d 确认: %s\n", nodeId, (char *)rxBuf);
         gotData = true;
+        /* ⭐ 阈值下发成功: 收到 ACK 后才清除标志, 重置重试计数,
+         * 并向平台补回"同步服务调用"回复(成功 Result=1) */
+        if (strcmp((char *)rxBuf, "AT+ZombieThreshold") == 0)
+        {
+            int slot = findNode(nodeId);
+            if (slot >= 0)
+            {
+                nodes[slot].thresholdNeedsUpdate = false;
+                nodes[slot].thresholdRetryCount = 0;
+                DBG_PRINTF("[LoRa] 节点%d 僵尸车阈值下发成功\n", nodeId);
+                onenet_notifyServiceResult(slot, true, nodes[slot].thresholdValue);
+            }
+        }
         /* PING 通(PONG)即视为节点存活: 刷新在线状态与活性时间,
          * 并处理"掉线恢复"需要重新代上线(与收到数据的恢复逻辑一致) */
         if (strcmp((char *)rxBuf, "PONG") == 0)
@@ -202,6 +216,26 @@ static bool handleCompleteFrame(uint8_t header)
                 nd.lastUpdate = millis();
                 if (wasOffline && nd.certSent && !nd.subLogin)
                     nd.loginPending = true;
+                /* ⭐ 方案三: PONG 确认在线后, 触发阈值下发 (限次重试)
+                 * 最多重试 3 次, 超过后放弃 (防止旧固件节点阻塞) */
+                if (nd.thresholdNeedsUpdate && nd.certSent && nd.thresholdRetryCount < 3)
+                {
+                    nd.thresholdRetryCount++;  /* 重试次数+1 */
+                    lora_sendControl(nodeId, "ZombieThreshold", nd.thresholdValue);
+                    if (nd.thresholdRetryCount >= 3)
+                    {
+                        /* 超过3次, 清除标志, 等待用户重新下发或节点升级后重试 */
+                        nd.thresholdNeedsUpdate = false;
+                        onenet_notifyServiceResult(slot, false, 0);   /* ⭐ 回平台失败 */
+                        DBG_PRINTF("[LoRa] 节点%d 僵尸车阈值重试%d次失败, 放弃 (等节点升级或重新下发)\n",
+                                   nodeId, nd.thresholdRetryCount);
+                    }
+                    else
+                    {
+                        DBG_PRINTF("[LoRa] 节点%d 在线, 下发僵尸车阈值=%d秒 (重试%d/3, 待ACK)\n",
+                                   nodeId, nd.thresholdValue, nd.thresholdRetryCount);
+                    }
+                }
             }
         }
         break;
@@ -474,9 +508,31 @@ bool lora_tick(void)
         else if (certOk && online)
         {
             /* 已注册在线节点: 快速路径, 直接发 DATA (不经过 PING) */
-            bool verify = shouldVerifyCert(currentNode);
-            sendAT(currentNode, verify ? "CER" : "DATA", 0, false);
-            respTimeout = LORA_RESPONSE_TIMEOUT_MS;
+            /* ⭐ 方案三补充: 若该节点有待下发的阈值, 且重试次数<3, 先下发阈值 */
+            if (slot >= 0 && nodes[slot].thresholdNeedsUpdate && nodes[slot].thresholdRetryCount < 3)
+            {
+                nodes[slot].thresholdRetryCount++;  /* 重试次数+1 */
+                lora_sendControl(currentNode, "ZombieThreshold", nodes[slot].thresholdValue);
+                if (nodes[slot].thresholdRetryCount >= 3)
+                {
+                    /* 超过3次, 清除标志, 防止阻塞 */
+                    nodes[slot].thresholdNeedsUpdate = false;
+                    onenet_notifyServiceResult(slot, false, 0);   /* ⭐ 回平台失败 */
+                    DBG_PRINTF("[LoRa] 节点%d 僵尸车阈值重试%d次失败, 放弃 (等节点升级或重新下发)\n",
+                               currentNode, nodes[slot].thresholdRetryCount);
+                }
+                else
+                {
+                    DBG_PRINTF("[LoRa] 节点%d 在线, 快速路径下发僵尸车阈值=%d秒 (重试%d/3, 待ACK)\n",
+                               currentNode, nodes[slot].thresholdValue, nodes[slot].thresholdRetryCount);
+                }
+            }
+            else
+            {
+                bool verify = shouldVerifyCert(currentNode);
+                sendAT(currentNode, verify ? "CER" : "DATA", 0, false);
+                respTimeout = LORA_RESPONSE_TIMEOUT_MS;
+            }
         }
         else if (slot < 0)
         {

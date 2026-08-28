@@ -161,7 +161,7 @@ class _SpotsPageState extends State<SpotsPage> {
     final bgColor = _getSpotColor(spot);
     final statusText = _getSpotStatusText(spot);
     final iconData = _getSpotIcon(spot);
-    final canAct = !spot.isFree && !spot.isOffline;
+    final canAct = !spot.isFree && !spot.isOffline && !spot.isDisabledSpot;
 
     return GestureDetector(
       onTap: () => _navigateToDetail(context, spot),
@@ -175,14 +175,24 @@ class _SpotsPageState extends State<SpotsPage> {
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
           child: Row(
             children: [
-              Container(
-                width: 40,
-                height: 40,
-                decoration: BoxDecoration(
-                  color: bgColor.withValues(alpha: 0.12),
-                  borderRadius: BorderRadius.circular(10),
+              GestureDetector(
+                onTap: () {
+                  // 模拟车位: 点击图标循环切换状态(空闲→占用→僵尸), 真实设备照常进详情
+                  if (!spot.isReal) {
+                    provider.cycleMockStatus(spot.id);
+                  } else {
+                    _navigateToDetail(context, spot);
+                  }
+                },
+                child: Container(
+                  width: 40,
+                  height: 40,
+                  decoration: BoxDecoration(
+                    color: bgColor.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Icon(iconData, color: bgColor, size: 22),
                 ),
-                child: Icon(iconData, color: bgColor, size: 22),
               ),
               const SizedBox(width: 12),
               Expanded(
@@ -343,6 +353,7 @@ class _SpotsPageState extends State<SpotsPage> {
   /* ==================== 辅助方法 ==================== */
 
   Color _getSpotColor(SpotModel spot) {
+    if (spot.isDisabledSpot) return AppColors.textSecondary;
     if (spot.isOffline) return AppColors.textSecondary;
     if (spot.isFree) return AppColors.success;
     if (spot.isOccupied) return AppColors.warning;
@@ -350,6 +361,7 @@ class _SpotsPageState extends State<SpotsPage> {
   }
 
   String _getSpotStatusText(SpotModel spot) {
+    if (spot.isDisabledSpot) return '已停用';
     if (spot.isOffline) return '离线';
     if (spot.isFree) return '空闲';
     if (spot.isOccupied) return '占用';
@@ -357,6 +369,7 @@ class _SpotsPageState extends State<SpotsPage> {
   }
 
   IconData _getSpotIcon(SpotModel spot) {
+    if (spot.isDisabledSpot) return Icons.block;
     if (spot.isOffline) return Icons.cloud_off;
     if (spot.isFree) return Icons.local_parking;
     if (spot.isOccupied) return Icons.directions_car;
@@ -364,6 +377,7 @@ class _SpotsPageState extends State<SpotsPage> {
   }
 
   String _getSpotSubText(SpotModel spot) {
+    if (spot.isDisabledSpot) return '设备已停用';
     if (spot.isOffline) return '设备离线';
     if (spot.isFree) return '暂无车辆';
     return '占用 ${spot.occupiedHours}h';

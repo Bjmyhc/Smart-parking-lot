@@ -10,9 +10,13 @@ class ApiService {
   static const String _baseUrl = 'https://iot-api.heclouds.com';
   // 车位列表只展示节点产品(04kjwU9TC7)下的设备; 网关产品(9YIs0S7V11)不是车位, 不纳入列表
   static const String _nodeProductId = '04kjwU9TC7';
+  static const String nodeProductId = _nodeProductId; // 公开访问
   // 网关设备(承载 OtaAllow 全网升级确认门控): OtaAllow 是网关自身属性, 下发目标为 PGW001
   static const String gatewayProductId = '9YIs0S7V11';
   static const String gatewayDeviceId = 'PGW001';
+  // 摄像头独立设备(车牌识别): Park001 车位在线时, 从这里拉真实车牌补到车位卡片
+  static const String cameraProductId = '4enONCu0Y7';
+  static const String cameraDeviceId = 'Cam001';
   static const String _userId = '528332';
   static const String _accessKey = 'e3b97243b0d24ffda1befead601ef617';
 
@@ -60,6 +64,8 @@ class ApiService {
         }
         realSpots = parsed;
         debugPrint('>>> 真实设备: ${realSpots.length} 台');
+        // ⭐ 补摄像头识别到的真实车牌: 必须 Park001 节点在线才查 Cam001(HTTP API 查询, 不用MQTT), 不在线跳过
+        realSpots = await _patchCameraPlates(realSpots);
       }
     } catch (e) {
       debugPrint('>>> 获取真实设备失败: $e');
@@ -123,7 +129,12 @@ class ApiService {
             final statusValue = device['status'];
             final isOnline = statusValue == 1 || statusValue == 'online' || statusValue == true;
             device['online'] = isOnline;
-            debugPrint('>>> 设备: ${device['name']} (${isOnline ? "在线" : "离线"})');
+            // enable_status: 设备启用状态, false=已在平台停用(区别于"纯粹离线")
+            final enabled = device['enable_status'];
+            final isDisabled = enabled == false || enabled == 'false';
+            device['is_disabled'] = isDisabled;
+            debugPrint('>>> 设备: ${device['name']} '
+                '(online=${isOnline ? "在线" : "离线"}, enable_status=$enabled${isDisabled ? ", 已停用" : ""})');
             devices.add(device);
           }
           return devices;
@@ -272,6 +283,50 @@ class ApiService {
     }
   }
 
+  /// 把摄像头 Cam001 识别到的真实车牌补到关联车位卡片上.
+  /// 关联规则(当前硬编码, 以后可扩展为映射表):
+  ///   车位 Park001 在线 → 从摄像头 Cam001(产品 4enONCu0Y7) 拉 PlateNumber 属性,
+  ///   摄像头离线 / PlateNumber 为空 / 查询失败 → 不补, 保持车位原 plateNumber(未知车牌).
+  /// ⚠️ 用户要求严格顺序: 必须 Park001 节点在线才查摄像头, 不在线直接跳过不查.
+  Future<List<SpotModel>> _patchCameraPlates(List<SpotModel> spots) async {
+    try {
+      // 1. 先找 Park001 且在线的车位 → 用户要求: 不在线就不查摄像头, 直接跳过
+      final park001Idx = spots.indexWhere(
+        (s) => s.id == 'Park001' && s.isOnline && !s.isDisabled,
+      );
+      if (park001Idx < 0) {
+        debugPrint('>>> 摄像头补车牌: Park001 离线/不存在/已停用, 跳过查询');
+        return spots;
+      }
+
+      // 2. Park001 在线 → 查 Cam001 摄像头设备属性
+      debugPrint('>>> 摄像头补车牌: Park001 在线, 查询 Cam001 属性...');
+      final camDetail = await getDeviceDetail(cameraDeviceId, productId: cameraProductId);
+      final camProps = camDetail['properties'] as Map?;
+      if (camProps == null) {
+        debugPrint('>>> 摄像头补车牌: Cam001 无属性(离线/未上报), 跳过');
+        return spots;
+      }
+
+      // 3. 提取 PlateNumber, 空字符串就不补 (用户说不管准确性, 先连通, 有值就填)
+      final rawPlate = camProps['PlateNumber'];
+      final plate = rawPlate?.toString().trim();
+      if (plate == null || plate.isEmpty) {
+        debugPrint('>>> 摄像头补车牌: Cam001 PlateNumber 为空, 跳过');
+        return spots;
+      }
+
+      // 4. 填到 Park001 车位上 (copyWith 重建对象避免副作用)
+      final newList = List<SpotModel>.from(spots);
+      newList[park001Idx] = newList[park001Idx].copyWith(plateNumber: plate);
+      debugPrint('✅ 摄像头补车牌: Park001 ← $plate');
+      return newList;
+    } catch (e) {
+      debugPrint('⚠️ 摄像头补车牌失败(不影响车位列表加载): $e');
+      return spots;   /* 查询异常就返回原列表, 绝不破坏主流程 */
+    }
+  }
+
   Future<bool> setProperty(String deviceName, String identifier, dynamic value, {String? productId}) async {
     try {
       final pid = productId ?? _nodeProductId;
@@ -297,11 +352,107 @@ class ApiService {
 
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
-        return data['code'] == 0;
+        final success = data['code'] == 0;
+        debugPrint('✅ setProperty($deviceName, $identifier, $value): code=${data['code']} msg=${data['msg']}');
+        return success;
+      } else {
+        debugPrint('❌ setProperty HTTP error: ${response.statusCode}');
+        return false;
+      }
+    } catch (e) {
+      debugPrint('❌ setProperty exception: $e');
+      return false;
+    }
+  }
+
+  /// 调用物模型服务 (同步): 平台在 ~10s 内返回服务执行结果.
+  /// 用于节点物模型服务 SetZombieThreshold 等; 返回解析后的 output(Map) 或 null(失败/异常).
+  /// 注: 服务定义在节点产品物模型上, product_id 需传节点产品 (默认).
+  Future<Map<String, dynamic>?> callService(
+    String deviceName,
+    String identifier,
+    Map<String, dynamic> params, {
+    String? productId,
+  }) async {
+    try {
+      final pid = productId ?? _nodeProductId;
+      final auth = _generateAuthorization();
+      final url = Uri.parse('$_baseUrl/thingmodel/call-service');
+
+      final response = await _client.post(
+        url,
+        headers: {
+          'Authorization': auth,
+          'Content-Type': 'application/json',
+        },
+        body: json.encode({
+          'product_id': pid,
+          'device_name': deviceName,
+          'identifier': identifier,
+          'params': params,
+        }),
+      );
+
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        debugPrint('✅ callService($deviceName, $identifier): code=${data['code']} msg=${data['msg']}');
+        debugPrint('>>> 响应体: ${response.body}');
+        if (data['code'] == 0) {
+          final out = data['data'];
+          if (out is Map) {
+            // 平台可能把输出直接放在 data 下, 也可能包一层 output
+            final output = out['output'];
+            if (output is Map) return Map<String, dynamic>.from(output);
+            return Map<String, dynamic>.from(out);
+          }
+        }
+        return null;
+      } else {
+        debugPrint('❌ callService HTTP error: ${response.statusCode}');
+        return null;
+      }
+    } catch (e) {
+      debugPrint('❌ callService exception: $e');
+      return null;
+    }
+  }
+
+  /// 检查网关设备是否在线
+  Future<bool> isGatewayOnline() async {
+    try {
+      final auth = _generateAuthorization();
+      final url = Uri.parse('$_baseUrl/device/list?product_id=$gatewayProductId&offset=0&limit=20');
+
+      final response = await _client.get(
+        url,
+        headers: {
+          'Authorization': auth,
+          'Content-Type': 'application/json',
+        },
+      );
+
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        if (data['code'] == 0) {
+          final List<dynamic> rawList = data['data']['list'] ?? [];
+          for (final d in rawList) {
+            final device = Map<String, dynamic>.from(d as Map);
+            final name = device['name'] ?? device['deviceName'] ?? '';
+            if (name == gatewayDeviceId) {
+              final statusValue = device['status'];
+              final isOnline = statusValue == 1 || statusValue == 'online' || statusValue == true;
+              debugPrint('✅ 网关 $gatewayDeviceId 状态: ${isOnline ? "在线" : "离线"} (status=$statusValue)');
+              return isOnline;
+            }
+          }
+          debugPrint('⚠️ 未找到网关设备 $gatewayDeviceId');
+          return false;  /* 未找到网关设备, 视为离线 */
+        }
       }
       return false;
     } catch (e) {
-      return true;
+      debugPrint('❌ isGatewayOnline exception: $e');
+      return false;
     }
   }
 
@@ -448,19 +599,20 @@ class ApiService {
     }
   }
 
-  Future<List<AlertModel>> getAlerts() async {
+  /// 派生告警列表. 阈值由策略配置传入: [alertSec]=停车超时告警阈值(秒).
+  Future<List<AlertModel>> getAlerts({int alertSec = 3600}) async {
     try {
       final spots = await getSpots();
       final alerts = <AlertModel>[];
 
       for (final spot in spots) {
-        if (spot.isOccupied && spot.occupiedHours >= 24) {
+        if (spot.isOccupied && spot.occupiedHours * 3600 >= alertSec) {
           alerts.add(AlertModel(
             id: 'alert_',
             plateNumber: spot.plateNumber ?? '未知车牌',
             spotId: spot.id,
             occupiedHours: spot.occupiedHours,
-            status: spot.occupiedHours >= 72 ? 'pending' : 'dispatched',
+            status: 'pending',
             createdAt: DateTime.now().subtract(Duration(hours: spot.occupiedHours)),
           ));
         }
@@ -477,17 +629,17 @@ class ApiService {
   }
 
   Future<bool> dispatchAlert(String alertId) async {
-    await Future.delayed(const Duration(seconds: 1));
+    await Future.delayed(const Duration(milliseconds: 250));
     return true;
   }
 
   Future<bool> notifyOwner(String alertId) async {
-    await Future.delayed(const Duration(seconds: 1));
+    await Future.delayed(const Duration(milliseconds: 250));
     return true;
   }
 
   Future<bool> resolveAlert(String alertId) async {
-    await Future.delayed(const Duration(seconds: 1));
+    await Future.delayed(const Duration(milliseconds: 250));
     return true;
   }
 
@@ -504,7 +656,7 @@ class ApiService {
         occupiedSpots: occupied,
         zombieSpots: zombie,
         occupancyRate: rate,
-        weeklyTrend: _getMockWeeklyTrend(),
+        hourlyTrend: [],
       );
     } catch (e) {
       return StatsModel.empty();
@@ -512,18 +664,19 @@ class ApiService {
   }
 
   List<SpotModel> _getMockSpots() {
-    // 模拟车位编号与真实设备命名一致 (Park00x), 便于真实/本地模式统一展示
+    // 模拟车位编号与真实设备命名一致 (Park00x), 便于真实/本地模式统一展示.
+    // 全部标记 isReal: false → 平台下发(服务调用/属性设置)会跳过模拟车位.
     return [
-      SpotModel(id: 'Park001', zone: 'A', status: 'occupied', occupiedHours: 2, batteryLevel: 85, signalStrength: -65, geoMagnetic: 1, ultrasonic: 3, plateNumber: '京A·12345'),
-      SpotModel(id: 'Park002', zone: 'A', status: 'free', occupiedHours: 0, batteryLevel: 90, signalStrength: -60, geoMagnetic: 0, ultrasonic: 80),
-      SpotModel(id: 'Park003', zone: 'A', status: 'zombie', occupiedHours: 72, batteryLevel: 45, signalStrength: -75, geoMagnetic: 1, ultrasonic: 3, plateNumber: '京B·67890'),
-      SpotModel(id: 'Park004', zone: 'B', status: 'occupied', occupiedHours: 5, batteryLevel: 80, signalStrength: -70, geoMagnetic: 1, ultrasonic: 4, plateNumber: '京C·11111'),
-      SpotModel(id: 'Park005', zone: 'B', status: 'free', occupiedHours: 0, batteryLevel: 88, signalStrength: -62, geoMagnetic: 0, ultrasonic: 90),
-      SpotModel(id: 'Park006', zone: 'B', status: 'occupied', occupiedHours: 1, batteryLevel: 92, signalStrength: -58, geoMagnetic: 1, ultrasonic: 5, plateNumber: '京D·22222'),
-      SpotModel(id: 'Park007', zone: 'C', status: 'offline', isOnline: false),
-      SpotModel(id: 'Park008', zone: 'C', status: 'free', occupiedHours: 0, batteryLevel: 95, signalStrength: -55, geoMagnetic: 0, ultrasonic: 75),
+      SpotModel(id: 'Park001', zone: 'A', status: 'occupied', occupiedHours: 2, batteryLevel: 85, signalStrength: -65, geoMagnetic: 1, ultrasonic: 3, plateNumber: '京A·12345', isReal: false),
+      SpotModel(id: 'Park002', zone: 'A', status: 'free', occupiedHours: 0, batteryLevel: 90, signalStrength: -60, geoMagnetic: 0, ultrasonic: 80, plateNumber: '京A·54321', isReal: false),
+      SpotModel(id: 'Park003', zone: 'A', status: 'zombie', occupiedHours: 72, batteryLevel: 45, signalStrength: -75, geoMagnetic: 1, ultrasonic: 3, plateNumber: '京B·67890', isReal: false),
+      SpotModel(id: 'Park004', zone: 'B', status: 'occupied', occupiedHours: 5, batteryLevel: 80, signalStrength: -70, geoMagnetic: 1, ultrasonic: 4, plateNumber: '京C·11111', isReal: false),
+      SpotModel(id: 'Park005', zone: 'B', status: 'free', occupiedHours: 0, batteryLevel: 88, signalStrength: -62, geoMagnetic: 0, ultrasonic: 90, plateNumber: '京B·11111', isReal: false),
+      SpotModel(id: 'Park006', zone: 'B', status: 'occupied', occupiedHours: 1, batteryLevel: 92, signalStrength: -58, geoMagnetic: 1, ultrasonic: 5, plateNumber: '京D·22222', isReal: false),
+      SpotModel(id: 'Park007', zone: 'C', status: 'offline', isOnline: false, plateNumber: '京C·22222', isReal: false),
+      SpotModel(id: 'Park008', zone: 'C', status: 'free', occupiedHours: 0, batteryLevel: 95, signalStrength: -55, geoMagnetic: 0, ultrasonic: 75, plateNumber: '京C·33333', isReal: false),
       // Park009 故意设为矛盾案例: 地磁感应到车但超声波距离远 → 触发"传感器数据矛盾"诊断
-      SpotModel(id: 'Park009', zone: 'C', status: 'occupied', occupiedHours: 8, batteryLevel: 78, signalStrength: -80, geoMagnetic: 1, ultrasonic: 120, plateNumber: '京E·33333'),
+      SpotModel(id: 'Park009', zone: 'C', status: 'occupied', occupiedHours: 8, batteryLevel: 78, signalStrength: -80, geoMagnetic: 1, ultrasonic: 120, plateNumber: '京E·33333', isReal: false),
     ];
   }
 
@@ -532,18 +685,6 @@ class ApiService {
       AlertModel(id: 'alert_1', plateNumber: '京B·67890', spotId: 'Park003', occupiedHours: 72, status: 'pending', createdAt: DateTime.now().subtract(const Duration(hours: 72))),
       AlertModel(id: 'alert_2', plateNumber: '京E·33333', spotId: 'Park009', occupiedHours: 48, status: 'dispatched', createdAt: DateTime.now().subtract(const Duration(hours: 48))),
       AlertModel(id: 'alert_3', plateNumber: '京F·44444', spotId: 'Park010', occupiedHours: 96, status: 'resolved', createdAt: DateTime.now().subtract(const Duration(hours: 96))),
-    ];
-  }
-
-  List<DailyTrend> _getMockWeeklyTrend() {
-    return [
-      DailyTrend(date: '周一', avgOccupancy: 45, alertsCount: 2),
-      DailyTrend(date: '周二', avgOccupancy: 52, alertsCount: 1),
-      DailyTrend(date: '周三', avgOccupancy: 48, alertsCount: 3),
-      DailyTrend(date: '周四', avgOccupancy: 60, alertsCount: 0),
-      DailyTrend(date: '周五', avgOccupancy: 55, alertsCount: 2),
-      DailyTrend(date: '周六', avgOccupancy: 68, alertsCount: 1),
-      DailyTrend(date: '周日', avgOccupancy: 58, alertsCount: 2),
     ];
   }
 

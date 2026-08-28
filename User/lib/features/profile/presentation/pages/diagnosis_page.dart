@@ -55,9 +55,6 @@ class DiagnosisPage extends StatefulWidget {
 
 class _DiagnosisPageState extends State<DiagnosisPage>
     with SingleTickerProviderStateMixin {
-  /// 超声波判定"有车"的距离阈值(cm), 与节点固件 DIST_THRESHOLD_CM=10 保持一致.
-  static const int _usCarThresholdCm = 10;
-
   /// 每台设备的扫描间隔(ms), 控制扫描节奏.
   static const int _scanStepMs = 300;
 
@@ -85,18 +82,21 @@ class _DiagnosisPageState extends State<DiagnosisPage>
 
   /// 手动触发诊断: 逐台推进设备扫描, 每查到一条问题立即实时上屏, 完成后汇总.
   Future<void> _startDiagnose() async {
-    final spots = context.read<ParkingProvider>().spots;
+    final provider = context.read<ParkingProvider>();
+    final spots = provider.spots;
+    // 传感器矛盾判定距离阈值取自策略配置 (与节点固件 DIST_THRESHOLD_CM 对应)
+    final usThresholdCm = provider.sensorDistanceCm;
     setState(() {
       _phase = _DiagPhase.diagnosing;
       _checkIndex = 0;
       _issues = [];
-      _snapshot = spots;
+      _snapshot = spots.where((s) => !s.isDisabledSpot).toList();  // 平台停用的设备不参与诊断
     });
     for (var i = 0; i < _snapshot.length; i++) {
       await Future.delayed(const Duration(milliseconds: _scanStepMs));
       if (!mounted) return;
       // 单台立即诊断: 结果实时追加到列表, 逐条上屏
-      final found = _diagnoseSpot(_snapshot[i]);
+      final found = _diagnoseSpot(_snapshot[i], usThresholdCm);
       setState(() {
         _checkIndex = i + 1;
         _issues.addAll(found);
@@ -112,7 +112,8 @@ class _DiagnosisPageState extends State<DiagnosisPage>
   /// - 地磁感应到车(1), 但超声波距离很远(>=阈值判无车) → 超声波可能被遮挡/故障
   /// - 超声波距离很近(<阈值判有车), 但地磁未感应(0)   → 地磁可能异常/受干扰
   /// 注意: 仅凭长时间占用(僵尸车)不构成传感器异常.
-  List<DiagnosisIssue> _diagnoseSpot(SpotModel spot) {
+  /// [usThresholdCm] 为超声波判定"有车"的距离阈值, 取自策略配置.
+  List<DiagnosisIssue> _diagnoseSpot(SpotModel spot, int usThresholdCm) {
     final issues = <DiagnosisIssue>[];
     if (spot.isOffline) {
       issues.add(DiagnosisIssue(
@@ -124,7 +125,7 @@ class _DiagnosisPageState extends State<DiagnosisPage>
     }
 
     // 传感器矛盾 1: 地磁感应到车, 但超声波距离远 → 超声波侧异常
-    if (spot.geoMagnetic == 1 && spot.ultrasonic >= _usCarThresholdCm) {
+    if (spot.geoMagnetic == 1 && spot.ultrasonic >= usThresholdCm) {
       issues.add(DiagnosisIssue(
         level: 'warning',
         title: '${spot.id} 传感器数据矛盾',
@@ -135,7 +136,7 @@ class _DiagnosisPageState extends State<DiagnosisPage>
     // 传感器矛盾 2: 超声波距离很近(判有车), 但地磁未感应 → 地磁侧异常
     if (spot.geoMagnetic == 0 &&
         spot.ultrasonic > 0 &&
-        spot.ultrasonic < _usCarThresholdCm) {
+        spot.ultrasonic < usThresholdCm) {
       issues.add(DiagnosisIssue(
         level: 'warning',
         title: '${spot.id} 传感器数据矛盾',

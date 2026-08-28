@@ -179,12 +179,16 @@ static void activeEvent(void)
      *   断线后 onenet_loop() 同步清除连接标志并走重连.
      *   简化: 移除了参考项目的 PING_SENT 标志位假死检测 */
 
-    /* 每 15s 或 dataChanged: 代子设备上线/下线/数据上报
+    /* 每 2s 或 dataChanged: 代子设备上线/下线/数据上报
+     * 上行闸门: 两次 uploadAll 至少隔 UPLOAD_MIN_INTERVAL_MS(1s),
+     * 配合平台"上行≤1次/s"限速, 多节点同时变状态也不超;
+     * dataChanged 被闸门挡住时保持置位, 下一拍(≤1s后)自动补发.
      * OTA 期间暂停: LoRa 链路被 OTA 占用, 节点缓存是升级前旧值,
      * 且节点正在升级/重启, 不应把旧状态/旧版本推给平台 */
     if (sysEventFlag & SYS_EVENT_MQTT_CONNECTED)
     {
         if (ota_getState() == OTA_IDLE &&
+            (now - lastUpload >= UPLOAD_MIN_INTERVAL_MS) &&
             (dataChanged || (now - lastUpload >= UPLOAD_INTERVAL)))
         {
             onenet_uploadAll();

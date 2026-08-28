@@ -12,6 +12,7 @@ typedef struct {
     char     productKey[12];       /* 子设备产品ID */
     char     deviceName[33];       /* 子设备设备名 */
     bool     certSent;             /* 是否收到过证书 */
+    uint32_t zombieThresholdSec;   /* 僵尸车判定阈值(秒), 0=未设置/使用默认 */
 } PersistedCert_t;
 
 static const uint8_t CERTS_MAGIC = 0xA5;  /* 文件有效性标识 */
@@ -36,11 +37,14 @@ void saveCertsToLittleFS(void)
         pc.certSent = true;
         memcpy(pc.productKey, nodes[i].productKey, sizeof(pc.productKey));
         memcpy(pc.deviceName, nodes[i].deviceName, sizeof(pc.deviceName));
+        /* ⭐ 保存僵尸车阈值: 只有已设置的节点才保存 (非0值) */
+        pc.zombieThresholdSec = (nodes[i].thresholdValue > 0) ?
+                                nodes[i].thresholdValue : 0;
         f.write((uint8_t *)&pc, sizeof(PersistedCert_t));
     }
     f.close();
     LittleFS.end();
-    DBG_PRINTF("[LFS] 已保存 %d 条证书\n", saved);
+    DBG_PRINTF("[LFS] 已保存 %d 条证书(含阈值)\n", saved);
 }
 
 void loadCertsFromLittleFS(void)
@@ -75,11 +79,21 @@ void loadCertsFromLittleFS(void)
         sysEventFlag |= (1 << (pc.nodeId - 1));
         DBG_PRINTF("[LFS] 加载证书: 节点%d (%s/%s)\n",
                    pc.nodeId, pc.productKey, pc.deviceName);
+
+        /* ⭐ 加载僵尸车阈值: 如有保存则设置待下发标志, 重置重试计数 */
+        if (pc.zombieThresholdSec > 0)
+        {
+            nodes[slot].thresholdValue = pc.zombieThresholdSec;
+            nodes[slot].thresholdNeedsUpdate = true;  /* PONG 确认在线后自动下发 */
+            nodes[slot].thresholdRetryCount = 0;       /* 重启后重置重试计数 */
+            DBG_PRINTF("[LFS] 节点%d 僵尸车阈值=%lu秒 (待PONG下发)\n",
+                       pc.nodeId, (unsigned long)pc.zombieThresholdSec);
+        }
     }
     f.close();
     LittleFS.end();
     dataChanged = true;
-    DBG_PRINTF("[LFS] 已从Flash加载 %d 条证书\n", count);
+    DBG_PRINTF("[LFS] 已从Flash加载 %d 条证书(含阈值)\n", count);
 }
 
 NodeData nodes[LORA_MAX_NODES];
@@ -117,11 +131,9 @@ void updateNodeFromRaw(uint8_t nodeId, const LoraNodeData_t *raw)
     if (slot < 0) return;
 
     NodeData &nd = nodes[slot];
-    bool changed = (nd.parkStatus != raw->ParkStatus) ||
-                   (nd.ultrasonic != raw->Ultrasonic) ||
-                   (nd.geoMagnetic != raw->GeoMagnetic) ||
-                   (nd.led != (raw->LED != 0)) ||
-                   (nd.ledEnable != (raw->LedEnable != 0));
+    /* ⭐ 仅车位状态变化才触发立即上报; 距离/地磁/LED/阈值等走 15s 定时兜底,
+     * 避免距离微小抖动导致每次轮询都上报刷屏平台 */
+    bool changed = (nd.parkStatus != raw->ParkStatus);
 
     bool wasOffline = !nd.online;
     nd.parkStatus   = raw->ParkStatus;
@@ -130,6 +142,7 @@ void updateNodeFromRaw(uint8_t nodeId, const LoraNodeData_t *raw)
     nd.occupiedTime = raw->OccupiedTime;
     nd.led          = (raw->LED != 0);
     nd.ledEnable    = (raw->LedEnable != 0);
+    nd.zombieThresholdSec = raw->ZombieThreshold;   /* ⭐ 节点当前生效阈值, 供 pack/post 上报观看 */
     strncpy(nd.fwVersion, raw->FwVersion, sizeof(nd.fwVersion) - 1);
     nd.fwVersion[sizeof(nd.fwVersion) - 1] = '\0';   /* 节点上报固件版本串, OTA 检测据此自动更新 */
     nd.lastUpdate   = millis();

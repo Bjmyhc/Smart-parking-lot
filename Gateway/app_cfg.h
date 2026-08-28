@@ -67,7 +67,8 @@
 #define OLED_SCAN_MAX_MS        10000   /* 扫描画面最长显示时间(ms, 保险) */
 
 /* ==================== 上报与超时 ==================== */
-#define UPLOAD_INTERVAL     15000   /* 定时上报周期(ms) */
+#define UPLOAD_INTERVAL     5000    /* 定时上报周期(ms): 比赛演示要快, 5s 一推 */
+#define UPLOAD_MIN_INTERVAL_MS  1000  /* 上行最小间隔(ms): 配合平台"≤1次/s"限速, 锁死不超 */
 #define NODE_DATA_TIMEOUT_BASE  3000   /* 节点超时基准(ms) */
 #define NODE_PER_NODE_TIMEOUT   3000    /* 每发现1个节点附加超时(ms), 适配轮询一圈耗时 */
 #define MQTT_RETRY_DELAY    5000    /* MQTT重连间隔(ms) */

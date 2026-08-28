@@ -27,6 +27,10 @@ struct NodeData {
     bool     loginPending;    /* 已拿到证书, 待代上线 */
     bool     logoutPending;   /* 节点离线, 待代下线 */
     bool     subLogin;        /* 已代子设备上线成功 */
+    bool     thresholdNeedsUpdate; /* ⭐ 僵尸车判定阈值待下发(收到MQTT配置后标记, PONG确认在线后下发) */
+    uint32_t thresholdValue;      /* ⭐ 待下发的阈值(秒), 0=使用默认 */
+    uint8_t  thresholdRetryCount;  /* ⭐ 下发重试次数, 超过3次放弃 (防止无限重试阻塞) */
+    uint32_t zombieThresholdSec;   /* ⭐ 节点上报的当前生效阈值(秒), 随 pack/post 上报只读属性观看 */
 };
 
 extern NodeData nodes[LORA_MAX_NODES];

@@ -36,6 +36,14 @@
  * 阶段状态改用官方 fuse-ota $tid/check 接口, 不再上报 OtaStatus */
 #define SUB_PROP_OTA_ALLOW       "OtaAllow"
 #define SUB_PROP_OTA_PROGRESS    "OtaProgress"
+/* ⭐ 僵尸车判定阈值(秒): 定义在节点产品物模型上, 可按节点分别设置 */
+#define SUB_PROP_ZOMBIE_THRESHOLD "ZombieThresholdSec"
+/* ⭐ 僵尸车阈值服务标识符: 定义在节点产品物模型上(非网关).
+ * APP 经 call-service 同步调用, 平台转发到网关的 sub/service/invoke 主题,
+ * 输入 ThresholdValue, 输出 Result/ActualValue */
+#define SUB_SERVICE_ZOMBIE_THRESHOLD "SetZombieThreshold"
+/* 同步服务调用截止(ms): 平台同步调用超时约10s, 网关须赶在前面回 invoke_reply */
+#define SUB_SERVICE_DEADLINE_MS    9000
 
 /* 代上线等待平台回复的超时(ms), 超时后重新排队 */
 #define SUB_LOGIN_TIMEOUT_MS     5000
@@ -52,6 +60,18 @@ uint32_t mqttRxCount = 0;   /* 平台下发到网关的消息数 */
 static uint8_t  loginSlot    = 0xFF;
 static bool     awaitingLogin = false;
 static uint32_t loginSentAt   = 0;
+
+/* ⭐ 子设备服务调用(同步)待回复状态机:
+ * 平台同步服务调用 ~10s 内等回复; 网关单线程不能阻塞等 LoRa ACK,
+ * 故收到 invoke 后记下待回复状态返回主循环, 等 LoRa ACK 后由
+ * onenet_notifyServiceResult() 补回 invoke_reply; 超过截止时间强制回失败 */
+static struct {
+    bool     active;       /* 是否有待回复的服务调用 */
+    char     msgId[32];    /* 平台消息 id, 回复时原样带回 */
+    uint8_t  slot;         /* 目标节点索引 */
+    uint32_t targetValue;  /* 目标阈值(秒) */
+    uint32_t deadlineMs;   /* 截止时间戳(ms) */
+} s_pendingServiceReply;
 
 /* ==================== 内部函数 ==================== */
 
@@ -116,6 +136,7 @@ static void subPost(uint8_t slot)
     props[SUB_PROP_OCCUPIED_TIME]["value"]   = (long)nd.occupiedTime;
     props[SUB_PROP_LED]["value"]             = nd.led;
     props[SUB_PROP_LED_ENABLE]["value"]      = nd.ledEnable;
+    props[SUB_PROP_ZOMBIE_THRESHOLD]["value"] = (long)nd.zombieThresholdSec;   /* ⭐ 只读属性: 节点当前生效阈值 */
 
     String out;
     serializeJson(doc, out);
@@ -158,6 +179,7 @@ static void subPostBatch(void)
         props[SUB_PROP_OCCUPIED_TIME]["value"]   = (long)nd.occupiedTime;
         props[SUB_PROP_LED]["value"]             = nd.led;
         props[SUB_PROP_LED_ENABLE]["value"]      = nd.ledEnable;
+        props[SUB_PROP_ZOMBIE_THRESHOLD]["value"] = (long)nd.zombieThresholdSec;   /* ⭐ 只读属性: 节点当前生效阈值 */
     }
 
     String out;
@@ -210,9 +232,133 @@ static void handleSubPropertySet(JsonDocument &doc)
             lora_sendControl(nodes[slot].nodeId, "LedEnable", v);
             DBG_PRINTF("[MQTT] 节点%d LED使能=%d\n", nodes[slot].nodeId, v);
         }
+        /* ⭐ 僵尸车判定阈值: 按节点设置, 标记待下发 + 保存到 Flash */
+        else if (key == SUB_PROP_ZOMBIE_THRESHOLD)
+        {
+            if (v >= 5 && v <= 2592000) {
+                nodes[slot].thresholdNeedsUpdate = true;
+                nodes[slot].thresholdValue = v;
+                nodes[slot].thresholdRetryCount = 0;  /* 重置重试计数, 新阈值从头开始 */
+                saveCertsToLittleFS();  /* ⭐ 立即保存到 Flash, 断电不丢 */
+                DBG_PRINTF("[MQTT] 节点%d 僵尸车阈值=%d秒 (已保存Flash, 待PONG下发)\n", nodes[slot].nodeId, v);
+            } else {
+                DBG_PRINTF("[MQTT] 僵尸车阈值超出范围(5-2592000): %d\n", v);
+            }
+        }
     }
     onenet_replySet(msgId, 200, "success");
     dataChanged = true;
+}
+
+/* 回复平台"子设备服务调用"结果 (thing/sub/service/invoke_reply)
+ * 官方响应体: {"id":"..","code":..,"msg":"..","data":{"deviceName":"..",
+ *  "productID":"..","identifier":"..","output":{"Result":..,"ActualValue":..}}} */
+static void replySubServiceInvoke(const char *msgId, const char *pk, const char *dn,
+                                  const char *identifier, int code, const char *msg,
+                                  int result, int actualValue)
+{
+    if (!mqtt.connected()) return;
+    StaticJsonDocument<512> doc;
+    doc["id"]   = msgId;
+    doc["code"] = code;
+    doc["msg"]  = msg;
+    JsonObject data = doc.createNestedObject("data");
+    data["deviceName"] = dn;
+    data["productID"]  = pk;
+    data["identifier"] = identifier;
+    JsonObject output = data.createNestedObject("output");
+    output["Result"]      = result;
+    output["ActualValue"] = actualValue;
+    String out;
+    serializeJson(doc, out);
+    mqtt.publish(TOPIC_SUB_SERVICE_INVOKE_REPLY, out.c_str());
+    mqttTxCount++;   /* 上行计数 */
+    DBG_PRINTF("[MQTT] 回复服务调用: %s\n", out.c_str());
+}
+
+/* 处理平台下行: 子设备服务调用 (thing/sub/service/invoke).
+ * 平台把节点物模型服务调用(SetZombieThreshold, 定义在节点产品上)转发到网关,
+ * 消息体: {"id":"..","version":"1.0","params":{"deviceName":"park1",
+ *  "productID":"04..","identifier":"SetZombieThreshold","input":{"ThresholdValue":3600}}}
+ * 网关解析后定位节点 → 标记阈值下发(LoRa), 收到 ACK 后补回 invoke_reply;
+ * 网关单线程不可阻塞, 用 s_pendingServiceReply 跨主循环补回复 */
+static void handleSubServiceInvoke(JsonDocument &doc)
+{
+    const char *msgId = doc["id"] | "";
+    JsonObject params = doc["params"].as<JsonObject>();
+    if (params.isNull()) return;
+    mqttRxCount++;   /* 下行计数 */
+
+    const char *pk         = params["productID"]  | "";
+    const char *dn         = params["deviceName"] | "";
+    const char *identifier = params["identifier"] | "";
+    JsonObject input = params["input"].as<JsonObject>();
+    if (input.isNull())
+    {
+        replySubServiceInvoke(msgId, pk, dn, identifier, 400, "invalid input", 0, 0);
+        return;
+    }
+
+    /* 只处理僵尸车阈值服务 */
+    if (strcmp(identifier, SUB_SERVICE_ZOMBIE_THRESHOLD) != 0)
+    {
+        DBG_PRINTF("[MQTT] 服务调用: 不支持的 identifier=%s\n", identifier);
+        replySubServiceInvoke(msgId, pk, dn, identifier, 404, "unsupported service", 0, 0);
+        return;
+    }
+
+    int threshold = input["ThresholdValue"] | 0;
+    if (threshold < 5 || threshold > 2592000)
+    {
+        DBG_PRINTF("[MQTT] 服务调用阈值越界: %d\n", threshold);
+        replySubServiceInvoke(msgId, pk, dn, identifier, 400, "ThresholdValue out of range", 0, 0);
+        return;
+    }
+
+    /* 上一次服务调用尚未结束(等 LoRa ACK), 拒绝并提示稍后重试 */
+    if (s_pendingServiceReply.active)
+    {
+        DBG_PRINTF("[MQTT] 服务调用繁忙, 拒绝新调用\n");
+        replySubServiceInvoke(msgId, pk, dn, identifier, 200, "busy", 0, 0);
+        return;
+    }
+
+    /* 按 deviceName 匹配节点 */
+    int slot = -1;
+    for (uint8_t i = 0; i < nodeCount; i++)
+    {
+        if (strcmp(nodes[i].deviceName, dn) == 0) { slot = i; break; }
+    }
+    if (slot < 0)
+    {
+        DBG_PRINTF("[MQTT] 服务调用: 未知节点 %s/%s\n", pk, dn);
+        replySubServiceInvoke(msgId, pk, dn, identifier, 404, "device not found", 0, 0);
+        return;
+    }
+
+    /* 节点离线: 立即回失败, 不进入下发流程 */
+    if (!nodes[slot].online)
+    {
+        DBG_PRINTF("[MQTT] 服务调用: 节点%d 离线, 立即回失败\n", nodes[slot].nodeId);
+        replySubServiceInvoke(msgId, pk, dn, identifier, 200, "node offline", 0, 0);
+        return;
+    }
+
+    /* 在线: 写阈值 + 标记待下发(LoRa) + 记录待回复状态 */
+    nodes[slot].thresholdValue = threshold;
+    nodes[slot].thresholdRetryCount = 0;
+    nodes[slot].thresholdNeedsUpdate = true;
+    saveCertsToLittleFS();   /* 立即存 Flash, 断电不丢 */
+
+    s_pendingServiceReply.active = true;
+    snprintf(s_pendingServiceReply.msgId, sizeof(s_pendingServiceReply.msgId),
+             "%s", msgId);
+    s_pendingServiceReply.slot        = (uint8_t)slot;
+    s_pendingServiceReply.targetValue = (uint32_t)threshold;
+    s_pendingServiceReply.deadlineMs  = millis() + SUB_SERVICE_DEADLINE_MS;
+
+    DBG_PRINTF("[MQTT] 服务调用 SetZombieThreshold 节点%d 阈值=%d秒 (待LoRa下发ACK)\n",
+               nodes[slot].nodeId, threshold);
 }
 
 /* 上报网关自身属性 (property/post): OtaAllow 门控 + OtaProgress 实时进度.
@@ -332,7 +478,16 @@ static void mqtt_callback(char *topic, byte *payload, unsigned int length)
     /* --- 3. 子设备属性设置 (下行控制) --- */
     if (strstr(topic, "thing/sub/property/set"))
     {
+        DBG_PRINTF("[MQTT] 收到子设备属性设置: %s\n", topic);
         handleSubPropertySet(doc);
+        return;
+    }
+
+    /* --- 3.5 子设备服务调用 (thing/sub/service/invoke) --- */
+    if (strstr(topic, "thing/sub/service/invoke"))
+    {
+        DBG_PRINTF("[MQTT] 收到子设备服务调用: %s\n", topic);
+        handleSubServiceInvoke(doc);
         return;
     }
 
@@ -389,9 +544,10 @@ bool onenet_connect(void)
     mqtt.subscribe(TOPIC_SUB_LOGIN_REPLY);
     mqtt.subscribe(TOPIC_PACK_POST_REPLY);
     mqtt.subscribe(TOPIC_SUB_SET);
+    mqtt.subscribe(TOPIC_SUB_SERVICE_INVOKE);   /* ⭐ 子设备服务调用下行 */
     mqtt.subscribe(TOPIC_PROP_SET);          /* 网关自身属性下行: OtaAllow 门控 */
     mqtt.subscribe(TOPIC_PROP_POST_REPLY);   /* 网关自身属性上报回执(排查) */
-    DBG_PRINTLN("[MQTT] 连接成功, 已订阅子设备登录/上报/设置 + 网关属性主题");
+    DBG_PRINTLN("[MQTT] 连接成功, 已订阅子设备登录/上报/设置/服务调用 + 网关属性主题");
     sysEventFlag |= SYS_EVENT_MQTT_CONNECTED;
 
     /* MQTT 重连后平台会话重置, 已注册节点全部需要重新代上线;
@@ -429,6 +585,21 @@ void onenet_loop(void)
     if (!mqtt.connected() && (sysEventFlag & SYS_EVENT_MQTT_CONNECTED))
     {
         onenet_disconnect();
+        s_pendingServiceReply.active = false;   /* 断线无法回 invoke_reply, 丢弃待回复状态 */
+    }
+
+    /* ⭐ 同步服务调用截止检查: 超过 9s 未收到 LoRa ACK 强制回失败
+     * (平台同步调用超时约10s, 必须赶在前面回复, 否则平台判定超时) */
+    if (s_pendingServiceReply.active &&
+        (long)(millis() - s_pendingServiceReply.deadlineMs) > 0)
+    {
+        NodeData &nd = nodes[s_pendingServiceReply.slot];
+        DBG_PRINTF("[MQTT] 服务调用超时(%dms), 回失败\n", (int)SUB_SERVICE_DEADLINE_MS);
+        replySubServiceInvoke(s_pendingServiceReply.msgId,
+                              nd.productKey, nd.deviceName,
+                              SUB_SERVICE_ZOMBIE_THRESHOLD,
+                              200, "timeout", 0, 0);
+        s_pendingServiceReply.active = false;
     }
 
     /* 网关自身属性上报: OtaAllow / OtaProgress 任一变化,
@@ -514,4 +685,25 @@ void onenet_replySet(const char *id, int code, const char *msg)
     serializeJson(doc, output);
     mqtt.publish(TOPIC_SUB_SET_REPLY, output.c_str());
     DBG_PRINTF("[MQTT] 回复平台: %s\n", output.c_str());
+}
+
+/* ⭐ 供 lora_handler 调用: LoRa 阈值下发结果确认后, 补回"同步服务调用"回复.
+ * 仅当存在待回复的服务调用且节点匹配时才回; 属性路径下发(控制台改属性)
+ * 不置 pending, 调用会被忽略, 不会产生多余回复.
+ * success=true → Result=1/ActualValue=实际生效值; false → Result=0/ActualValue=0 */
+void onenet_notifyServiceResult(uint8_t slot, bool success, uint32_t value)
+{
+    if (!s_pendingServiceReply.active || s_pendingServiceReply.slot != slot)
+        return;   /* 非服务调用触发(或已回复/已超时), 忽略 */
+
+    NodeData &nd = nodes[slot];
+    replySubServiceInvoke(s_pendingServiceReply.msgId,
+                          nd.productKey, nd.deviceName,
+                          SUB_SERVICE_ZOMBIE_THRESHOLD,
+                          200, success ? "success" : "failed",
+                          success ? 1 : 0,
+                          success ? (int)value : 0);
+    s_pendingServiceReply.active = false;
+    DBG_PRINTF("[MQTT] 服务调用结果已回复平台 (节点%d, %s)\n",
+               nodes[slot].nodeId, success ? "成功" : "失败");
 }
