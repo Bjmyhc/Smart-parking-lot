@@ -380,7 +380,7 @@ class _SpotsPageState extends State<SpotsPage> {
     if (spot.isDisabledSpot) return '设备已停用';
     if (spot.isOffline) return '设备离线';
     if (spot.isFree) return '暂无车辆';
-    return '占用 ${spot.occupiedHours}h';
+    return '占用 ${SpotModel.formatOccupiedDuration(spot.actualOccupiedSec)}';
   }
 
   void _navigateToDetail(BuildContext context, SpotModel spot) {

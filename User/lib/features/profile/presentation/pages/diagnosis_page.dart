@@ -150,7 +150,7 @@ class _DiagnosisPageState extends State<DiagnosisPage>
       issues.add(DiagnosisIssue(
         level: 'info',
         title: '${spot.id} 长时间占用',
-        detail: '该车位已连续占用 ${spot.occupiedHours} 小时，传感器数据正常',
+        detail: '该车位已连续占用 ${SpotModel.formatOccupiedDuration(spot.actualOccupiedSec)}，传感器数据正常',
         suggestion: '建议通知车主挪车，必要时派单处理',
       ));
     }

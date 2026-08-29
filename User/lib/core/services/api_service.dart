@@ -666,25 +666,27 @@ class ApiService {
   List<SpotModel> _getMockSpots() {
     // 模拟车位编号与真实设备命名一致 (Park00x), 便于真实/本地模式统一展示.
     // 全部标记 isReal: false → 平台下发(服务调用/属性设置)会跳过模拟车位.
+    // 🆕 每个车位补 occupiedSec=occupiedHours*3600, 让本地模拟数据也能自动适配时长单位
     return [
-      SpotModel(id: 'Park001', zone: 'A', status: 'occupied', occupiedHours: 2, batteryLevel: 85, signalStrength: -65, geoMagnetic: 1, ultrasonic: 3, plateNumber: '京A·12345', isReal: false),
-      SpotModel(id: 'Park002', zone: 'A', status: 'free', occupiedHours: 0, batteryLevel: 90, signalStrength: -60, geoMagnetic: 0, ultrasonic: 80, plateNumber: '京A·54321', isReal: false),
-      SpotModel(id: 'Park003', zone: 'A', status: 'zombie', occupiedHours: 72, batteryLevel: 45, signalStrength: -75, geoMagnetic: 1, ultrasonic: 3, plateNumber: '京B·67890', isReal: false),
-      SpotModel(id: 'Park004', zone: 'B', status: 'occupied', occupiedHours: 5, batteryLevel: 80, signalStrength: -70, geoMagnetic: 1, ultrasonic: 4, plateNumber: '京C·11111', isReal: false),
-      SpotModel(id: 'Park005', zone: 'B', status: 'free', occupiedHours: 0, batteryLevel: 88, signalStrength: -62, geoMagnetic: 0, ultrasonic: 90, plateNumber: '京B·11111', isReal: false),
-      SpotModel(id: 'Park006', zone: 'B', status: 'occupied', occupiedHours: 1, batteryLevel: 92, signalStrength: -58, geoMagnetic: 1, ultrasonic: 5, plateNumber: '京D·22222', isReal: false),
+      SpotModel(id: 'Park001', zone: 'A', status: 'occupied', occupiedHours: 2, occupiedSec: 2*3600, batteryLevel: 85, signalStrength: -65, geoMagnetic: 1, ultrasonic: 3, plateNumber: '京A·12345', isReal: false),
+      SpotModel(id: 'Park002', zone: 'A', status: 'free', occupiedHours: 0, occupiedSec: 0, batteryLevel: 90, signalStrength: -60, geoMagnetic: 0, ultrasonic: 80, plateNumber: '京A·54321', isReal: false),
+      SpotModel(id: 'Park003', zone: 'A', status: 'zombie', occupiedHours: 72, occupiedSec: 72*3600, batteryLevel: 45, signalStrength: -75, geoMagnetic: 1, ultrasonic: 3, plateNumber: '京B·67890', isReal: false),
+      SpotModel(id: 'Park004', zone: 'B', status: 'occupied', occupiedHours: 5, occupiedSec: 5*3600, batteryLevel: 80, signalStrength: -70, geoMagnetic: 1, ultrasonic: 4, plateNumber: '京C·11111', isReal: false),
+      SpotModel(id: 'Park005', zone: 'B', status: 'free', occupiedHours: 0, occupiedSec: 0, batteryLevel: 88, signalStrength: -62, geoMagnetic: 0, ultrasonic: 90, plateNumber: '京B·11111', isReal: false),
+      SpotModel(id: 'Park006', zone: 'B', status: 'occupied', occupiedHours: 1, occupiedSec: 1*3600, batteryLevel: 92, signalStrength: -58, geoMagnetic: 1, ultrasonic: 5, plateNumber: '京D·22222', isReal: false),
       SpotModel(id: 'Park007', zone: 'C', status: 'offline', isOnline: false, plateNumber: '京C·22222', isReal: false),
-      SpotModel(id: 'Park008', zone: 'C', status: 'free', occupiedHours: 0, batteryLevel: 95, signalStrength: -55, geoMagnetic: 0, ultrasonic: 75, plateNumber: '京C·33333', isReal: false),
+      SpotModel(id: 'Park008', zone: 'C', status: 'free', occupiedHours: 0, occupiedSec: 0, batteryLevel: 95, signalStrength: -55, geoMagnetic: 0, ultrasonic: 75, plateNumber: '京C·33333', isReal: false),
       // Park009 故意设为矛盾案例: 地磁感应到车但超声波距离远 → 触发"传感器数据矛盾"诊断
-      SpotModel(id: 'Park009', zone: 'C', status: 'occupied', occupiedHours: 8, batteryLevel: 78, signalStrength: -80, geoMagnetic: 1, ultrasonic: 120, plateNumber: '京E·33333', isReal: false),
+      SpotModel(id: 'Park009', zone: 'C', status: 'occupied', occupiedHours: 8, occupiedSec: 8*3600, batteryLevel: 78, signalStrength: -80, geoMagnetic: 1, ultrasonic: 120, plateNumber: '京E·33333', isReal: false),
     ];
   }
 
   List<AlertModel> _getMockAlerts() {
+    // 🆕 加occupiedSec参数, 本地模拟告警也能自动适配秒/分/时单位
     return [
-      AlertModel(id: 'alert_1', plateNumber: '京B·67890', spotId: 'Park003', occupiedHours: 72, status: 'pending', createdAt: DateTime.now().subtract(const Duration(hours: 72))),
-      AlertModel(id: 'alert_2', plateNumber: '京E·33333', spotId: 'Park009', occupiedHours: 48, status: 'dispatched', createdAt: DateTime.now().subtract(const Duration(hours: 48))),
-      AlertModel(id: 'alert_3', plateNumber: '京F·44444', spotId: 'Park010', occupiedHours: 96, status: 'resolved', createdAt: DateTime.now().subtract(const Duration(hours: 96))),
+      AlertModel(id: 'alert_1', plateNumber: '京B·67890', spotId: 'Park003', occupiedHours: 72, occupiedSec: 72*3600, status: 'pending', createdAt: DateTime.now().subtract(const Duration(hours: 72))),
+      AlertModel(id: 'alert_2', plateNumber: '京E·33333', spotId: 'Park009', occupiedHours: 48, occupiedSec: 48*3600, status: 'dispatched', createdAt: DateTime.now().subtract(const Duration(hours: 48))),
+      AlertModel(id: 'alert_3', plateNumber: '京F·44444', spotId: 'Park010', occupiedHours: 96, occupiedSec: 96*3600, status: 'resolved', createdAt: DateTime.now().subtract(const Duration(hours: 96))),
     ];
   }
 

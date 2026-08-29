@@ -41,57 +41,53 @@
 
 static void WDG_Init(void)
 {
+    /* ⭐ 关键修复1: 先开启 LSI 时钟 (IWDG 唯一时钟源), 并等待稳定
+     * 不开 LSI 直接操作 IWDG = 看门狗完全失效, 卡死永远不复位 */
+    RCC_LSICmd(ENABLE);
+    while (RCC_GetFlagStatus(RCC_FLAG_LSIRDY) == RESET);
+
     IWDG_WriteAccessCmd(IWDG_WriteAccess_Enable);   /* 解除写保护 */
     IWDG_SetPrescaler(IWDG_Prescaler_64);           /* 分频 64 */
+    /* ⭐ 关键修复2: 等待分频值写入完成 (PVU=0), 否则写操作被硬件丢弃 */
+    while (IWDG_GetFlagStatus(IWDG_FLAG_PVU) != RESET);
+
     IWDG_SetReload(IWDG_RELOAD_VALUE);              /* 超时约 4s */
+    /* ⭐ 关键修复3: 等待重载值写入完成 (RVU=0) */
+    while (IWDG_GetFlagStatus(IWDG_FLAG_RVU) != RESET);
+
     IWDG_ReloadCounter();                           /* 先装载再使能 */
     IWDG_Enable();                                  /* 启动看门狗 */
+    Usart_Printf(USART_DEBUG, "[WDG] 初始化完成: LSI已开启, 超时≈4s\r\n");
 }
 
-/* 喂狗 + 周期打印状态(便于调试):
- * 复位后运行时长从 0 重新计时, 可据此判断芯片是否发生过看门狗复位 */
+/* 喂狗: 仅执行看门狗重载操作 (纯原子, 无打印/判断, 100% 不会卡死).
+ * 任何任务卡死导致主循环没跑到本行 → 4s 后门狗自动复位 */
 static void WDG_Feed(void)
 {
-    static uint32_t s_lastDbgTick = 0;
-	
-    IWDG_ReloadCounter();                           /* 喂狗 */
-
-    if (Get_Tick() - s_lastDbgTick >= WDG_LOG_INTERVAL_MS)
-    {
-        s_lastDbgTick = Get_Tick();
-        Usart_Printf(USART_DEBUG, "[WDG] 喂狗正常, 运行 %lu 秒\n",
-                     (unsigned long)(Get_Tick() / 1000));
-		
-    }
+    IWDG_ReloadCounter();
 }
 
 int main(void)
 {
-    /* 设置向量表偏移: OTA 后 APP 从 0x08004000 启动,
-     * BootLoader 跳转过来后必须先设 VTOR, 否则中断向量指向 Boot 区
-     * 注意: 普通烧录(A区直跑)时 VTOR 默认 0x08000000, 设了也兼容 */
+    /* 设置向量表偏移: OTA 后 APP 从 0x08004000 启动 */
     SCB->VTOR = FLASH_BASE | 0x4000;
 
-    /* 恢复总中断使能: BootLoader 的 Load_APP 跳转前执行过
-     * __disable_irq(), 跳转过来时 PRIMASK 仍为关闭状态.
-     * 若不重新使能, SysTick/USART 等所有中断都不响应:
-     *   - SysTick 停走 -> Get_Tick() 停滞 -> 周期任务全部跳过
-     *   - USART2 中断不触发 -> LoRa 环形缓冲收不到字节 -> 不响应网关
-     *   表现为打印完启动横幅后无任何输出、网关搜不到节点.
-     * 直接烧录(复位启动)时 PRIMASK=0, 此调用无副作用 */
+    /* 恢复总中断使能 */
     __enable_irq();
+
+    /* ⭐⭐⭐ 第一时间启动看门狗: 任何初始化步骤卡死(BSP_Init里任何一步)
+     * 都会在 4s 后自动复位, 再也不会出现"必须手动按复位才好" */
+    WDG_Init();
 
     /* 初始化所有板级外设(含LoRa模块) */
     BSP_Init();
-
-    /* 启动看门狗: 此后主循环必须周期性喂狗 */
-    WDG_Init();
 
     /* 上电横幅: 区分当前烧录的是节点端/网关端固件 */
     Usart_Printf(USART_DEBUG,
         "\r\n[SYS] ========== 智能停车场节点 %s ==========\r\n", NODE_FW_VERSION);
 
     /* 主循环 - 时间戳非阻塞架构 */
+    static uint32_t s_lastWdgLogTick = 0;  /* 喂狗日志最后打印时间 */
     while (1)
     {
         US_Task();                  /* 超声波采样 */
@@ -99,8 +95,16 @@ int main(void)
         QMC_Task();                 /* 地磁采集 */
         LED_Task();                 /* LED控制 */
         LoRa_Task();                /* LoRa通信: 响应网关轮询 + 下行命令 */
+
+        /* ⭐ 喂狗状态日志 (必须放在喂狗之前: 打印卡死 = 不喂狗 = 4s复位, 符合预期) */
+        if (Get_Tick() - s_lastWdgLogTick >= WDG_LOG_INTERVAL_MS)
+        {
+            s_lastWdgLogTick = Get_Tick();
+            Usart_Printf(USART_DEBUG, "[WDG] 喂狗正常, 运行 %lu 秒\r\n",
+                         (unsigned long)(Get_Tick() / 1000));
+        }
 		
-        /* 喂狗(每10秒打印一次状态): 任一段代码卡死超4s自动复位 */
+        /* 最后一步才喂狗: 完整跑完全部任务才有资格, 任何一步卡死都不喂 */
         WDG_Feed();
     }
 }

@@ -74,7 +74,8 @@ class _FirmwareUpgradePageState extends State<FirmwareUpgradePage> {
     
     if (p.otaConfirming) return '$step%';
     if (status == 4) return '100%';
-    if (_task != null) return '';
+    // 有新版本: 圆环中心大字显示目标版本, 不再显示空文字
+    if (_task != null) return _task?['target']?.toString() ?? '';
     return '100%';
   }
 
@@ -86,7 +87,8 @@ class _FirmwareUpgradePageState extends State<FirmwareUpgradePage> {
     if (p.otaConfirming) return '升级中...';
     if (status == 4) return '升级完成';
     if (status == 5 || status == 6) return '升级失败';
-    if (_task != null) return '发现新版本';
+    // 有新版本: 不再显示"发现新版本"小字, 信息已在圆环中心大字体现
+    if (_task != null) return '';
     return '当前已是最新版本';
   }
 
@@ -396,6 +398,7 @@ class _FirmwareUpgradePageState extends State<FirmwareUpgradePage> {
   Widget _buildProgressDetails(ParkingProvider p) {
     final statusText = p.otaStatusText;
     final step = p.otaStep;
+    final failed = p.otaStatus == 5 || p.otaStatus == 6;
     
     return Container(
       padding: const EdgeInsets.all(16),
@@ -403,37 +406,23 @@ class _FirmwareUpgradePageState extends State<FirmwareUpgradePage> {
         color: AppColors.surface,
         borderRadius: BorderRadius.circular(12),
       ),
-      child: Column(
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text(
-                statusText,
-                style: const TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w500,
-                  color: AppColors.textPrimary,
-                ),
-              ),
-              Text(
-                '$step%',
-                style: const TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w600,
-                  color: AppColors.primary,
-                ),
-              ),
-            ],
+          Text(
+            statusText,
+            style: const TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w500,
+              color: AppColors.textPrimary,
+            ),
           ),
-          const SizedBox(height: 12),
-          ClipRRect(
-            borderRadius: BorderRadius.circular(4),
-            child: LinearProgressIndicator(
-              value: step / 100,
-              minHeight: 6,
-              backgroundColor: AppColors.primary.withValues(alpha: 0.15),
-              color: AppColors.primary,
+          Text(
+            '$step%',
+            style: TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w600,
+              color: failed ? AppColors.danger : AppColors.primary,
             ),
           ),
         ],

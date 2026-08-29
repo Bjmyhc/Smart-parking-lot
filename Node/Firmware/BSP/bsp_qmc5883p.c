@@ -1,4 +1,4 @@
-﻿/**
+/**
  * @file bsp_qmc5883p.c
  * @brief QMC5883P 三轴磁力计驱动文件 (C语言版本)
  * 
@@ -408,10 +408,14 @@ uint8_t QMC5883P_Update(QMC5883P_Device_t *dev)
     uint8_t rawData[6];
     uint32_t start = QMC5883P_GetTick();
 
-    /* 等待数据就绪 (或超时返回) */
+    /* 等待数据就绪 (或超时返回)
+     * ⭐ 双重超时兜底: Get_Tick()(ms级) + 软件自增计数(次), 防止SysTick停了死循环 */
+    uint32_t swTimeout = 0;  /* 软件超时计数(次), 每次DelayXms(1) = 1次, 最大QMC_READ_TIMEOUT次 */
+    #define QMC_SW_TIMEOUT_CNT QMC5883P_READ_TIMEOUT_MS
     while (!QMC5883P_IsDataRdy())
     {
-        if (QMC5883P_GetTick() - start > QMC5883P_READ_TIMEOUT_MS)
+        swTimeout++;
+        if ((QMC5883P_GetTick() - start > QMC5883P_READ_TIMEOUT_MS) || (swTimeout >= QMC_SW_TIMEOUT_CNT))
             return QMC5883P_ERROR;
         QMC5883P_Delay(1);
     }

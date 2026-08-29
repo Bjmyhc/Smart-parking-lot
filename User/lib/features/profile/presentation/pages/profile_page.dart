@@ -185,11 +185,6 @@ class ProfilePage extends StatelessWidget {
           ),
           _buildDivider(),
           _buildGroupItem(
-            icon: Icons.devices_outlined,
-            title: '节点管理',
-          ),
-          _buildDivider(),
-          _buildGroupItem(
             icon: Icons.policy_outlined,
             title: '策略配置',
             onTap: () {

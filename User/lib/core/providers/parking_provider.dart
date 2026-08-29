@@ -22,13 +22,16 @@ class ParkingProvider extends ChangeNotifier {
 
   static const _modeKey = 'spots_real_mode';
   static const _layoutKey = 'spots_layout_mode';
+  static const _notifiedAtPrefix = 'notified_at_'; // 🆕 通知时间戳 SharedPreferences 前缀
 
   final ApiService _apiService;
-  Timer? _refreshTimer;
+  Timer? _refreshTimer;  /* 3s API轮询定时器 */
+  Timer? _tickTimer;     /* ⭐⭐⭐ 1s UI刷新定时器: 只要有占用车位, 每秒触发一次UI重建让秒数跳动 */
   bool _refreshing = false;
   bool _gatewayOnline = false;  /* ⭐ 网关在线状态 */
   String? _policyError;         /* ⭐ 最近一次策略下发失败原因 */
   bool _policyPartial = false;  /* ⭐ 上次下发是否部分成功 (UI 琥珀色提示) */
+  bool _nodeThresholdSynced = false; /* 🆕 是否已同步过节点真实阈值到本地(重启只同步1次, 避免3s反复改) */
 
   List<SpotModel> _spots = [];
   bool _realOnly = true; // true=真实模式(仅真实设备), 需模拟车位再切换本地模式
@@ -50,15 +53,20 @@ class ParkingProvider extends ChangeNotifier {
   String? get policyError => _policyError;   /* ⭐ 策略下发失败原因 */
   bool get policyPartial => _policyPartial;  /* ⭐ 上次下发部分成功 */
 
-  /* 告警处理记录 (按车位 spotId): 已处理由"僵尸车离开车位"自动派生 */
-  /// 已自动处理的僵尸车快照 (spotId -> 告警): 车辆离开车位后自动标记为已处理, 供告警中心查看历史.
+  /* ⭐⭐⭐ 告警事件隔离机制: 按「每次停车事件」生成独立工单, 不再和车位永久绑定
+   * 同一车位发生 N 次僵尸车事件 → 生成 N 个独立告警（独立id、独立时间戳、独立处理流程）*/
+  /// 当前每个车位对应的【正在处理的活跃工单】: spotId → AlertModel (同一个车位同时刻只有1个active)
+  final Map<String, AlertModel> _activeAlerts = {};
+  /// 已处理归档工单: key = alertId (事件级唯一), 不是spotId → 同一车位的历史事件都会被保留, 不会被新车覆盖
   final Map<String, AlertModel> _resolvedAlerts = {};
 
-  /* 本地模拟: 通知/派单/处理 状态与处理记录 (仅内存, 3s 刷新后回写到 spots, 重启即丢) */
-  final Set<String> _notifiedSpotIds = {};
-  final Set<String> _dispatchedSpotIds = {};
-  final Map<String, String> _handlerNames = {}; // spotId -> 处理人
-  final Map<String, DateTime> _handledAts = {}; // spotId -> 完成时间
+  /* 本地模拟: 通知/派单/处理 状态与处理记录 (KEY = alertId 事件级, 不是spotId车位级) */
+  final Set<String> _notifiedAlertIds = {};   // 已发出通知的工单id
+  final Set<String> _dispatchedAlertIds = {}; // 已派单的工单id
+  final Map<String, String> _handlerNames = {};    // alertId -> 处理人
+  final Map<String, DateTime> _handledAts = {};    // alertId -> 完成时间
+  final Map<String, DateTime> _notifiedAts = {};   // alertId -> 通知车主时间（用于派单倒计时, 持久化）
+  final Map<String, DateTime> _dispatchedAts = {}; // alertId -> 派单时间
 
   /* 模拟车位本地状态切换覆盖 (spotId -> 状态/占用时长, 内存态, 3s 刷新后回写) */
   final Map<String, String> _mockStatusOverrides = {};
@@ -108,6 +116,7 @@ class ParkingProvider extends ChangeNotifier {
     await _loadHourlySnapshot();
     await refresh();
     _restartRefreshTimer();
+    _restartTickTimer(); // ⭐⭐⭐ 启动1秒粒度秒数跳动定时器
     // 固件升级为低频操作: 不常驻轮询, 由 MainShell 在每次进入前台时触发
     // 一轮短检测(beginOtaCheckSession), 检测到待升级任务时弹窗提示
   }
@@ -117,6 +126,17 @@ class ParkingProvider extends ChangeNotifier {
     _realOnly = prefs.getBool(_modeKey) ?? true;  /* 默认真实模式(仅真实设备) */
     _layoutMode = prefs.getInt(_layoutKey) ?? 0;
     _policy = await PolicyConfig.load();
+    // ⭐ 加载持久化的工单通知时间戳 → 关APP重启不丢派单倒计时 (key后缀是alertId事件级唯一)
+    for (final key in prefs.getKeys()) {
+      if (key.startsWith(_notifiedAtPrefix)) {
+        final alertId = key.substring(_notifiedAtPrefix.length);
+        final ts = prefs.getInt(key);
+        if (ts != null) {
+          _notifiedAts[alertId] = DateTime.fromMillisecondsSinceEpoch(ts);
+          _notifiedAlertIds.add(alertId); // 有时间戳=一定通知过
+        }
+      }
+    }
   }
 
   /// 按当前刷新策略重建全局轮询定时器 (刷新间隔变化时立即生效).
@@ -124,6 +144,19 @@ class ParkingProvider extends ChangeNotifier {
     _refreshTimer?.cancel();
     _refreshTimer =
         Timer.periodic(Duration(seconds: _policy.refreshSec), (_) => refresh());
+  }
+
+  /// ⭐⭐⭐ 1秒粒度【占用秒数跳动定时器】: 解决"3秒API刷新成功但秒数看起来不变"的用户感知问题
+  /// - 仅当存在 占用/僵尸 车位时才每秒 notifyListeners() → 不浪费性能
+  /// - 不调 refresh, 不请求API → 只是触发Consumer重新build, 调用 actualOccupiedSec getter 计算 now - occupiedSince, 秒数自动+1
+  /// - 效果: 用户肉眼看到「5秒→6秒→7秒→8秒」每秒跳动, 不会再有"卡住不更新"的错觉
+  void _restartTickTimer() {
+    _tickTimer?.cancel();
+    _tickTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+      final hasOccupied = _spots.any((s) => s.isOccupied || s.isZombie);
+      if (!hasOccupied) return;
+      notifyListeners();
+    });
   }
 
   /* ==================== 只读数据 ==================== */
@@ -218,9 +251,10 @@ class ParkingProvider extends ChangeNotifier {
       if (!hasAlert) continue;
       list.add(_buildAlert(spot));
     }
-    // 追加已自动处理的僵尸车历史 (车辆已离开车位)
+    // 追加已处理归档的历史工单 (事件级独立存储 → 不会被新事件覆盖, 同一车位多条历史都保留)
     list.addAll(_resolvedAlerts.values);
-    list.sort((a, b) => b.occupiedHours.compareTo(a.occupiedHours));
+    // 按「工单创建时间」倒序（最新的排前面），不再用占用时长排序，因为新老工单时长不一样
+    list.sort((a, b) => (b.createdAt ?? DateTime(2000)).compareTo(a.createdAt ?? DateTime(2000)));
     return list;
   }
 
@@ -230,21 +264,51 @@ class ParkingProvider extends ChangeNotifier {
       .where((a) => a.status != 'resolved')
       .toList();
 
-  /// 由当前占用车位派生告警: pending=未通知 / notified=已通知 / dispatched=处理中.
+  /// ⭐⭐⭐ 【按事件生成/复用工单】核心修复: 同一车位多次僵尸车事件 → 生成多个独立工单
+  /// 规则:
+  /// 1. 当前有_activeAlerts[spot.id]（说明同一个停车事件的工单还在处理中）→ 复用这个工单ID和createdAt,
+  ///    只更新占用秒数/状态, 保证时间连续、处理记录不丢失
+  /// 2. 当前没有active（新车第一次变僵尸车 / 或者上一个事件已经归档结束）→ 生成全新事件级唯一id的工单
   AlertModel _buildAlert(SpotModel spot) {
-    final status = _dispatchedSpotIds.contains(spot.id)
-        ? 'dispatched'
-        : _notifiedSpotIds.contains(spot.id)
-            ? 'notified'
-            : 'pending';
-    return AlertModel(
-      id: 'alert_${spot.id}',
+    final realOcc = spot.actualOccupiedSec;
+    final active = _activeAlerts[spot.id];
+
+    /* 情况1: 同一个事件正在处理中 → 直接复用id/createdAt, 更新状态/秒数 */
+    if (active != null) {
+      final status = _dispatchedAlertIds.contains(active.id)
+          ? 'dispatched'
+          : _notifiedAlertIds.contains(active.id)
+              ? 'notified'
+              : 'pending';
+      final updated = active.copyWith(
+        status: status,
+        plateNumber: spot.plateNumber ?? active.plateNumber,
+        occupiedSec: realOcc,
+        occupiedHours: realOcc ~/ 3600,
+      );
+      _activeAlerts[spot.id] = updated; // 同步最新值到active缓存
+      return updated;
+    }
+
+    /* 情况2: 新事件 → 生成全新工单id（事件级唯一，同一车位不同事件id不同）*/
+    // 用「进场时间戳」做后缀，保证每次停车事件都是新id，不会和该车位的历史工单id冲突
+    final eventTs = spot.occupiedSince?.millisecondsSinceEpoch ?? DateTime.now().millisecondsSinceEpoch;
+    final alertId = 'alert_${spot.id}_$eventTs';
+    final createdAt = realOcc > 0
+        ? DateTime.now().subtract(Duration(seconds: realOcc))
+        : DateTime.now();
+
+    final newAlert = AlertModel(
+      id: alertId,
       plateNumber: spot.plateNumber ?? '未知车牌',
       spotId: spot.id,
-      occupiedHours: spot.occupiedHours,
-      status: status,
-      createdAt: DateTime.now().subtract(Duration(hours: spot.occupiedHours)),
+      occupiedHours: realOcc ~/ 3600,
+      occupiedSec: realOcc,
+      status: 'pending', /* 新事件默认未通知 */
+      createdAt: createdAt,
     );
+    _activeAlerts[spot.id] = newAlert; // 标记为当前活跃工单
+    return newAlert;
   }
 
   /// 统计模型: 占用率/僵尸车数由 spots 派生, 一周趋势为演示数据.
@@ -302,7 +366,26 @@ class ParkingProvider extends ChangeNotifier {
       final prevGatewayOnline = _gatewayOnline;
       _spots = await _apiService.getSpots(realOnly: _realOnly);
       _syncLocalState(); // 先回写本地模拟状态(含手动切换), 让自动处理看到一致的当前状态
-      _handleAutoResolve(prevById); // 检测"僵尸车离开车位"→自动标记已处理
+      /* ⭐⭐⭐ 在任何自动判定之前, 先正确维护每个车位的occupiedSince本地时间戳
+       * 这一步是修复"占用时间刷新滞后, 超过30秒阈值"bug的核心: 之后所有的actualOccupiedSec、僵尸判定、
+       * 自动通知派单都基于实时计算出的秒数, 不再依赖节点轮询上报 */
+      _updateOccupiedSince(prevById);
+      // 🆕 【顺序调到最前】先同步节点上报的真实阈值, 再做自动通知/派单
+      //    否则首轮刷新用默认1小时阈值判断, 可能导致自动阶梯判定不及时
+      await _syncPolicyFromNodes();
+      /* ⭐⭐⭐【关键】事件流转必须在【预构建active工单】之前执行!
+       *   否则 Case 2 (新车进场变僵尸) 执行 _activeAlerts.remove() 时会误删掉
+       *   刚刚为本轮新车预构建出来的active, 导致后续 _buildAlert 生成的alertId
+       *   (格式: spotId_occupiedSince) 可能与该车位历史已归档的 alertId
+       *   (同一辆车没离开过, occupiedSince没变) 完全相同 → 新旧工单串数据 */
+      _handleAutoResolve(prevById); // ① 检测"僵尸车离开"→归档 / "新车变僵尸"→清旧active指针
+      /* ⭐⭐⭐【事件流转完成后】再为目前仍为僵尸车的车位预构建 active 工单
+       *   此时历史事件指针已清空 → _buildAlert 一定会生成全新的 alertId,
+       *   不会和 _resolvedAlerts 里的历史id冲突 */
+      for (final spot in _spots.where((s) => s.isZombie)) _buildAlert(spot);
+      // 🆕 平台告警策略 2 级自动阶梯:
+      await _autoNotifyPendingZombies(); // ① 僵尸告警出现 → 立即自动通知车主(零等待)
+      await _autoDispatchOverdueNotified(); // ② 通知后等待dispatchWaitSec未挪车 → 自动派单
       
       /* ⭐ 同时检查网关在线状态 */
       _gatewayOnline = await _apiService.isGatewayOnline();
@@ -317,10 +400,35 @@ class ParkingProvider extends ChangeNotifier {
     if (prevLoading || changed) notifyListeners();
   }
 
+  /* ⭐⭐⭐ 修复占用时间刷新滞后的核心: 为每个车位正确维护 occupiedSince 本地时间戳
+   * 规则:
+   * 1. 新占用 (free→occupied): startTime = now - 节点上报的occupiedSec (既保留历史, 后续实时累加)
+   * 2. 持续占用: 继承上一轮的 occupiedSince → 时间绝对连续, 刷新不会重置
+   * 3. 变空闲: 不设置 (保持 null) */
+  void _updateOccupiedSince(Map<String, SpotModel> prevById) {
+    final now = DateTime.now();
+    for (int i = 0; i < _spots.length; i++) {
+      final s = _spots[i];
+      if (!(s.isOccupied || s.isZombie)) continue;
+      final prev = prevById[s.id];
+      // 上一轮也是占用/僵尸, 且有时间戳 → 直接继承, 保证连续
+      if (prev != null && (prev.isOccupied || prev.isZombie) && prev.occupiedSince != null) {
+        _spots[i] = s.copyWith(occupiedSince: prev.occupiedSince);
+      } else {
+        // 新车进场 / 首轮拉取 → 用当前时间减去已占用秒数反推准确开始时间
+        final startSec = s.occupiedSec > 0 ? s.occupiedSec : 0;
+        final startTime = now.subtract(Duration(seconds: startSec));
+        _spots[i] = s.copyWith(occupiedSince: startTime);
+      }
+    }
+  }
+
   /// 对比本轮刷新前后车位数据, 判断是否真的有内容变化 (避免无谓重建).
   bool _spotsChanged(Map<String, SpotModel> prevById) {
     if (prevById.length != _spots.length) return true;
+    bool hasOccupied = false;  /* ⭐ 有占用/僵尸车位 → 它的实际占用秒数每轮都在涨, 必须刷新UI */
     for (final s in _spots) {
+      if (s.isOccupied || s.isZombie) hasOccupied = true;
       final prev = prevById[s.id];
       if (prev == null) return true;
       if (prev.status != s.status ||
@@ -331,7 +439,8 @@ class ParkingProvider extends ChangeNotifier {
         return true;
       }
     }
-    return false;
+    /* ⭐ 关键修复: 只要有占用车位, 即使静态字段没变, 占用时长也在实时增长, 需要触发UI重建显示最新秒数 */
+    return hasOccupied;
   }
 
   /// 记录每小时占用率快照; 返回是否产生了新快照 (供 refresh 判断是否需要通知).
@@ -373,20 +482,30 @@ class ParkingProvider extends ChangeNotifier {
     final spot = _spots[idx];
     String next;
     int occ;
+    DateTime? occupiedSince;
     switch (spot.status) {
       case 'free':
         next = 'occupied';
         occ = 1;
+        occupiedSince = DateTime.now(); // ⭐ 立刻记录当前时间为占用开始, 之后actualOccupiedSec实时从0秒增长
         break;
       case 'occupied':
         next = 'zombie';
         occ = 2;
+        // ⭐ 继承上一轮的 occupiedSince → 占用时间绝对连续, 不会跳变
+        occupiedSince = spot.occupiedSince ?? DateTime.now().subtract(const Duration(seconds: 30));
         break;
       default:
         next = 'free';
         occ = 0;
+        occupiedSince = null; // ⭐ 车开走, 清空占用开始时间戳
     }
-    _spots[idx] = spot.copyWith(status: next, occupiedHours: occ);
+    _spots[idx] = spot.copyWith(
+      status: next,
+      occupiedHours: occ,
+      occupiedSec: next == 'free' ? 0 : spot.occupiedSec,
+      occupiedSince: occupiedSince,
+    );
     /* 记录覆盖值, 供 3s 刷新后回写, 防止模拟车位状态被刷新打回默认 */
     _mockStatusOverrides[id] = next;
     _mockOccupiedOverrides[id] = occ;
@@ -395,26 +514,34 @@ class ParkingProvider extends ChangeNotifier {
 
   /* ==================== 处理动作 (仅本地模拟 stub) ==================== */
 
-  /// 通知车主: 调模拟 stub + 本地标记"已通知".
+  /// 通知车主: 调模拟 stub + 标记对应工单为"已通知"（事件级alertId维度）
   Future<void> notifyOwner(SpotModel spot) async {
     await _apiService.notifyOwner(spot.id);
-    _notifiedSpotIds.add(spot.id);
+    final alertId = _activeAlerts[spot.id]?.id;
+    if (alertId == null) return;
+    _notifiedAlertIds.add(alertId);
+    // ⭐ 通知时间戳按【工单id】存，派单倒计时从这一刻开始算
+    _notifiedAts[alertId] = DateTime.now();
+    await _saveNotifiedAt(alertId); // 持久化前缀也改成alertId
     _syncLocalState();
     _addLog(
       type: 'notify',
       title: '通知车主',
       spotId: spot.id,
-      detail: '已通知 ${spot.plateNumber ?? spot.id} 车主尽快挪车',
+      detail: '已通知 ${spot.plateNumber ?? spot.id} 车主尽快挪车，${_policy.dispatchWaitSec ~/ 3600}小时后未挪车将自动派单',
     );
     notifyListeners();
   }
 
-  /// 派单: 调模拟 stub + 设置处理人 + 标记"处理中".
+  /// 派单: 调模拟 stub + 设置处理人 + 标记对应工单为"处理中"（事件级alertId维度）
   Future<void> dispatchSpot(SpotModel spot, {required String handlerName}) async {
     await _apiService.dispatchAlert(spot.id);
-    _dispatchedSpotIds.add(spot.id);
-    _handlerNames[spot.id] = handlerName;
-    _handledAts.remove(spot.id);
+    final alertId = _activeAlerts[spot.id]?.id;
+    if (alertId == null) return;
+    _dispatchedAlertIds.add(alertId);
+    _handlerNames[alertId] = handlerName;
+    _dispatchedAts[alertId] = DateTime.now();
+    _handledAts.remove(alertId); /* 重派时清掉旧完成时间 */
     _syncLocalState();
     _addLog(
       type: 'dispatch',
@@ -425,28 +552,39 @@ class ParkingProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// 批量通知: 并行调 stub + 本地标记"已通知" (避免逐台串行等待放大延迟).
+  /// 批量通知: 并行调 stub + 本地标记"已通知" (事件级alertId维度).
   Future<void> notifySpots(Iterable<SpotModel> spots) async {
     final list = spots.toList();
     await Future.wait(list.map((s) => _apiService.notifyOwner(s.id)));
-    _notifiedSpotIds.addAll(list.map((s) => s.id));
+    final now = DateTime.now();
+    for (final s in list) {
+      final alertId = _activeAlerts[s.id]?.id;
+      if (alertId == null) continue;
+      _notifiedAlertIds.add(alertId);
+      _notifiedAts[alertId] = now;
+      await _saveNotifiedAt(alertId);
+    }
     _syncLocalState();
     _addLog(
       type: 'notify',
       title: '批量通知车主',
-      detail: '已通知 ${list.length} 个车位的车主挪车',
+      detail: '已通知 ${list.length} 个车位的车主挪车，${_policy.dispatchWaitSec ~/ 3600}小时后未挪车将自动派单',
     );
     notifyListeners();
   }
 
-  /// 批量派单: 并行调 stub + 默认处理人 + 标记"处理中" (避免逐台串行等待放大延迟).
+  /// 批量派单: 并行调 stub + 默认处理人 + 标记"处理中" (事件级alertId维度).
   Future<void> dispatchSpots(Iterable<SpotModel> spots) async {
     final list = spots.toList();
     await Future.wait(list.map((s) => _apiService.dispatchAlert(s.id)));
+    final now = DateTime.now();
     for (final s in list) {
-      _dispatchedSpotIds.add(s.id);
-      _handlerNames.putIfAbsent(s.id, () => '张师傅');
-      _handledAts.remove(s.id);
+      final alertId = _activeAlerts[s.id]?.id;
+      if (alertId == null) continue;
+      _dispatchedAlertIds.add(alertId);
+      _handlerNames.putIfAbsent(alertId, () => '张师傅');
+      _dispatchedAts[alertId] = now;
+      _handledAts.remove(alertId);
     }
     _syncLocalState();
     _addLog(
@@ -461,15 +599,34 @@ class ParkingProvider extends ChangeNotifier {
 
   Set<String> get selectedSpotIds => Set.unmodifiable(_selectedSpotIds);
   Set<String> get selectedAlertIds => Set.unmodifiable(_selectedAlertIds);
-  bool isSpotDispatched(String spotId) => _dispatchedSpotIds.contains(spotId);
+  /// ⭐ 车位当前是否在【本次事件】处理中: 查active告警id是否在派单集合
+  bool isSpotDispatched(String spotId) {
+    final alertId = _activeAlerts[spotId]?.id;
+    return alertId != null && _dispatchedAlertIds.contains(alertId);
+  }
 
   /// 车位当前告警处理状态: pending=未通知 / notified=已通知 / dispatched=处理中 / resolved=已处理.
+  /// ⭐ 事件级隔离: 按【当前active工单】判断, 不是车位级永久标记, 新车进场会变回pending
   String spotAlertStatus(String spotId) {
-    if (_resolvedAlerts.containsKey(spotId)) return 'resolved';
-    if (_dispatchedSpotIds.contains(spotId)) return 'dispatched';
-    if (_notifiedSpotIds.contains(spotId)) return 'notified';
+    final active = _activeAlerts[spotId];
+    if (active != null) {
+      if (_dispatchedAlertIds.contains(active.id)) return 'dispatched';
+      if (_notifiedAlertIds.contains(active.id)) return 'notified';
+      return 'pending';
+    }
+    // 没有active工单 → 若该车位最近1条归档是已处理, 则显示resolved (用于处理完但车位还没清空时)
+    final lastResolved = _resolvedAlerts.values.where((a) => a.spotId == spotId).toList();
+    if (lastResolved.isNotEmpty) return 'resolved';
     return 'pending';
   }
+
+  /// 🆕 以下 getter 专供【独立告警详情页】读取各阶段时间戳/处理人
+  /// ⭐ 查询工单处理时间戳/处理人: 参数改为 alertId（事件级唯一）, 不再按车位绑定
+  /// 不再强依赖 SpotModel 实时状态 → 即使车位已空、新车进场, 老工单的处理记录依然完整保留, 不会被覆盖
+  DateTime? getNotifiedAt(String alertId) => _notifiedAts[alertId];
+  DateTime? getDispatchedAt(String alertId) => _dispatchedAts[alertId];
+  DateTime? getHandledAt(String alertId) => _handledAts[alertId];
+  String? getHandlerName(String alertId) => _handlerNames[alertId];
 
   void toggleSpotSelection(String spotId) {
     if (!_selectedSpotIds.add(spotId)) _selectedSpotIds.remove(spotId);
@@ -519,29 +676,53 @@ class ParkingProvider extends ChangeNotifier {
     if (!s.isReal) {
       final status = _mockStatusOverrides[s.id];
       if (status != null) {
+        final occHours = _mockOccupiedOverrides[s.id] ?? s.occupiedHours;
         s = s.copyWith(
           status: status,
-          occupiedHours: _mockOccupiedOverrides[s.id] ?? s.occupiedHours,
+          occupiedHours: occHours,
+          occupiedSec: occHours * 3600, // 🆕 模拟车位切换状态时同步秒级时长
         );
       }
     }
-    if (_notifiedSpotIds.contains(s.id)) {
-      s.notifyStatus = 'notified';
+
+    /* ⭐⭐⭐ 所有处理记录改为【事件级 alertId】维度: 查该车位当前active工单的alertId */
+    final activeAlert = _activeAlerts[s.id];
+    final alertId = activeAlert?.id;
+
+    if (alertId != null) {
+      // active工单 = 本次事件正在处理 → 同步它的通知/派单状态、处理人、时间戳到车位展示层
+      if (_notifiedAlertIds.contains(alertId)) {
+        s.notifyStatus = 'notified';
+      }
+      final name = _handlerNames[alertId];
+      if (name != null) s.handlerName = name;
+      final handledAt = _handledAts[alertId];
+      if (handledAt != null) s.handledAt = handledAt;
+      final notifiedAt = _notifiedAts[alertId];
+      if (notifiedAt != null) s.notifiedAt = notifiedAt;
+      final dispatchedAt = _dispatchedAts[alertId];
+      if (dispatchedAt != null) s.dispatchedAt = dispatchedAt;
     }
-    final name = _handlerNames[s.id];
-    if (name != null) {
-      s.handlerName = name;
-    }
-    final handledAt = _handledAts[s.id];
-    if (handledAt != null) {
-      s.handledAt = handledAt;
+
+    // 🆕 同步告警创建时间:
+    // - 活动僵尸车(未处理): 用activeAlert的createdAt, 保证和独立告警详情页完全一致
+    // - 已处理历史: 从_resolvedAlerts按spotId找最新的一条历史记录createdAt
+    final resolvedList = _resolvedAlerts.values.where((a) => a.spotId == s.id).toList()
+      ..sort((a, b) => (b.createdAt ?? DateTime(2000)).compareTo(a.createdAt ?? DateTime(2000)));
+    final resolvedAlert = resolvedList.isNotEmpty ? resolvedList.first : null;
+    if (activeAlert?.createdAt != null) {
+      s.alertCreatedAt = activeAlert!.createdAt;
+    } else if (s.isZombie) {
+      s.alertCreatedAt ??= DateTime.now().subtract(Duration(seconds: s.actualOccupiedSec));
+    } else if (resolvedAlert?.createdAt != null) {
+      s.alertCreatedAt = resolvedAlert!.createdAt;
     }
     return s;
   }
 
-  /// 检测车位状态转换并自动处理 (每次刷新后调用):
-  /// - 僵尸车/超时占用车离开车位 → 自动标记为"已处理" (记录快照供告警中心查看历史)
-  /// - 新车进场开始占用 → 开启新一轮, 清空上一轮的 已处理/忽略/通知/派单 记录
+  /// ⭐⭐⭐ 【按事件隔离】检测车位状态转换并自动处理（每次refresh后调用）:
+  /// ① 僵尸车离开车位 → 把当前active工单归档为【已处理】（按alertId存，不再按spotId覆盖）
+  /// ② 新车进场变僵尸 → 删除旧active指针 → 下次_buildAlert生成全新eventId的工单，新老彻底独立
   void _handleAutoResolve(Map<String, SpotModel> prevById) {
     bool wasAlert(SpotModel s) => s.isZombie; // 告警仅在成为僵尸车时产生
 
@@ -550,27 +731,59 @@ class ParkingProvider extends ChangeNotifier {
       final prevHadAlert = prev != null && wasAlert(prev);
       final nowHasAlert = wasAlert(spot);
 
+      /* =============== 情况1: 上一轮有告警 → 本轮无 = 车辆离开, 工单结束 =============== */
       if (prevHadAlert && !nowHasAlert) {
-        // 车辆已离开车位 → 自动处理为"已处理"
-        _resolvedAlerts[spot.id] = AlertModel(
-          id: 'alert_${spot.id}',
-          plateNumber: prev.plateNumber ?? '未知车牌',
-          spotId: spot.id,
-          occupiedHours: prev.occupiedHours,
-          status: 'resolved',
-          createdAt: DateTime.now().subtract(Duration(hours: prev.occupiedHours)),
-        );
-        _handledAts[spot.id] = DateTime.now();
-        _handlerNames.putIfAbsent(spot.id, () => '自动处理');
-        _dispatchedSpotIds.remove(spot.id);
-        _notifiedSpotIds.remove(spot.id);
-      } else if (!prevHadAlert && nowHasAlert) {
-        // 新车进场开始占用 → 上一轮记录作废, 重新从待处理开始
-        _resolvedAlerts.remove(spot.id);
-        _dispatchedSpotIds.remove(spot.id);
-        _notifiedSpotIds.remove(spot.id);
-        _handlerNames.remove(spot.id);
-        _handledAts.remove(spot.id);
+        // ⭐ 归档对象使用「active工单」的真实id/createdAt，不是spot.id临时拼的
+        final active = _activeAlerts[spot.id];
+        final resolvedAt = DateTime.now();
+
+        if (active != null) {
+          // active存在 → 直接复用它的 eventId/createdAt/车牌，确保时间线和已处理详情完整
+          final realOcc = prev.actualOccupiedSec;
+          final resolved = active.copyWith(
+            status: 'resolved',
+            occupiedSec: realOcc,
+            occupiedHours: realOcc ~/ 3600,
+          );
+          _resolvedAlerts[resolved.id] = resolved; // 🆕 key = alertId（事件级），同一车位多事件不覆盖
+          _handledAts[resolved.id] = resolvedAt;    // 完成时间按alertId存
+          _handlerNames.putIfAbsent(resolved.id, () => '自动处理');
+          // ⭐ 该alertId从 active集合 移除（事件结束），但保留_notifiedAts/dispatchedAts历史供详情查看
+          _notifiedAlertIds.remove(resolved.id);
+          _dispatchedAlertIds.remove(resolved.id);
+          _activeAlerts.remove(spot.id); // ✅ 关键：清掉车位active指针，下一轮新车就会生成全新alertId的工单！
+        } else {
+          // 兜底（active还没生成的极端情况）→ 临时创建一条归档记录
+          final realOcc = prev.actualOccupiedSec;
+          final temp = AlertModel(
+            id: 'alert_${spot.id}_${resolvedAt.millisecondsSinceEpoch}',
+            plateNumber: prev.plateNumber ?? '未知车牌',
+            spotId: spot.id,
+            occupiedHours: realOcc ~/ 3600,
+            occupiedSec: realOcc,
+            status: 'resolved',
+            createdAt: realOcc > 0 ? resolvedAt.subtract(Duration(seconds: realOcc)) : resolvedAt,
+          );
+          _resolvedAlerts[temp.id] = temp;
+          _handledAts[temp.id] = resolvedAt;
+          _handlerNames.putIfAbsent(temp.id, () => '自动处理');
+          _activeAlerts.remove(spot.id);
+        }
+      }
+      /* =============== 情况2: 新车进场变僵尸 = 开启新一轮事件 =============== */
+      else if (prev != null && !prevHadAlert && nowHasAlert) {
+        // ⭐ 只有【上一轮可对比】且【上一轮没告警】才判定新车进场
+        //    删除旧active指针 → _buildAlert在使用时会生成全新eventId的工单
+        //    旧工单已在【情况1】归档到_resolvedAlerts，这里只清当前active，不碰历史
+        final oldActive = _activeAlerts.remove(spot.id);
+        if (oldActive != null) {
+          _notifiedAlertIds.remove(oldActive.id);
+          _dispatchedAlertIds.remove(oldActive.id);
+          _handlerNames.remove(oldActive.id);
+          _handledAts.remove(oldActive.id);
+          _dispatchedAts.remove(oldActive.id);
+          _clearNotifiedAt(oldActive.id); // 🆕 清除上一轮事件的持久化通知时间戳
+        }
       }
     }
   }
@@ -809,9 +1022,118 @@ class ParkingProvider extends ChangeNotifier {
     }
   }
 
+  /* ==================== 🆕 平台告警策略: 2 级自动阶梯 (纯APP端, 不下发节点) ==================== */
+
+  /// ⭐ 持久化【单个工单】的通知时间戳到 SharedPreferences, key = alertId (事件级).
+  Future<void> _saveNotifiedAt(String alertId) async {
+    final ts = _notifiedAts[alertId]?.millisecondsSinceEpoch;
+    if (ts == null) return;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt('$_notifiedAtPrefix$alertId', ts);
+  }
+
+  /// ⭐ 清除【单个工单】的通知时间戳缓存 (内存 + SharedPreferences), 事件结束后调用.
+  Future<void> _clearNotifiedAt(String alertId) async {
+    _notifiedAts.remove(alertId);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove('$_notifiedAtPrefix$alertId');
+  }
+
+  /// 🆕 ① 僵尸告警出现(pending状态) → 立即自动通知车主, 零等待缓冲.
+  Future<void> _autoNotifyPendingZombies() async {
+    for (final spot in _spots) {
+      if (!spot.isZombie) continue;
+      if (spotAlertStatus(spot.id) != 'pending') continue; // 只处理"待通知"的新僵尸车
+      // 自动通知, 和手动点"通知车主"效果完全一致
+      await notifyOwner(spot);
+    }
+  }
+
+  /// 🆕 ② 通知车主后等待 dispatchWaitSec 仍未挪车 → 自动派单(默认张师傅), 按【event级alertId】判断
+  Future<void> _autoDispatchOverdueNotified() async {
+    final now = DateTime.now();
+    final waitMs = _policy.dispatchWaitSec * 1000;
+    for (final spot in _spots) {
+      if (!spot.isZombie) continue; // 车主拖走了(不再是僵尸), 跳过
+      final status = spotAlertStatus(spot.id);
+      if (status != 'notified') continue; // 只处理"已通知未派单"的
+      final alertId = _activeAlerts[spot.id]?.id;
+      if (alertId == null) continue;
+      final notifiedAt = _notifiedAts[alertId];
+      if (notifiedAt == null) continue;
+      // 通知时间距今是否超过阈值
+      if (now.difference(notifiedAt).inMilliseconds >= waitMs) {
+        // 自动派单给默认处理人: 张师傅, 和手动点"派单"效果完全一致
+        await dispatchSpot(spot, handlerName: '张师傅');
+        _addLog(
+          type: 'dispatch',
+          title: '系统自动派单',
+          spotId: spot.id,
+          detail: '通知车主 ${_policy.dispatchWaitSec ~/ 3600} 小时后未挪车, 自动派单',
+          success: true,
+        );
+      }
+    }
+  }
+
+  /// 🆕 解决"APP重启变回1小时"bug: 从真实节点拉上报的ZombieThreshold属性,
+  /// 同步到APP本地PolicyConfig (只改本地, 不下发服务, 以节点端实际生效的值为准).
+  /// 重启后仅同步1次, 以后3s刷新不再重复覆盖.
+  Future<void> _syncPolicyFromNodes() async {
+    if (_nodeThresholdSynced) return;
+    // 找第一个: 真实节点 + 未停用 + 在线 + 上报了阈值非null
+    for (final s in _spots) {
+      if (!s.isReal || s.isDisabledSpot || !s.isOnline) continue;
+      final nodeThreshold = s.zombieThresholdSec;
+      if (nodeThreshold == null) continue;
+      // 找到第一个合法值, 与本地对比
+      if (nodeThreshold != _policy.zombieThresholdSec) {
+        debugPrint('[策略同步] 节点${s.id}实际阈值=${nodeThreshold}s, 本地=${_policy.zombieThresholdSec}s, 自动同步本地');
+        _policy = _policy.copyWith(zombieThresholdSec: nodeThreshold);
+        await _policy.save(); // 仅存本地SharedPreferences, 不下发服务
+        _addLog(
+          type: 'policy',
+          title: '策略自动同步',
+          spotId: s.id,
+          detail: '检测到节点阈值与本地不一致，已自动同步为 ${(nodeThreshold/3600).toStringAsFixed(1)} 小时（以节点实际生效为准）',
+          success: true,
+        );
+      }
+      _nodeThresholdSynced = true;
+      notifyListeners();
+      return;
+    }
+    // 没找到合法节点阈值(离线/未上报), 下次刷新继续尝试, 不设标记
+  }
+
+  /// 🆕 策略配置页手动一键同步: 把节点端真实阈值写进APP本地PolicyConfig(不下发服务).
+  Future<bool> syncNodeThresholdToLocal() async {
+    for (final s in _spots) {
+      if (!s.isReal || s.isDisabledSpot || !s.isOnline) continue;
+      final nodeThreshold = s.zombieThresholdSec;
+      if (nodeThreshold == null) continue;
+      _policy = _policy.copyWith(zombieThresholdSec: nodeThreshold);
+      await _policy.save();
+      _nodeThresholdSynced = true;
+      _addLog(
+        type: 'policy',
+        title: '手动同步阈值',
+        spotId: s.id,
+        detail: '已将节点端真实阈值同步为 ${(nodeThreshold/3600).toStringAsFixed(1)} 小时',
+        success: true,
+      );
+      notifyListeners();
+      return true;
+    }
+    _policyError = '节点离线或未上报阈值，无法同步';
+    notifyListeners();
+    return false;
+  }
+
   @override
   void dispose() {
     _refreshTimer?.cancel();
+    _tickTimer?.cancel(); // ⭐ 1秒粒度秒数跳动定时器
     _otaCheckTimer?.cancel();
     _otaPollTimer?.cancel();
     _apiService.dispose();

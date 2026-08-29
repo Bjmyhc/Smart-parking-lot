@@ -13,6 +13,7 @@ import '../../../../core/models/alert_model.dart';
 import '../../../../core/providers/parking_provider.dart';
 import '../../../profile/presentation/pages/diagnosis_page.dart';
 import '../../../profile/presentation/pages/firmware_upgrade_page.dart';
+import '../../../profile/presentation/pages/policy_config_page.dart';
 
 /// 首页: 可长按拖动的卡片式首页 (还原自早期提交).
 /// 5 张卡片支持长按 1 秒震动后拖动排序, 顺序持久化到本地.
@@ -222,10 +223,10 @@ class _OverviewPageState extends State<OverviewPage> {
             () => widget.onSwitchTab?.call(2),
           ),
           _buildQuickItem(
-            Icons.local_parking,
-            '车位管理',
+            Icons.tune_rounded,
+            '策略配置',
             AppColors.primary,
-            () => widget.onSwitchTab?.call(1),
+            () => _push(context, const PolicyConfigPage()),
           ),
           _buildQuickItem(
             Icons.sensors,
@@ -547,7 +548,7 @@ class _OverviewPageState extends State<OverviewPage> {
                         ),
                         const SizedBox(height: 4),
                         Text(
-                          '车位 ${latestAlert.spotId} · 已占用 ${latestAlert.occupiedHours} 小时',
+                          '车位 ${latestAlert.spotId} · 已占用 ${SpotModel.formatOccupiedDuration(latestAlert.occupiedSec)}',
                           style: const TextStyle(
                             fontSize: 13,
                             color: AppColors.textSecondary,

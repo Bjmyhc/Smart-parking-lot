@@ -7,7 +7,7 @@ import '../../../../core/theme/app_dims.dart';
 import '../../../../core/models/alert_model.dart';
 import '../../../../core/models/spot_model.dart';
 import '../../../../core/providers/parking_provider.dart';
-import '../../../spots/presentation/pages/spot_detail_page.dart';
+import 'alert_detail_page.dart';
 
 class AlertsPage extends StatefulWidget {
   const AlertsPage({super.key});
@@ -401,108 +401,134 @@ class _AlertsPageState extends State<AlertsPage> {
     }
 
     final isSelected = provider.selectedAlertIds.contains(alert.id);
-    final showActions = alert.status == 'pending' ||
-        alert.status == 'notified' ||
-        alert.status == 'dispatched';
+    // 所有状态都有对应的操作按钮: pending→通知 / notified→派单 / dispatched或resolved→查看详情
+    final showActions = true;
 
-    return Container(
-      margin: const EdgeInsets.only(bottom: AppDims.gapCard),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(AppDims.radiusLarge),
-        border: _batchMode && isSelected
-            ? Border.all(color: AppColors.primary, width: 1.5)
-            : null,
-      ),
-      child: CardContainer(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                if (_batchMode) ...[
-                  _buildSelectBox(
-                    selected: isSelected,
-                    onTap: () => provider.toggleAlertSelection(alert.id),
+    return GestureDetector(
+      /* ⭐ 【所有状态都可以进详情】: 非批量模式下点击卡片任意位置跳转详情页, 彻底消除无入口问题 */
+      onTap: _batchMode
+          ? null
+          : () {
+              _goToDetail(alert);
+            },
+      behavior: HitTestBehavior.opaque,
+      child: Container(
+        margin: const EdgeInsets.only(bottom: AppDims.gapCard),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(AppDims.radiusLarge),
+          border: _batchMode && isSelected
+              ? Border.all(color: AppColors.primary, width: 1.5)
+              : null,
+        ),
+        child: CardContainer(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  if (_batchMode) ...[
+                    _buildSelectBox(
+                      selected: isSelected,
+                      onTap: () => provider.toggleAlertSelection(alert.id),
+                    ),
+                    const SizedBox(width: 4),
+                  ],
+                  Container(
+                    width: 56,
+                    height: 56,
+                    decoration: BoxDecoration(
+                      color: iconBgColor,
+                      borderRadius: BorderRadius.circular(AppDims.radiusMedium),
+                    ),
+                    child: Icon(iconData, color: iconColor, size: 30),
                   ),
-                  const SizedBox(width: 4),
-                ],
-                Container(
-                  width: 56,
-                  height: 56,
-                  decoration: BoxDecoration(
-                    color: iconBgColor,
-                    borderRadius: BorderRadius.circular(AppDims.radiusMedium),
-                  ),
-                  child: Icon(iconData, color: iconColor, size: 30),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          Expanded(
-                            child: Text(
-                              '僵尸车告警 - ${alert.plateNumber}',
-                              style: const TextStyle(
-                                fontSize: 16,
-                                fontWeight: FontWeight.w700,
-                                color: AppColors.textPrimary,
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                '僵尸车告警 - ${alert.plateNumber}',
+                                style: const TextStyle(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w700,
+                                  color: AppColors.textPrimary,
+                                ),
                               ),
                             ),
-                          ),
-                          const SizedBox(width: 8),
-                          StatusBadge.fromStatus(alert.status),
-                        ],
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        '车位: ${alert.spotId} · 占用 ${alert.occupiedHours}小时',
-                        style: const TextStyle(
-                          fontSize: 13,
-                          color: AppColors.textSecondary,
+                            const SizedBox(width: 8),
+                            StatusBadge.fromStatus(alert.status),
+                          ],
                         ),
-                      ),
-                      const SizedBox(height: 4),
-                      if (alert.createdAt != null)
+                        const SizedBox(height: 8),
                         Text(
-                          '创建时间: ${_formatDate(alert.createdAt!)}',
+                          '车位: ${alert.spotId} · 占用 ${SpotModel.formatOccupiedDuration(alert.occupiedSec)}',
                           style: const TextStyle(
-                            fontSize: 12,
+                            fontSize: 13,
                             color: AppColors.textSecondary,
                           ),
                         ),
-                    ],
+                        const SizedBox(height: 4),
+                        if (alert.createdAt != null)
+                          Text(
+                            '创建时间: ${_formatDate(alert.createdAt!)}',
+                            style: const TextStyle(
+                              fontSize: 12,
+                              color: AppColors.textSecondary,
+                            ),
+                          ),
+                      ],
+                    ),
                   ),
-                ),
-              ],
-            ),
-            if (showActions) ...[
-              const SizedBox(height: 16),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.end,
-                children: [
-                  _buildStatusActionButton(context, provider, alert),
                 ],
               ),
+              if (showActions) ...[
+                const SizedBox(height: 16),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [
+                    _buildStatusActionButton(context, provider, alert),
+                  ],
+                ),
+              ],
             ],
-          ],
+          ),
         ),
       ),
     );
   }
 
-  /// 按告警状态自适应的操作按钮: 未通知→通知 / 已通知→派单 / 处理中→查看详情.
+  /// 按告警状态自适应的操作按钮组:
+  /// - pending:  [查看详情] ── [通知车主]
+  /// - notified: [查看详情] ── [派单]
+  /// - dispatched / resolved: [查看详情]
   Widget _buildStatusActionButton(
       BuildContext context, ParkingProvider provider, AlertModel alert) {
     switch (alert.status) {
       case 'pending':
-        return _buildNotifyButton(context, provider, alert);
+        return Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            _buildViewButton(context, alert),
+            const SizedBox(width: 8),
+            _buildNotifyButton(context, provider, alert),
+          ],
+        );
       case 'notified':
-        return _buildDispatchButton(context, provider, alert);
+        return Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            _buildViewButton(context, alert),
+            const SizedBox(width: 8),
+            _buildDispatchButton(context, provider, alert),
+          ],
+        );
       case 'dispatched':
+      case 'resolved': // 🆕 已处理的告警也可以查看详情(包含完整处理过程时间轴)
       default:
         return _buildViewButton(context, alert);
     }
@@ -681,16 +707,15 @@ class _AlertsPageState extends State<AlertsPage> {
     return spotsById[spotId];
   }
 
+  /// 🆕 查看告警详情: 跳转到【独立的告警工单详情页】
+  /// 与车位实时详情解耦 → 即使车位现在没车/设备离线, 也能完整看到:
+  /// ✅ 车辆信息(车牌/占用时长/检测时间)
+  /// ✅ 完整4步处理时间轴 + 各阶段时间戳/处理人
+  /// ✅ 按告警状态显示的操作按钮
   void _goToDetail(AlertModel alert) {
-    final spotsById = {for (final s in context.read<ParkingProvider>().spots) s.id: s};
-    final spot = spotsById[alert.spotId];
-    if (spot == null) {
-      _showSnackBar('未找到对应车位');
-      return;
-    }
     Navigator.push(
       context,
-      MaterialPageRoute(builder: (context) => SpotDetailPage(spot: spot)),
+      MaterialPageRoute(builder: (context) => AlertDetailPage(alert: alert)),
     );
   }
 

@@ -31,6 +31,13 @@ class _SpotDetailPageState extends State<SpotDetailPage> {
   bool _hasAlert(SpotModel spot, int alertSec) =>
       (spot.isZombie || spot.isOccupied) && spot.occupiedHours * 3600 >= alertSec;
 
+  /// 是否有处理过程需要展示: 有告警或有任一阶段的处理记录
+  bool _hasHandlingRecord(SpotModel spot) =>
+      spot.alertCreatedAt != null ||
+      spot.notifiedAt != null ||
+      spot.dispatchedAt != null ||
+      spot.handledAt != null;
+
   String _formatDateTime(DateTime time) {
     String two(int v) => v.toString().padLeft(2, '0');
     return '${time.year}-${time.month}-${time.day} ${two(time.hour)}:${two(time.minute)}';
@@ -67,6 +74,10 @@ class _SpotDetailPageState extends State<SpotDetailPage> {
             if (_hasAlert(spot, provider.alertSec)) ...[
               const SizedBox(height: AppDims.gapCard),
               _buildAlertInfo(provider, spot),
+            ],
+            if (_hasHandlingRecord(spot)) ...[
+              const SizedBox(height: AppDims.gapCard),
+              _buildHandlingTimeline(spot),
             ],
             const SizedBox(height: 100),
           ],
@@ -154,7 +165,7 @@ class _SpotDetailPageState extends State<SpotDetailPage> {
                       _buildInfoItem(
                         icon: Icons.timer,
                         label: '占用时长',
-                        value: '${spot.occupiedHours}h',
+                        value: SpotModel.formatOccupiedDuration(spot.actualOccupiedSec),
                         color: spot.isZombie ? AppColors.danger : AppColors.warning,
                       ),
                     ],
@@ -382,7 +393,7 @@ class _SpotDetailPageState extends State<SpotDetailPage> {
           ),
           const SizedBox(height: 16),
           _buildInfoRow('告警类型', '僵尸车 (占用≥24h)'),
-          _buildInfoRow('占用时长', '${spot.occupiedHours} 小时'),
+          _buildInfoRow('占用时长', SpotModel.formatOccupiedDuration(spot.actualOccupiedSec)),
           Padding(
             padding: const EdgeInsets.symmetric(vertical: 10),
             child: Row(
@@ -401,6 +412,157 @@ class _SpotDetailPageState extends State<SpotDetailPage> {
           if (spot.handledAt != null)
             _buildInfoRow('完成时间', _formatDateTime(spot.handledAt!)),
           _buildInfoRow('通知状态', spot.isNotified ? '已通知车主' : '未通知'),
+        ],
+      ),
+    );
+  }
+
+  /// 🆕 处理情况时间轴卡片: 展示从告警创建到处理完成的完整流程
+  Widget _buildHandlingTimeline(SpotModel spot) {
+    return CardContainer(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            '处理情况',
+            style: TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.w600,
+              color: AppColors.textPrimary,
+            ),
+          ),
+          const SizedBox(height: 20),
+          // 步骤1: 告警创建
+          _buildTimelineStep(
+            icon: Icons.warning_amber,
+            title: '告警上报',
+            subtitle: '检测到僵尸车，系统自动生成告警',
+            time: spot.alertCreatedAt,
+            done: spot.alertCreatedAt != null,
+            isLast: false,
+          ),
+          // 步骤2: 车主通知
+          _buildTimelineStep(
+            icon: Icons.notifications_active,
+            title: '通知车主',
+            subtitle: spot.notifiedAt != null ? '已发送挪车提醒' : '等待通知',
+            time: spot.notifiedAt,
+            done: spot.notifiedAt != null,
+            isLast: false,
+          ),
+          // 步骤3: 派单处理
+          _buildTimelineStep(
+            icon: Icons.assignment_turned_in,
+            title: '工单派单',
+            subtitle: spot.dispatchedAt != null && spot.handlerName != null
+                ? '派单给 ${spot.handlerName}'
+                : '等待派单',
+            time: spot.dispatchedAt,
+            done: spot.dispatchedAt != null,
+            isLast: false,
+          ),
+          // 步骤4: 处理完成
+          _buildTimelineStep(
+            icon: Icons.check_circle,
+            title: '处理完成',
+            subtitle: spot.handledAt != null ? '僵尸车已处理完毕' : '处理中',
+            time: spot.handledAt,
+            done: spot.handledAt != null,
+            isLast: true,
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 时间轴单步: 左侧圆形图标+连接线, 右侧标题/描述/时间
+  Widget _buildTimelineStep({
+    required IconData icon,
+    required String title,
+    required String subtitle,
+    required DateTime? time,
+    required bool done,
+    required bool isLast,
+  }) {
+    final bgColor = done ? AppColors.success : AppColors.textSecondary.withValues(alpha: 0.15);
+    final iconColor = done ? Colors.white : AppColors.textSecondary;
+    final lineColor = done ? AppColors.success : AppColors.textSecondary.withValues(alpha: 0.2);
+    final titleColor = done ? AppColors.textPrimary : AppColors.textSecondary;
+
+    return SizedBox(
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // 左侧: 竖线+圆形图标
+          SizedBox(
+            width: 32,
+            child: Column(
+              children: [
+                Container(
+                  width: 32,
+                  height: 32,
+                  decoration: BoxDecoration(
+                    color: bgColor,
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(
+                    done ? Icons.check : icon,
+                    color: iconColor,
+                    size: 18,
+                  ),
+                ),
+                if (!isLast)
+                  Container(
+                    width: 2,
+                    height: 48,
+                    color: lineColor,
+                    margin: const EdgeInsets.symmetric(vertical: 6),
+                  ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 14),
+          // 右侧: 标题 + 副标题 + 时间
+          Expanded(
+            child: Padding(
+              padding: EdgeInsets.only(top: 2, bottom: isLast ? 0 : 20),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          title,
+                          style: TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.w600,
+                            color: titleColor,
+                          ),
+                        ),
+                      ),
+                      if (time != null)
+                        Text(
+                          _formatDateTime(time),
+                          style: const TextStyle(
+                            fontSize: 12,
+                            color: AppColors.textSecondary,
+                          ),
+                        ),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    subtitle,
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: done ? AppColors.textSecondary.withValues(alpha: 0.9) : AppColors.textSecondary,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
         ],
       ),
     );

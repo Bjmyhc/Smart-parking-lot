@@ -1,4 +1,4 @@
-﻿/****************************************************************************
+/****************************************************************************
  * 超声波传感器驱动 - bsp_ultrasonic.c
  * 
  * 功能描述:
@@ -101,25 +101,33 @@ uint16_t US_GetDistance(void)
     GPIO_ResetBits(US_TRIG_PORT, US_TRIG_PIN);
 
     uint32_t startTime = Get_Tick();
+    /* ⭐ 双重超时兜底: Get_Tick()(ms级) + 软件自增计数(us级), 防止SysTick停了死循环 */
+    uint32_t swTimeout = 0;  /* 软件超时计数(次), 每次循环≈1us, 200000次≈200ms */
+    #define US_SW_TIMEOUT_CNT 200000
     while (TIM_GetFlagStatus(TIM1, TIM_FLAG_CC1) == RESET)
     {
-        if (Get_Tick() - startTime >= 200)
+        swTimeout++;
+        if ((Get_Tick() - startTime >= 200) || (swTimeout >= US_SW_TIMEOUT_CNT))
         {
             TIM_Cmd(TIM1, DISABLE);
             Usart_Printf(USART_DEBUG, "US: CC1 timeout (no echo start)\r\n");
             return 0;
         }
+        DelayXus(1);  /* 循环延迟, 软件超时精度≈1us */
     }
 
     startTime = Get_Tick();
+    swTimeout = 0;
     while (TIM_GetFlagStatus(TIM1, TIM_FLAG_CC2) == RESET)
     {
-        if (Get_Tick() - startTime >= 200)
+        swTimeout++;
+        if ((Get_Tick() - startTime >= 200) || (swTimeout >= US_SW_TIMEOUT_CNT))
         {
             TIM_Cmd(TIM1, DISABLE);
             Usart_Printf(USART_DEBUG, "US: CC2 timeout (no echo end)\r\n");
             return 0;
         }
+        DelayXus(1);
     }
 
     TIM_Cmd(TIM1, DISABLE);

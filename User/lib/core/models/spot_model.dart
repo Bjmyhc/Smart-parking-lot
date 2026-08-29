@@ -3,6 +3,9 @@ class SpotModel {
   final String zone;
   final String status;
   final int occupiedHours;
+  final int occupiedSec; // 🆕 原始占用秒数(节点上报值, 仅作为首轮拉取时的兜底)
+  /* ⭐ 进入占用状态的【本地时间戳】: 用于实时计算占用时间, 不再依赖节点定时上报的OccupiedTime属性 */
+  DateTime? occupiedSince;
   final double batteryLevel;
   final int signalStrength;
   final String? plateNumber;
@@ -21,29 +24,39 @@ class SpotModel {
   /* 传感器原始数据 (OneNET 物模型属性, 用于传感器矛盾诊断) */
   final int geoMagnetic; // 地磁检测值: 0=未感应 / 1=感应到车
   final int ultrasonic;  // 超声波距离(cm)
+  final int? zombieThresholdSec; // 🆕 节点端真实僵尸判定阈值(秒), null=未知(离线/未上报)
 
   /* 本地模拟字段 (处理记录): 仅内存态, 3s 刷新后由 ParkingProvider 回写, 重启即丢 */
   String notifyStatus; // 'none'=未通知 / 'notified'=已通知
   String? handlerName; // 处理人
   DateTime? handledAt; // 完成时间
+  DateTime? alertCreatedAt; // 🆕 告警创建时间
+  DateTime? notifiedAt;     // 🆕 车主通知时间
+  DateTime? dispatchedAt;   // 🆕 派单时间
 
   SpotModel({
     required this.id,
     this.zone = 'A',
     this.status = 'free',
     this.occupiedHours = 0,
+    this.occupiedSec = 0,
+    this.occupiedSince, // ⭐ 进入占用状态的本地时间戳 (非final, refresh时可修改)
     this.batteryLevel = 100.0,
     this.signalStrength = 0,
     this.geoMagnetic = 0,
     this.ultrasonic = 0,
+    this.zombieThresholdSec,
     this.plateNumber,
     this.lastUpdated,
     this.isOnline = true,
     this.isDisabled = false,
-    this.isReal = true,  /* 真实设备默认 true, 模拟车位显式传 false */
+    this.isReal = true,
     this.notifyStatus = 'none',
     this.handlerName,
     this.handledAt,
+    this.alertCreatedAt,
+    this.notifiedAt,
+    this.dispatchedAt,
   });
 
   factory SpotModel.fromJson(Map<String, dynamic> json) {
@@ -81,18 +94,29 @@ class SpotModel {
     // 传感器原始数据: 地磁 0/1 + 超声波距离(cm), 用于传感器矛盾诊断
     final geoMagnetic = properties['GeoMagnetic'] as int? ?? 0;
     final ultrasonic = properties['Ultrasonic'] as int? ?? 0;
-
+    // 🆕 节点端僵尸判定阈值属性(OneNET物模型真实identifier=ZombieThresholdSec, 其余为fallback兼容)
+    int? zombieThresholdSec = properties['ZombieThresholdSec'] as int?
+        ?? properties['ZombieThreshold'] as int?
+        ?? properties['ThresholdValue'] as int?
+        ?? properties['threshold_value'] as int?;
     final rawName = json['name'] as String? ?? json['deviceName'] as String? ?? '';
+    // 调试输出: 真实在线节点阈值未读到 → 打印所有属性key用于排查OneNET真实标识符
+    if (isOnline && !isDisabled && zombieThresholdSec == null && rawName.startsWith(RegExp(r'Park|park'))) {
+      print('[SpotModel 调试] ⚠️ 节点 $rawName 未读到僵尸阈值属性, 平台属性keys=${properties.keys.toList()}');
+      print('[SpotModel 调试]    完整属性values=$properties');
+    }
 
     return SpotModel(
       id: rawName,
       zone: _extractZone(rawName),
       status: status,
       occupiedHours: occupiedHours,
+      occupiedSec: isOnline ? occupiedTime : 0, // 🆕 原始占用秒数, 离线=0
       batteryLevel: isOnline ? 85.0 : 0.0,
       signalStrength: isOnline ? -65 : 0,
       geoMagnetic: geoMagnetic,
       ultrasonic: ultrasonic,
+      zombieThresholdSec: zombieThresholdSec, // 🆕 节点端上报的真实阈值
       plateNumber: json['plate_number'] as String?,
       lastUpdated: json['updated_at'] as String?,
       isOnline: isOnline,
@@ -130,6 +154,8 @@ class SpotModel {
   SpotModel copyWith({
     String? status,
     int? occupiedHours,
+    int? occupiedSec,
+    DateTime? occupiedSince, // ⭐ 进入占用状态的本地时间戳
     String? plateNumber,
     String? lastUpdated,
     bool? isOnline,
@@ -138,20 +164,27 @@ class SpotModel {
     String? notifyStatus,
     String? handlerName,
     DateTime? handledAt,
+    DateTime? alertCreatedAt,
+    DateTime? notifiedAt,
+    DateTime? dispatchedAt,
     double? batteryLevel,
     int? signalStrength,
     int? geoMagnetic,
     int? ultrasonic,
+    int? zombieThresholdSec,
   }) {
     return SpotModel(
       id: id,
       zone: zone,
       status: status ?? this.status,
       occupiedHours: occupiedHours ?? this.occupiedHours,
+      occupiedSec: occupiedSec ?? this.occupiedSec,
+      occupiedSince: occupiedSince ?? this.occupiedSince, // ⭐
       batteryLevel: batteryLevel ?? this.batteryLevel,
       signalStrength: signalStrength ?? this.signalStrength,
       geoMagnetic: geoMagnetic ?? this.geoMagnetic,
       ultrasonic: ultrasonic ?? this.ultrasonic,
+      zombieThresholdSec: zombieThresholdSec ?? this.zombieThresholdSec,
       plateNumber: plateNumber ?? this.plateNumber,
       lastUpdated: lastUpdated ?? this.lastUpdated,
       isOnline: isOnline ?? this.isOnline,
@@ -160,6 +193,9 @@ class SpotModel {
       notifyStatus: notifyStatus ?? this.notifyStatus,
       handlerName: handlerName ?? this.handlerName,
       handledAt: handledAt ?? this.handledAt,
+      alertCreatedAt: alertCreatedAt ?? this.alertCreatedAt,
+      notifiedAt: notifiedAt ?? this.notifiedAt,
+      dispatchedAt: dispatchedAt ?? this.dispatchedAt,
     );
   }
 
@@ -169,4 +205,47 @@ class SpotModel {
   bool get isOffline => status == 'offline';
   bool get isDisabledSpot => status == 'disabled';
   bool get isNotified => notifyStatus == 'notified';
+
+  /* ⭐⭐⭐ 【实时占用秒数】: 彻底解决刷新滞后问题
+   * 原 occupiedSec 完全依赖节点上报的 OccupiedTime 属性, 节点仅在 LoRa 轮询时才更新 → 严重滞后
+   * 现在改为用本地时间戳 occupiedSince 动态计算:
+   * 1. occupied/zombie 状态: now - occupiedSince 实时秒数
+   * 2. free/offline/disabled → 返回0
+   * 3. 🆕 懒汉式兜底: 若 occupiedSince 为null (因任何原因未在_updateOccupiedSince设置), 
+   *    则首次调用 actualOccupiedSec 时立刻用 occupiedSec 反推一个起始时间戳, 之后秒数就会实时增长
+   * 4. 这个 getter 在每次 build 的时候都会重新计算, 手动刷新/轮询刷新都会立刻看到最新占用时间 */
+  int get actualOccupiedSec {
+    if (isOccupied || isZombie) {
+      if (occupiedSince != null) {
+        return DateTime.now().difference(occupiedSince!).inSeconds;
+      }
+      // 🆕 懒汉式兜底: 首次调用时反推并记录, 后面秒数就会实时增长
+      final now = DateTime.now();
+      if (occupiedSec > 0) {
+        occupiedSince = now.subtract(Duration(seconds: occupiedSec));
+      } else {
+        occupiedSince = now;
+      }
+      return DateTime.now().difference(occupiedSince!).inSeconds;
+    }
+    return 0;
+  }
+
+  /// 🆕 通用时长格式化: 自动适配秒/分/时单位
+  /// 比赛场景下阈值通常设为几十秒/几分钟, 不再显示"占用0小时"
+  /// 示例: 50秒→"50秒", 70秒→"1分10秒", 3600秒→"1小时", 3661秒→"1小时1分"
+  static String formatOccupiedDuration(int totalSec) {
+    if (totalSec <= 0) return '0秒';
+    if (totalSec < 60) return '${totalSec}秒';
+
+    final int min = totalSec ~/ 60;
+    final int sec = totalSec % 60;
+    if (min < 60) {
+      return sec == 0 ? '${min}分钟' : '${min}分${sec}秒';
+    }
+
+    final int hour = min ~/ 60;
+    final int m = min % 60;
+    return m == 0 ? '${hour}小时' : '${hour}小时${m}分';
+  }
 }

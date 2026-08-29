@@ -1,4 +1,4 @@
-﻿/****************************************************************************
+/****************************************************************************
  * 串口驱动 - bsp_usart.c
  * 
  * 功能描述:
@@ -17,6 +17,10 @@
 #include <stdarg.h>
 #include <string.h>
 #include <stdio.h>
+#include "bsp_delay.h"   /* ⭐ 引入 Get_Tick() 用于串口发送超时判断 */
+
+/* ==================== 串口发送超时(ms): 硬件异常时最多阻塞 50ms, 避免死等卡死主循环 ==================== */
+#define USART_SEND_TIMEOUT_MS 50
 
 /* ==================== USART2 环形缓冲区变量 ==================== */
 static volatile uint8_t  usart2_rbuf[USART2_RBUF_SIZE];
@@ -138,11 +142,18 @@ void Usart_Init(void)
 void Usart_SendString(USART_TypeDef *USARTx, unsigned char *str, unsigned short len)
 {
     unsigned short count = 0;
+    uint32_t startTick;
 
     for (; count < len; count++)
     {
         USART_SendData(USARTx, *str++);
-        while (USART_GetFlagStatus(USARTx, USART_FLAG_TC) == RESET);
+        /* ⭐ 死等TC加超时: 50ms未发送完成直接跳过, 防止串口硬件异常卡死主循环 */
+        startTick = Get_Tick();
+        while (USART_GetFlagStatus(USARTx, USART_FLAG_TC) == RESET)
+        {
+            if (Get_Tick() - startTick > USART_SEND_TIMEOUT_MS)
+                break;
+        }
     }
 }
 
@@ -160,6 +171,7 @@ void Usart_Printf(USART_TypeDef *USARTx, char *fmt, ...)
     char buf[296];
     char *p = buf;
     va_list ap;
+    uint32_t startTick;
 
     va_start(ap, fmt);
     vsnprintf(buf, sizeof(buf) - 1, fmt, ap);
@@ -168,11 +180,23 @@ void Usart_Printf(USART_TypeDef *USARTx, char *fmt, ...)
 
     while (*p)
     {
-        while (USART_GetFlagStatus(USARTx, USART_FLAG_TXE) == RESET);
+        /* ⭐ 死等TXE加超时: 50ms未就绪直接跳过当前字节 */
+        startTick = Get_Tick();
+        while (USART_GetFlagStatus(USARTx, USART_FLAG_TXE) == RESET)
+        {
+            if (Get_Tick() - startTick > USART_SEND_TIMEOUT_MS)
+                break;
+        }
         USART_SendData(USARTx, (uint8_t)(*p++));
     }
 
-    while (USART_GetFlagStatus(USARTx, USART_FLAG_TC) == RESET);
+    /* ⭐ 最终死等TC加超时 */
+    startTick = Get_Tick();
+    while (USART_GetFlagStatus(USARTx, USART_FLAG_TC) == RESET)
+    {
+        if (Get_Tick() - startTick > USART_SEND_TIMEOUT_MS)
+            break;
+    }
 }
 
 /****************************************************************************

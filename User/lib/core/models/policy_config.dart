@@ -2,15 +2,17 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 /// 策略配置: 把系统里写死的判定规则集中于此, 可在 App 内修改并持久化, 修改即时生效.
 ///
-/// 四组策略:
+/// 五组策略:
 /// - 告警策略: 停车超时告警阈值 (秒级)
-/// - ⭐ 僵尸车判定阈值: 节点端判定僵尸车的秒级阈值
+/// - ⭐ 僵尸车判定阈值: 节点端判定僵尸车的秒级阈值 (节点端下发, 不要改含义)
+/// - 🆕 平台派单策略: 通知车主后等待多少秒仍未挪车 → 自动派单 (纯APP端, 不下发节点)
 /// - 传感器策略: 传感器矛盾判定距离阈值
 /// - 刷新策略: 数据轮询刷新间隔
 /// - OTA 策略: 自动检测开关 / 检测间隔 / 每轮检测次数
 class PolicyConfig {
   final int alertSec; // 停车超时告警阈值 (秒): 占用超过该时长生成告警
   final int zombieThresholdSec; // ⭐ 僵尸车判定阈值 (秒): 节点端占用超过该时长判定为僵尸车
+  final int dispatchWaitSec; // 🆕 平台派单等待时间 (秒): 通知车主后等待多久未挪车自动派单 (默认24h=86400s)
   final int sensorDistanceCm; // 传感器矛盾判定距离阈值 (cm): 与节点固件 DIST_THRESHOLD_CM 对应
   final int refreshSec; // 数据刷新间隔 (秒)
   final bool otaEnabled; // OTA 自动检测开关
@@ -20,6 +22,7 @@ class PolicyConfig {
   const PolicyConfig({
     this.alertSec = 3600, // 默认1小时
     this.zombieThresholdSec = 3600, // 默认1小时, 可设置短阈值用于演示
+    this.dispatchWaitSec = 86400, // 🆕 默认24小时, 通知车主后1天未挪车自动派单
     this.sensorDistanceCm = 10,
     this.refreshSec = 3,
     this.otaEnabled = true,
@@ -32,6 +35,7 @@ class PolicyConfig {
 
   static const _kAlertSec = 'policy_alert_sec';
   static const _kZombieThresholdSec = 'policy_zombie_threshold_sec';
+  static const _kDispatchWaitSec = 'policy_dispatch_wait_sec';
   static const _kSensorCm = 'policy_sensor_distance_cm';
   static const _kRefreshSec = 'policy_refresh_sec';
   static const _kOtaEnabled = 'policy_ota_enabled';
@@ -44,6 +48,7 @@ class PolicyConfig {
     return PolicyConfig(
       alertSec: p.getInt(_kAlertSec) ?? defaults.alertSec,
       zombieThresholdSec: p.getInt(_kZombieThresholdSec) ?? defaults.zombieThresholdSec,
+      dispatchWaitSec: p.getInt(_kDispatchWaitSec) ?? defaults.dispatchWaitSec,
       sensorDistanceCm: p.getInt(_kSensorCm) ?? defaults.sensorDistanceCm,
       refreshSec: p.getInt(_kRefreshSec) ?? defaults.refreshSec,
       otaEnabled: p.getBool(_kOtaEnabled) ?? defaults.otaEnabled,
@@ -57,6 +62,7 @@ class PolicyConfig {
     final p = await SharedPreferences.getInstance();
     await p.setInt(_kAlertSec, alertSec);
     await p.setInt(_kZombieThresholdSec, zombieThresholdSec);
+    await p.setInt(_kDispatchWaitSec, dispatchWaitSec);
     await p.setInt(_kSensorCm, sensorDistanceCm);
     await p.setInt(_kRefreshSec, refreshSec);
     await p.setBool(_kOtaEnabled, otaEnabled);
@@ -67,6 +73,7 @@ class PolicyConfig {
   PolicyConfig copyWith({
     int? alertSec,
     int? zombieThresholdSec,
+    int? dispatchWaitSec,
     int? sensorDistanceCm,
     int? refreshSec,
     bool? otaEnabled,
@@ -76,6 +83,7 @@ class PolicyConfig {
     return PolicyConfig(
       alertSec: alertSec ?? this.alertSec,
       zombieThresholdSec: zombieThresholdSec ?? this.zombieThresholdSec,
+      dispatchWaitSec: dispatchWaitSec ?? this.dispatchWaitSec,
       sensorDistanceCm: sensorDistanceCm ?? this.sensorDistanceCm,
       refreshSec: refreshSec ?? this.refreshSec,
       otaEnabled: otaEnabled ?? this.otaEnabled,

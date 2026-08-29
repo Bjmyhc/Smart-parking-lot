@@ -135,11 +135,11 @@ class PolicyConfigPage extends StatelessWidget {
       rows: [
         _buildDurationRow(
           context: context,
-          title: '僵尸车告警阈值',
-          subtitle: '僵尸车占用超过该时长生成告警',
-          totalSeconds: policy.alertSec,
+          title: '派单等待时间',
+          subtitle: '通知车主后，该时间内未挪车将自动派单（纯APP本地生效）',
+          totalSeconds: policy.dispatchWaitSec,
           onChanged: (totalSeconds) {
-            provider.updatePolicy(policy.copyWith(alertSec: totalSeconds));
+            provider.updatePolicy(policy.copyWith(dispatchWaitSec: totalSeconds));
           },
         ),
         _buildStepperRow(
