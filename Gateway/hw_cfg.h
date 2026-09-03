@@ -11,8 +11,6 @@
 
 /* ==================== LoRa 串口配置 ====================
  * - ESP8266(只有1个硬串口): 使用SoftwareSerial
- *     D2 (GPIO4) = LoRa TX -> ESP RX
- *     D1 (GPIO5) = ESP8266 TX -> LoRa RX
  *     LORA_BAUD 软串建议 9600, 115200不稳
  * - ESP32/S3(3个硬串口): 直接 UART1, 引脚自由配置 */
 #if defined(ESP32)
@@ -22,20 +20,32 @@
   #define LORA_BAUD            115200
 #else
   #define LORA_USE_HWSERIAL    0
-  #define LORA_RX_PIN          D2
-  #define LORA_TX_PIN          D1
+  #define LORA_RX_PIN          D1
+  #define LORA_TX_PIN          D0
   #define LORA_BAUD            9600
 #endif
 
+/* ==================== LoRa 模块 AUX 引脚 ====================
+ * AUX 是模块输出, 反映模块忙闲状态:
+ *   高=数据发送中/接收中/模式切换中(忙)
+ *   低=发送完成/接收完成/切换完成(闲)
+ * 接 D2 (GPIO4), 发完命令后 while 等 AUX 变高, 判断模块是否收到数据 */
+#if defined(ESP32)
+  #define LORA_AUX_PIN          27
+#else
+  #define LORA_AUX_PIN          D2    /* GPIO4 */
+#endif
+#define LORA_AUX_WAIT_MS       50UL   /* 等 AUX 变高的超时(ms) */
+
 /* ==================== OLED 显示配置 (I2C, 集中显示) ====================
  * 0.96寸 SSD1306 接到网关, 显示 WiFi/MQTT/各节点状态
- * ESP8266: SDA=D5(GPIO14), SCL=D6(GPIO12) (不与 LoRa 软串/按键冲突) */
+ * ESP8266: SDA=D6(GPIO12), SCL=D7(GPIO13) (不与 LoRa 软串 D0/D1 / AUX D2 / 按键 D3 冲突) */
 #if defined(ESP32)
   #define OLED_SDA_PIN      18
   #define OLED_SCL_PIN      19
 #else
-  #define OLED_SDA_PIN      D5
-  #define OLED_SCL_PIN      D6
+  #define OLED_SDA_PIN      D6
+  #define OLED_SCL_PIN      D7
 #endif
 #define OLED_I2C_ADDR       0x3C    /* SSD1306 I2C 地址 */
 

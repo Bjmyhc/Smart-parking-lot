@@ -16,6 +16,7 @@ struct NodeData {
     uint32_t occupiedTime;  /* s */
     bool     led;           /* LED当前状态 */
     bool     ledEnable;     /* LED使能开关 */
+    int8_t   rssi;          /* ⭐ 本次接收节点数据帧的信号强度(dBm, -120~0), 来自模块DRSSI附加字节 */
     char     fwVersion[16]; /* 节点固件版本字符串(如 "v2.321"), 节点上报帧携带 */
     uint32_t lastUpdate;    /* 最后收到数据时间(ms) */
     bool     certSent;      /* 是否已收到证书 */
@@ -31,6 +32,11 @@ struct NodeData {
     uint32_t thresholdValue;      /* ⭐ 待下发的阈值(秒), 0=使用默认 */
     uint8_t  thresholdRetryCount;  /* ⭐ 下发重试次数, 超过3次放弃 (防止无限重试阻塞) */
     uint32_t zombieThresholdSec;   /* ⭐ 节点上报的当前生效阈值(秒), 随 pack/post 上报只读属性观看 */
+    uint16_t sensorDistanceCm;     /* ⭐ 节点上报的当前生效超声波距离阈值(cm), 随 pack/post 上报只读属性 */
+    /* ⭐ 超声波判定距离阈值(参考僵尸车阈值机制: PONG后下发, 限次重试) */
+    bool     sensorDistanceNeedsUpdate;  /* 待下发 */
+    uint16_t sensorDistanceValue;         /* 待下发的距离(cm), 0=使用默认 */
+    uint8_t  sensorDistanceRetryCount;    /* 下发重试次数 */
 };
 
 extern NodeData nodes[LORA_MAX_NODES];

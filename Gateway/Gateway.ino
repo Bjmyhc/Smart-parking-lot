@@ -220,6 +220,19 @@ static void passiveEvent(void)
 }
 
 /* ==================== setup ==================== */
+
+/* setup 阶段 delay 期间持续刷 OLED, 保证 boot 动画 (spinner 旋转/OK-FAIL 闪烁)
+ * 在画面停留期间持续调用, 否则动画只画一帧就停 */
+static void bootDelay(uint32_t ms)
+{
+    uint32_t t = millis();
+    while (millis() - t < ms)
+    {
+        oled_refresh();
+        delay(20);
+    }
+}
+
 void setup(void)
 {
     DEBUG_SERIAL.begin(DEBUG_BAUD);
@@ -228,6 +241,9 @@ void setup(void)
     DBG_PRINTLN(" 智能停车场网关 v2.0    ");
     DBG_PRINTLN(" LoRa 定点 + 二进制 + 轮询 ");
     DBG_PRINTLN("=============================");
+    /* M0 / M1 已硬件直连 GND: 强制 M0=M1=0 高时效模式,
+     * 不再需要 MCU 先设引脚, 此处直接进入外设初始化.
+     * lora_init() 内部会配置 AUX 输入并等模块初始化完成 (AUX低) */
 
     oled_init();                       /* OLED 先初始化 (启动阶段画面) */
     ota_init();                        /* OTA 处理器初始化 */
@@ -242,34 +258,59 @@ void setup(void)
     lora_triggerDiscovery();
     onenet_init();
 
+    /* --- 阶段0: 开机 Logo (静态 1.5s) --- */
+    oled_setBootState(BOOT_LOGO, "v2.0");
+    bootDelay(1500);
+
     /* --- 阶段1: 网络连接中 (WiFi) --- */
-    oled_showStartupPhase(1);
+    /* 进入 BOOT_WIFI_CONNECT: 画面显示 SSID + spinner 旋转点动画 */
     wifi_init();
+    oled_setBootState(BOOT_WIFI_CONNECT, wifiSsid);
     WiFi.begin(wifiSsid, wifiPassword);
     uint32_t t0 = millis();
     while (!wifi_connected() && (millis() - t0 < 15000))
     {
-        delay(500);
-        oled_refresh();              /* 刷新"网络连接中"画面 */
+        delay(100);                 /* 100ms 间隔, spinner 帧率流畅 */
+        oled_refresh();              /* 刷 spinner 动画 */
         wifi_printStatusChange();    /* 首次连接过程状态打到串口 */
         DBG_PRINT(".");
     }
     if (wifi_connected())
     {
         DBG_PRINTF("\n[WiFi] 连接成功! IP=%s\n", WiFi.localIP().toString().c_str());
+        oled_setBootState(BOOT_WIFI_OK, WiFi.localIP().toString().c_str());
+        bootDelay(1500);               /* 显示成功图标 1.5s (期间持续刷屏) */
         wasWifiConnected = true;    /* setup 已连上, 避免 loop 首轮重复打印 */
     }
     else
+    {
         DBG_PRINTLN("\n[WiFi] 连接失败, 将在主循环重试");
+        oled_setBootState(BOOT_WIFI_FAIL, "Retry in loop");
+        bootDelay(1500);               /* 显示失败图标 1.5s (期间持续刷屏) */
+    }
 
     /* --- 阶段2: 服务器连接中 (MQTT) --- */
+    /* 仅在 WiFi 已连上时尝试 MQTT, 失败不阻塞主循环重试 */
     if (wifi_connected())
     {
-        oled_showStartupPhase(2);
-        onenet_connect();   /* 连不上也没关系, 主循环会重试 */
+        oled_setBootState(BOOT_MQTT_CONNECT, "OneNET");
+        bool mqttOk = onenet_connect();   /* 同步阻塞, 连不上也返回 false */
+        if (mqttOk)
+        {
+            oled_setBootState(BOOT_MQTT_OK, "OneNET");
+            bootDelay(1500);
+        }
+        else
+        {
+            oled_setBootState(BOOT_MQTT_FAIL, "Retry in loop");
+            bootDelay(1500);
+        }
     }
 
     /* --- 阶段3: 节点扫描中 (LoRa) --- */
+    /* 退出 boot 模式 (BOOT_DONE), 切到原 scanPhase/drawScanScreen 旧逻辑:
+     * 节点扫描是异步的 (在主循环 lora_tick 里轮询), 用 FOUND 数字+搜索点动画 */
+    oled_setBootState(BOOT_DONE, NULL);
     oled_showStartupPhase(3);        /* 扫描画面计时从主循环开始 */
     DBG_PRINTLN("[网关] 初始化完成\n");
 }

@@ -1,4 +1,4 @@
-﻿/* ota_handler.h - Gateway OTA 升级处理器
+/* ota_handler.h - Gateway OTA 升级处理器
  *
  * 功能: 从网络下载固件 → 通过 LoRa 分包发送给节点
  *
@@ -71,5 +71,9 @@ OtaState_t ota_getState(void);
 
 /* 取消 OTA */
 void ota_cancel(void);
+
+/* ⭐ 通知 OTA 处理器: 节点已回复 AT+OTA:ack 触发确认
+ * 由 lora_handler 在收到节点 ACK 帧时调用, 触发命令可靠投递 */
+void ota_notifyTriggerAck(void);
 
 #endif /* OTA_HANDLER_H */

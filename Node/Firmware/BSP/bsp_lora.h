@@ -20,6 +20,7 @@
 #define __LORA_NODE_H
 
 #include <stdint.h>
+#include <stddef.h>   /* offsetof (CRC 计算用) */
 #include "stm32f10x.h"
 
 /* ==================== 节点地址配置 ==================== */
@@ -31,6 +32,18 @@
 #define LORA_GATEWAY_ADDR   0x0000      /* 网关地址 */
 #define LORA_CHANNEL        0x00        /* 信道(0), DX-LR22模块: 00=433.15MHz */
 #define LORA_BAUD           9600        /* LoRa 串口波特率，与网关端 SoftwareSerial 一致 */
+
+/* ==================== LoRa 模块 AUX 引脚 ====================
+ * AUX 是模块输出, 反映模块忙闲状态:
+ *   高=数据发送中/接收中/模式切换中(忙)
+ *   低=发送完成/接收完成/切换完成(闲)
+ * 节点端接 STM32F103 的 PA11 (该脚默认 USART1_CTS / USB_DM, 但本项目
+ * 未用 USART1 硬件流控也未用 USB, 故空闲可用作普通 GPIO 输入).
+ * 发送前后查 AUX 状态, 判定模块是否收到/发完, 异常时日志报 FAIL.
+ * 与网关端 hw_cfg.h 的 LORA_AUX_PIN/LORA_AUX_WAIT_MS 对称配置 */
+#define LORA_AUX_PORT       GPIOA
+#define LORA_AUX_PIN        GPIO_Pin_11   /* PA11 */
+#define LORA_AUX_WAIT_MS    50UL          /* 等 AUX 变化的超时(ms) */
 
 /* ==================== OneNET 子设备证书配置 ====================
  * 节点通过 LoRa 上报证书给网关, 网关代为上线 OneNET (网关+子设备模式)
@@ -53,9 +66,37 @@
 #define LORA_FRAME_OTA_OK   0xD1        /* OTA 接收成功 */
 #define LORA_FRAME_OTA_RETRY 0xE1       /* OTA 要求重发 */
 
+/* ==================== 协议版本 ==================== */
+#define LORA_PROTO_VERSION    2   /* v2: 加 seq + crc16 字段 */
+
+/* ==================== CRC16/MODBUS (工业标准, 多项式 0xA001) ====================
+ * 覆盖范围: 整个结构体除 crc16 字段外的所有字节
+ * 漏检概率 ~ 1/65536, 对 19-32 字节短帧完全够用 (LoRaWAN 也用 CRC16)
+ * 两端共用此函数, static 关键字避免多文件 link 冲突 */
+static inline uint16_t lora_crc16(const uint8_t *data, size_t len)
+{
+    uint16_t crc = 0xFFFF;
+    size_t i;
+    int b;
+    for (i = 0; i < len; i++)
+    {
+        crc ^= (uint16_t)data[i];
+        for (b = 0; b < 8; b++)
+        {
+            if (crc & 1) crc = (uint16_t)((crc >> 1) ^ 0xA001);
+            else         crc = (uint16_t)(crc >> 1);
+        }
+    }
+    return crc;
+}
+
 /* ==================== 数据结构 ==================== */
 
-/* 节点传感器数据(与网关端 LoraNodeData_t 一致, 30字节) */
+/* 节点传感器数据(v2: 19 字节, 加 seq + crc16)
+ * ⭐ v2 协议: 末尾追加 seq(1B) + crc16(2B), 16B → 19B
+ *   - seq: 节点每次发送 ++, 0..255 循环 (网关端可记录检测重复/丢包)
+ *   - crc16: CRC16/MODBUS, 覆盖 [结构体首, offsetof(crc16)) 字节
+ * 节点端发送前填, 网关端接收校验, 不通过直接丢弃 */
 #pragma pack(push, 1)
 typedef struct {
     uint8_t  ParkStatus;      /* 0=空闲, 1=有车, 2=僵尸车 */
@@ -65,17 +106,24 @@ typedef struct {
     uint8_t  LED;             /* LED 当前状态 0/1 */
     uint8_t  LedEnable;       /* LED 使能 0/1 */
     uint32_t ZombieThreshold; /* ⭐ 僵尸车判定阈值(秒), 当前生效值, 上报给平台观看 */
-    char     FwVersion[16];   /* 固件版本字符串(如 "v2.321"), 与网关端保持一致 */
+    uint16_t SensorDistanceCm; /* ⭐ 超声波判定距离阈值(cm), 当前生效值 */
+    /* === v2 协议新增字段 (放末尾, 兼容前向布局) === */
+    uint8_t  seq;             /* 帧序列号, 节点每次发送 ++, 0..255 循环 */
+    uint16_t crc16;           /* CRC16/MODBUS 校验, 覆盖前面所有字节 (不含本字段) */
 } NodeData_t;
 #pragma pack(pop)
 
-/* 节点证书(首次上线时发送给网关, 网关代为上线 OneNET) */
+/* 节点证书(v2: 32 字节, 加 seq + crc16)
+ * 首次上线时发送给网关, 网关代为上线 OneNET */
 #pragma pack(push, 1)
 typedef struct {
     uint8_t  valid;           /* 0=未配置, 1=有效 */
     char     ProductKey[12];  /* OneNET 产品ID */
-    char     DeviceName[33];  /* OneNET 设备名称 */
-    char     AccessKey[33];   /* OneNET 设备密钥 */
+    char     DeviceName[8];  /* OneNET 设备名称(如 Park001, 7字符+null) */
+    char     FwVersion[8];  /* 节点固件版本(如 "v2.521", 6字符+null), 供网关 OTA 检测 */
+    /* === v2 协议新增字段 === */
+    uint8_t  seq;             /* 帧序列号 */
+    uint16_t crc16;           /* CRC16/MODBUS 校验, 覆盖前面所有字节 */
 } NodeCert_t;
 #pragma pack(pop)
 

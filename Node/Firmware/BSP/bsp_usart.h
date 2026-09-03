@@ -1,4 +1,4 @@
-﻿/****************************************************************************
+/****************************************************************************
  * 串口驱动头文件 - bsp_usart.h
  * 
  * 功能描述:
@@ -23,7 +23,14 @@
 #define USART_DEBUG		USART1
 
 /* USART2 环形缓冲区大小 */
-#define USART2_RBUF_SIZE	256		
+#define USART2_RBUF_SIZE	256
+
+/* ⭐ USART2 ISR 诊断计数器(extern 声明, 定义在 bsp_usart.c):
+ *   usart2_oreCount  - ORE 溢出错误次数(持续增长说明串口过载/中断被阻塞)
+ *   usart2_rxCount   - ISR 累计接收字节数(停止增长说明 RX 中断没触发)
+ * 主循环周期打印用于定位"LoRa 模块有输出但 STM32 收不到"类故障 */
+extern volatile uint16_t usart2_oreCount;
+extern volatile uint32_t usart2_rxCount;
 
 /****************************************************************************
  * 函数名: Usart1_Init

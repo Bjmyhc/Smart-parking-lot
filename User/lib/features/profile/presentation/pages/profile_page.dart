@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../../../shared/widgets/card_container.dart';
+import '../../../../shared/widgets/page_header.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_dims.dart';
 import 'firmware_upgrade_page.dart';
@@ -32,9 +33,7 @@ class ProfilePage extends StatelessWidget {
                 children: [
                   _buildUserCard(),
                   const SizedBox(height: 12),
-                  _buildSystemGroup(context),
-                  const SizedBox(height: 12),
-                  _buildDeviceGroup(context),
+                  _buildToolGroup(context),
                   const SizedBox(height: 12),
                   _buildAccountGroup(),
                   const SizedBox(height: 80),
@@ -48,44 +47,16 @@ class ProfilePage extends StatelessWidget {
   }
 
   Widget _buildHeader(BuildContext context) {
-    return Padding(
-      padding: EdgeInsets.only(
-        top: MediaQuery.of(context).padding.top + 16,
-        left: AppDims.paddingPage,
-        right: AppDims.paddingPage,
+    final bell = Container(
+      width: 40,
+      height: 40,
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(12),
       ),
-      child: Row(
-        children: [
-          const Expanded(
-            child: Padding(
-              padding: EdgeInsets.only(left: 8),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    '我的',
-                    style: TextStyle(
-                      fontSize: 28,
-                      fontWeight: FontWeight.w500,
-                      color: AppColors.textPrimary,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          Container(
-            width: 40,
-            height: 40,
-            decoration: BoxDecoration(
-              color: AppColors.surface,
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: const Icon(Icons.notifications_none, color: AppColors.textSecondary, size: 22),
-          ),
-        ],
-      ),
+      child: const Icon(Icons.notifications_none, color: AppColors.textSecondary, size: 22),
     );
+    return PageHeader(title: '我的', actions: [bell]);
   }
 
   Widget _buildUserCard() {
@@ -174,21 +145,15 @@ class ProfilePage extends StatelessWidget {
     );
   }
 
-  Widget _buildSystemGroup(BuildContext context) {
+  Widget _buildToolGroup(BuildContext context) {
     return CardContainer(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
       child: Column(
         children: [
           _buildGroupItem(
-            icon: Icons.settings_outlined,
-            title: '系统设置',
-          ),
-          _buildDivider(),
-          _buildGroupItem(
             icon: Icons.policy_outlined,
             title: '策略配置',
             onTap: () {
-              // 与固件升级页一致的纯淡入转场
               Navigator.push(
                 context,
                 PageRouteBuilder(
@@ -201,21 +166,11 @@ class ProfilePage extends StatelessWidget {
               );
             },
           ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildDeviceGroup(BuildContext context) {
-    return CardContainer(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-      child: Column(
-        children: [
+          _buildDivider(),
           _buildGroupItem(
             icon: Icons.history,
             title: '操作日志',
             onTap: () {
-              // 与固件升级页一致的纯淡入转场
               Navigator.push(
                 context,
                 PageRouteBuilder(
@@ -233,7 +188,6 @@ class ProfilePage extends StatelessWidget {
             icon: Icons.update_outlined,
             title: '固件升级',
             onTap: () {
-              // 纯淡入转场: 页面原地淡入, 无滑入/缩放位移, 进入瞬间圆环即居中
               Navigator.push(
                 context,
                 PageRouteBuilder(
@@ -251,7 +205,6 @@ class ProfilePage extends StatelessWidget {
             icon: Icons.bug_report_outlined,
             title: '故障诊断',
             onTap: () {
-              // 与固件升级页一致的纯淡入转场
               Navigator.push(
                 context,
                 PageRouteBuilder(

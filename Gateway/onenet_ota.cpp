@@ -560,7 +560,7 @@ static long otaDownloadFile(const OtaIdentity_t *id, long tid, const char *fileP
     return total;
 }
 
-/* 上报升级状态: {"step":进度(0-100), 201=完成} */
+/* 上报升级状态: {"step": 0-100=进度, 201=成功, 202=失败, 203=下载失败, 204=校验失败} */
 static void otaReportStatus(long tid, int step)
 {
     const OtaIdentity_t *id = otaTaskIdentity();
@@ -810,7 +810,7 @@ void onenet_ota_tick(void)
         long n = otaDownloadFile(id, s_tid, fwFile);
         if (n <= 0)
         {
-            otaReportStatus(s_tid, 5);          /* 失败 */
+            otaReportStatus(s_tid, 203);        /* 下载固件失败 */
             s_stateResetAt = millis();          /* 保持失败态片刻后复位属性 */
             s_st = OTA_PLAT_RESET;
             break;
@@ -843,12 +843,18 @@ void onenet_ota_tick(void)
                         s_st = OTA_PLAT_IDLE;
                 }
                 else
-                    s_st = OTA_PLAT_IDLE;
+                {
+                    /* ⭐ 无在线节点: 上报失败+走RESET复位门控, 避免死循环重下载导致 APP 永久"升级中" */
+                    DBG_PRINTLN("[OTA][平台] 无在线节点, 上报失败(避免死循环重下载)");
+                    otaReportStatus(s_tid, 202);   /* 升级失败(无在线节点) */
+                    s_stateResetAt = millis();
+                    s_st = OTA_PLAT_RESET;
+                }
             }
             else
             {
                 DBG_PRINTLN("[OTA][平台] 节点固件校验失败(魔数/长度不符)");
-                otaReportStatus(s_tid, 5);
+                otaReportStatus(s_tid, 204);   /* 固件校验失败 */
                 s_stateResetAt = millis();        /* 保持失败态片刻后复位属性 */
                 s_st = OTA_PLAT_RESET;
             }
@@ -866,7 +872,7 @@ void onenet_ota_tick(void)
             DBG_PRINTF("[OTA][平台] LoRa 链路结束, %s, 上报平台\n",
                        ok ? "成功" : "失败");
             ota_progressSet(ok ? 100 : s_otaProgress);  /* 完成置满/失败保持当前进度 */
-            otaReportStatus(s_tid, ok ? 201 : 5);
+            otaReportStatus(s_tid, ok ? 201 : 202);  /* 201=成功, 202=升级失败 */
             s_stateResetAt = millis();            /* 保持终端态片刻后复位属性 */
         }
         s_st = OTA_PLAT_RESET;

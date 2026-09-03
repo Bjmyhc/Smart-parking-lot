@@ -4,6 +4,7 @@ import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_dims.dart';
 import '../../../../core/models/spot_model.dart';
 import '../../../../core/providers/parking_provider.dart';
+import '../../../../shared/widgets/page_header.dart';
 import 'spot_detail_page.dart';
 
 class SpotsPage extends StatefulWidget {
@@ -13,7 +14,53 @@ class SpotsPage extends StatefulWidget {
   State<SpotsPage> createState() => _SpotsPageState();
 }
 
-class _SpotsPageState extends State<SpotsPage> {
+class _SpotsPageState extends State<SpotsPage> with TickerProviderStateMixin {
+  /* ===== 模式切换: 弹簧挤压 =====
+   * 点标题切换真实/模拟. 旧列表所有卡片向第一张堆叠挤压(弹簧压下),
+   * 中点切换数据, 新列表从堆叠点弹簧弹开 → "归为一, 再散开"的弹簧效果.
+   * 逐卡 Transform.translate: 第 i 张位移 -i*step*stackFactor, stackFactor=1 全叠到首张. */
+  late final AnimationController _squeezeController = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 720),
+  );
+  // 单卡片行高估算(含间距), 用于逐卡堆叠位移. 列表布局实测 ~72.
+  static const double _stackStep = 72;
+
+  bool _switching = false;
+  List<SpotModel>? _oldSpots;
+
+  @override
+  void dispose() {
+    _squeezeController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _onToggleMode() async {
+    if (_switching) return;
+    _switching = true;
+    final provider = context.read<ParkingProvider>();
+
+    // 1. 快照旧列表(转场前半段固定不变)
+    _oldSpots = List.of(provider.spots);
+    if (mounted) setState(() {});
+
+    try {
+      // 2. ⭐ 同步切模式: 纯内存过滤缓存, 0 延迟. 不再等 OneNET API, 不再卡.
+      provider.toggleRealModeSync();
+      // 2.1 setState 让 AnimatedBuilder 闭包捕获新 spots (从 _realOnly 过滤后的新列表)
+      if (mounted) setState(() {});
+      // 3. 动画: 旧堆叠压缩(0~0.5) → 中点换数据 → 新弹簧弹开(0.5~1.0)
+      await _squeezeController.forward(from: 0);
+      // 4. 动画结束后 → 异步后台 refresh 同步云端最新数据 (不 await 不阻塞 UI, 失败有 3s 定时兜底)
+      provider.finishModeSwitchAndRefresh();
+    } finally {
+      _oldSpots = null;
+      _squeezeController.value = 0;
+      if (mounted) setState(() {});
+      _switching = false;
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final provider = context.watch<ParkingProvider>();
@@ -42,7 +89,7 @@ class _SpotsPageState extends State<SpotsPage> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          _buildSpotLayout(context, provider, spots),
+                          _buildSpotArea(context, provider, spots),
                           const SizedBox(height: 80),
                         ],
                       ),
@@ -54,45 +101,114 @@ class _SpotsPageState extends State<SpotsPage> {
     );
   }
 
-  Widget _buildHeader(BuildContext context, ParkingProvider provider) {
-    return Padding(
-      padding: EdgeInsets.only(
-        top: MediaQuery.of(context).padding.top + 16,
-        left: AppDims.paddingPage,
-        right: AppDims.paddingPage,
-      ),
-      child: Row(
-        children: [
-          Expanded(
-            child: Padding(
-              padding: const EdgeInsets.only(left: 8),
-              child: GestureDetector(
-                onTap: () => provider.toggleRealMode(),
-                behavior: HitTestBehavior.opaque,
-                child: const Text(
-                  '车位',
-                  style: TextStyle(
-                    fontSize: 28,
-                    fontWeight: FontWeight.w500,
-                    color: AppColors.textPrimary,
-                  ),
-                ),
+  /// 车位列表区: 模式切换时弹簧挤压转场, 平时直接渲染当前列表.
+  Widget _buildSpotArea(
+      BuildContext context, ParkingProvider provider, List<SpotModel> spots) {
+    final current = _buildSpotLayout(context, provider, spots);
+    // 非转场中 或 控制器空闲: 直接返回
+    if (_oldSpots == null || (_squeezeController.isDismissed && !_switching)) {
+      return current;
+    }
+    // 转场: AnimatedBuilder 每帧按进度重排卡片
+    return AnimatedBuilder(
+      animation: _squeezeController,
+      builder: (context, _) {
+        if (_oldSpots == null) return current; // 转场已结束, 直接返回新内容
+        final tv = _squeezeController.value;
+        // [0,0.5] 压缩旧快照, [0.5,1] 弹开新列表
+        final squeeze = tv < 0.5 ? (tv / 0.5) : 1.0; // 0→1 旧压缩
+        final expand = tv < 0.5 ? 0.0 : ((tv - 0.5) / 0.5); // 0→1 新弹开
+        // 压缩用 easeInCubic(加速压下), 弹开用 easeOutBack(过冲回弹, 弹簧感)
+        final sqC = Curves.easeInCubic.transform(squeeze);
+        final exC = Curves.easeOutBack.transform(expand);
+        final showOld = tv < 0.5;
+        final list = showOld ? _oldSpots! : spots;
+        // stackFactor: 1=完全堆叠到第一张, 0=完全展开. 旧阶段 0→1, 新阶段 1→0
+        final stackFactor = (showOld ? sqC : (1.0 - exC)).clamp(0.0, 1.0);
+        return _buildStackedLayout(context, provider, list, stackFactor);
+      },
+    );
+  }
+
+  /// 堆叠布局: 按 layoutMode 渲染, 每张卡片向第一张(顶部/左上)堆叠.
+  Widget _buildStackedLayout(BuildContext context, ParkingProvider provider,
+      List<SpotModel> spots, double stackFactor) {
+    if (spots.isEmpty) return _buildSpotLayout(context, provider, spots);
+    switch (provider.layoutMode) {
+      case 1:
+        return _buildStackedGrid(context, provider, spots, stackFactor);
+      case 0:
+      default:
+        return _buildStackedList(context, provider, spots, stackFactor);
+    }
+  }
+
+  /// 列表布局逐卡堆叠: 第 i 张向上移 i*step*stackFactor, stackFactor=1 全叠到首张.
+  Widget _buildStackedList(BuildContext context, ParkingProvider provider,
+      List<SpotModel> spots, double stackFactor) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: List.generate(spots.length, (i) {
+        final item = _buildSpotListItem(context, provider, spots[i]);
+        return Transform.translate(
+          offset: Offset(0, -i * _stackStep * stackFactor),
+          child: Opacity(
+            opacity: (1 - stackFactor * 0.6).clamp(0.0, 1.0),
+            child: item,
+          ),
+        );
+      }),
+    );
+  }
+
+  /// 网格布局逐卡堆叠: 第 (row,col) 张向 (0,0) 位置移动.
+  Widget _buildStackedGrid(BuildContext context, ParkingProvider provider,
+      List<SpotModel> spots, double stackFactor) {
+    return LayoutBuilder(builder: (context, c) {
+      const crossSpacing = 10.0, mainSpacing = 10.0;
+      final cellW = (c.maxWidth - crossSpacing) / 2;
+      final cellH = cellW / 2.0; // aspectRatio 2.0
+      final colStep = cellW + crossSpacing;
+      final rowStep = cellH + mainSpacing;
+      return Wrap(
+        spacing: crossSpacing,
+        runSpacing: mainSpacing,
+        children: List.generate(spots.length, (i) {
+          final row = i ~/ 2, col = i % 2;
+          return SizedBox(
+            width: cellW,
+            height: cellH,
+            child: Transform.translate(
+              offset: Offset(
+                -col * colStep * stackFactor,
+                -row * rowStep * stackFactor,
+              ),
+              child: Opacity(
+                opacity: (1 - stackFactor * 0.6).clamp(0.0, 1.0),
+                child: _buildSpotGridItem(context, provider, spots[i]),
               ),
             ),
-          ),
-          _buildLayoutSwitcher(provider),
-          const SizedBox(width: 10),
-          Container(
-            width: 40,
-            height: 40,
-            decoration: BoxDecoration(
-              color: AppColors.surface,
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: const Icon(Icons.search, color: AppColors.textSecondary, size: 22),
-          ),
-        ],
+          );
+        }),
+      );
+    });
+  }
+
+  Widget _buildHeader(BuildContext context, ParkingProvider provider) {
+    final search = Container(
+      width: 40,
+      height: 40,
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(12),
       ),
+      child: const Icon(Icons.search, color: AppColors.textSecondary, size: 22),
+    );
+    // 隐藏式触发: 点"车位"标题切换真实/模拟, 配合交叉溶解转场
+    return PageHeader(
+      title: '车位',
+      onTitleTap: _onToggleMode,
+      actions: [_buildLayoutSwitcher(provider), const SizedBox(width: 10), search],
     );
   }
 
@@ -149,6 +265,7 @@ class _SpotsPageState extends State<SpotsPage> {
   Widget _buildListLayout(BuildContext context, ParkingProvider provider, List<SpotModel> spots) {
     return ListView.builder(
       shrinkWrap: true,
+      padding: EdgeInsets.zero, // ⭐ 去掉 MediaQuery 自动加的顶部 padding, 让标题到首卡距离和堆叠动画一致
       physics: const NeverScrollableScrollPhysics(),
       itemCount: spots.length,
       itemBuilder: (context, index) {
@@ -264,6 +381,7 @@ class _SpotsPageState extends State<SpotsPage> {
   Widget _buildGridLayout(BuildContext context, ParkingProvider provider, List<SpotModel> spots) {
     return GridView.builder(
       shrinkWrap: true,
+      padding: EdgeInsets.zero, // ⭐ 去掉 MediaQuery 自动加的顶部 padding
       physics: const NeverScrollableScrollPhysics(),
       gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
         crossAxisCount: 2,

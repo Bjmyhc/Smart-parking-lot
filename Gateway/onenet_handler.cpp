@@ -30,6 +30,9 @@
 #define SUB_PROP_OCCUPIED_TIME   "OccupiedTime"
 #define SUB_PROP_LED             "LED"
 #define SUB_PROP_LED_ENABLE      "LedEnable"
+/* ⭐ 节点信号强度(dBm): 来自网关LoRa模块DRSSI附加字节, 网关代子设备上报只读属性,
+ * 定义在节点产品物模型上, 每个节点各有其值 */
+#define SUB_PROP_RSSI            "SignalRssi"
 /* OTA 全网升级确认: App 下发 OtaAllow=1 后网关才执行已检测到的升级任务.
  * 属性定义在节点产品物模型(下行), 网关在 set 主题按属性名拦截, 不转发节点.
  * OtaProgress: 网关 OTA 实时进度, 上行属性, 供 App 查询驱动精确进度条.
@@ -38,10 +41,14 @@
 #define SUB_PROP_OTA_PROGRESS    "OtaProgress"
 /* ⭐ 僵尸车判定阈值(秒): 定义在节点产品物模型上, 可按节点分别设置 */
 #define SUB_PROP_ZOMBIE_THRESHOLD "ZombieThresholdSec"
+/* ⭐ 超声波判定距离阈值(cm): 定义在节点产品物模型上, 可按节点分别设置, 支持 property/set 云同步 */
+#define SUB_PROP_SENSOR_DISTANCE  "SensorDistanceCm"
 /* ⭐ 僵尸车阈值服务标识符: 定义在节点产品物模型上(非网关).
  * APP 经 call-service 同步调用, 平台转发到网关的 sub/service/invoke 主题,
  * 输入 ThresholdValue, 输出 Result/ActualValue */
 #define SUB_SERVICE_ZOMBIE_THRESHOLD "SetZombieThreshold"
+/* ⭐ 超声波判定距离阈值服务: APP 经 call-service 同步调用, 输入 DistanceValue */
+#define SUB_SERVICE_SENSOR_DISTANCE  "SetSensorDistance"
 /* 同步服务调用截止(ms): 平台同步调用超时约10s, 网关须赶在前面回 invoke_reply */
 #define SUB_SERVICE_DEADLINE_MS    9000
 
@@ -69,15 +76,41 @@ static struct {
     bool     active;       /* 是否有待回复的服务调用 */
     char     msgId[32];    /* 平台消息 id, 回复时原样带回 */
     uint8_t  slot;         /* 目标节点索引 */
-    uint32_t targetValue;  /* 目标阈值(秒) */
+    uint32_t targetValue;  /* 目标阈值 */
     uint32_t deadlineMs;   /* 截止时间戳(ms) */
+    char     identifier[32]; /* ⭐ 服务标识符, 回复时原样带回 */
 } s_pendingServiceReply;
 
 /* ==================== 内部函数 ==================== */
 
+/* 校验字符串是否全部由可见 ASCII 字符组成 ([0x20, 0x7E])
+ * v2 双保险: subLogin 前校验 productKey/deviceName, 防止乱码上线请求 */
+static bool isAsciiPrintable(const char *s, size_t maxLen)
+{
+    if (!s || s[0] == '\0') return false;
+    for (size_t i = 0; i < maxLen && s[i] != '\0'; i++)
+    {
+        uint8_t c = (uint8_t)s[i];
+        if (c < 0x20 || c > 0x7E) return false;
+    }
+    return true;
+}
+
 /* 代子设备上线 */
 static void subLogin(uint8_t slot)
 {
+    /* ⭐ v2 双保险: 上线前校验 productKey/deviceName 必须是可见 ASCII 字符串
+     * 防止 CRC 漏检/状态机漏判/LoRa 链路错位导致乱码上线请求被发到 OneNET 平台
+     * 历史乱码 bug 根因之一: productID=".&H" deviceName="s:" 触发 code=2402 */
+    if (!isAsciiPrintable(nodes[slot].productKey, sizeof(nodes[slot].productKey)) ||
+        !isAsciiPrintable(nodes[slot].deviceName, sizeof(nodes[slot].deviceName)))
+    {
+        DBG_PRINTF("[MQTT] 子设备上线 节点%d: productKey/deviceName 非可见 ASCII, 跳过上线\n",
+                   nodes[slot].nodeId);
+        nodes[slot].loginPending = false;   /* 放弃本次上线, 等下次证书正确收到 */
+        return;
+    }
+
     StaticJsonDocument<256> doc;
     doc["id"] = String(millis());
     doc["version"] = "1.0";
@@ -137,6 +170,8 @@ static void subPost(uint8_t slot)
     props[SUB_PROP_LED]["value"]             = nd.led;
     props[SUB_PROP_LED_ENABLE]["value"]      = nd.ledEnable;
     props[SUB_PROP_ZOMBIE_THRESHOLD]["value"] = (long)nd.zombieThresholdSec;   /* ⭐ 只读属性: 节点当前生效阈值 */
+    props[SUB_PROP_SENSOR_DISTANCE]["value"] = (long)nd.sensorDistanceCm;     /* ⭐ 只读属性: 节点当前生效超声波距离阈值 */
+    props[SUB_PROP_RSSI]["value"]            = nd.rssi;                      /* ⭐ 只读属性: 节点信号强度(dBm) */
 
     String out;
     serializeJson(doc, out);
@@ -180,6 +215,8 @@ static void subPostBatch(void)
         props[SUB_PROP_LED]["value"]             = nd.led;
         props[SUB_PROP_LED_ENABLE]["value"]      = nd.ledEnable;
         props[SUB_PROP_ZOMBIE_THRESHOLD]["value"] = (long)nd.zombieThresholdSec;   /* ⭐ 只读属性: 节点当前生效阈值 */
+        props[SUB_PROP_SENSOR_DISTANCE]["value"] = (long)nd.sensorDistanceCm;     /* ⭐ 只读属性: 节点当前生效超声波距离阈值 */
+        props[SUB_PROP_RSSI]["value"]            = nd.rssi;                      /* ⭐ 只读属性: 节点信号强度(dBm) */
     }
 
     String out;
@@ -245,6 +282,19 @@ static void handleSubPropertySet(JsonDocument &doc)
                 DBG_PRINTF("[MQTT] 僵尸车阈值超出范围(5-2592000): %d\n", v);
             }
         }
+        /* ⭐ 超声波判定距离阈值: 按节点设置, 标记待下发 + 保存到 Flash */
+        else if (key == SUB_PROP_SENSOR_DISTANCE)
+        {
+            if (v >= 2 && v <= 400) {
+                nodes[slot].sensorDistanceNeedsUpdate = true;
+                nodes[slot].sensorDistanceValue = (uint16_t)v;
+                nodes[slot].sensorDistanceRetryCount = 0;  /* 重置重试计数, 新阈值从头开始 */
+                saveCertsToLittleFS();  /* ⭐ 立即保存到 Flash, 断电不丢 */
+                DBG_PRINTF("[MQTT] 节点%d 超声波距离阈值=%dcm (已保存Flash, 待PONG下发)\n", nodes[slot].nodeId, v);
+            } else {
+                DBG_PRINTF("[MQTT] 超声波距离阈值超出范围(2-400): %d\n", v);
+            }
+        }
     }
     onenet_replySet(msgId, 200, "success");
     dataChanged = true;
@@ -299,20 +349,36 @@ static void handleSubServiceInvoke(JsonDocument &doc)
         return;
     }
 
-    /* 只处理僵尸车阈值服务 */
-    if (strcmp(identifier, SUB_SERVICE_ZOMBIE_THRESHOLD) != 0)
+    /* 支持的子设备服务: 僵尸车阈值 + 超声波距离阈值 */
+    bool isZombie    = (strcmp(identifier, SUB_SERVICE_ZOMBIE_THRESHOLD) == 0);
+    bool isSensorDist = (strcmp(identifier, SUB_SERVICE_SENSOR_DISTANCE) == 0);
+    if (!isZombie && !isSensorDist)
     {
         DBG_PRINTF("[MQTT] 服务调用: 不支持的 identifier=%s\n", identifier);
         replySubServiceInvoke(msgId, pk, dn, identifier, 404, "unsupported service", 0, 0);
         return;
     }
 
-    int threshold = input["ThresholdValue"] | 0;
-    if (threshold < 5 || threshold > 2592000)
+    int value = 0;
+    if (isZombie)
     {
-        DBG_PRINTF("[MQTT] 服务调用阈值越界: %d\n", threshold);
-        replySubServiceInvoke(msgId, pk, dn, identifier, 400, "ThresholdValue out of range", 0, 0);
-        return;
+        value = input["ThresholdValue"] | 0;
+        if (value < 5 || value > 2592000)
+        {
+            DBG_PRINTF("[MQTT] 服务调用阈值越界: %d\n", value);
+            replySubServiceInvoke(msgId, pk, dn, identifier, 400, "ThresholdValue out of range", 0, 0);
+            return;
+        }
+    }
+    else  /* isSensorDist */
+    {
+        value = input["DistanceValue"] | 0;
+        if (value < 2 || value > 400)   /* 传感器有效量程: 2cm ~ 400cm */
+        {
+            DBG_PRINTF("[MQTT] 服务调用距离越界: %d\n", value);
+            replySubServiceInvoke(msgId, pk, dn, identifier, 400, "DistanceValue out of range", 0, 0);
+            return;
+        }
     }
 
     /* 上一次服务调用尚未结束(等 LoRa ACK), 拒绝并提示稍后重试 */
@@ -345,20 +411,31 @@ static void handleSubServiceInvoke(JsonDocument &doc)
     }
 
     /* 在线: 写阈值 + 标记待下发(LoRa) + 记录待回复状态 */
-    nodes[slot].thresholdValue = threshold;
-    nodes[slot].thresholdRetryCount = 0;
-    nodes[slot].thresholdNeedsUpdate = true;
+    if (isZombie)
+    {
+        nodes[slot].thresholdValue = (uint32_t)value;
+        nodes[slot].thresholdRetryCount = 0;
+        nodes[slot].thresholdNeedsUpdate = true;
+    }
+    else
+    {
+        nodes[slot].sensorDistanceValue = (uint16_t)value;
+        nodes[slot].sensorDistanceRetryCount = 0;
+        nodes[slot].sensorDistanceNeedsUpdate = true;
+    }
     saveCertsToLittleFS();   /* 立即存 Flash, 断电不丢 */
 
     s_pendingServiceReply.active = true;
     snprintf(s_pendingServiceReply.msgId, sizeof(s_pendingServiceReply.msgId),
              "%s", msgId);
+    snprintf(s_pendingServiceReply.identifier, sizeof(s_pendingServiceReply.identifier),
+             "%s", identifier);
     s_pendingServiceReply.slot        = (uint8_t)slot;
-    s_pendingServiceReply.targetValue = (uint32_t)threshold;
+    s_pendingServiceReply.targetValue = (uint32_t)value;
     s_pendingServiceReply.deadlineMs  = millis() + SUB_SERVICE_DEADLINE_MS;
 
-    DBG_PRINTF("[MQTT] 服务调用 SetZombieThreshold 节点%d 阈值=%d秒 (待LoRa下发ACK)\n",
-               nodes[slot].nodeId, threshold);
+    DBG_PRINTF("[MQTT] 服务调用 %s 节点%d 值=%d (待LoRa下发ACK)\n",
+               identifier, nodes[slot].nodeId, value);
 }
 
 /* 上报网关自身属性 (property/post): OtaAllow 门控 + OtaProgress 实时进度.
@@ -699,7 +776,7 @@ void onenet_notifyServiceResult(uint8_t slot, bool success, uint32_t value)
     NodeData &nd = nodes[slot];
     replySubServiceInvoke(s_pendingServiceReply.msgId,
                           nd.productKey, nd.deviceName,
-                          SUB_SERVICE_ZOMBIE_THRESHOLD,
+                          s_pendingServiceReply.identifier,
                           200, success ? "success" : "failed",
                           success ? 1 : 0,
                           success ? (int)value : 0);

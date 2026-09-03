@@ -32,6 +32,8 @@
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
 #include <stdarg.h>
+#include <string.h>   /* strncpy/strlen (临时消息缓冲) */
+#include <math.h>     /* cosf/sinf (Spinner 旋转动画) */
 
 /* 上下行 MQTT 消息计数 (定义在 onenet_handler.cpp) */
 extern uint32_t mqttTxCount;
@@ -49,6 +51,23 @@ static uint8_t  startupPhase = 0;
 /* 启动扫描节点画面: 初始化时全屏居中显示, 找到节点后自动切换到主界面 */
 static bool     scanPhase    = true;
 static uint32_t scanStartMs  = 0;
+
+/* ==================== Boot 状态机 (新, 替代 startupPhase 1/2) ====================
+ * 参考 xiaozhi-esp32 设计: 每个状态对应独立 OLED 画面 + 动画
+ *   BOOT_LOGO / WIFI_CONNECT / WIFI_OK / WIFI_FAIL
+ *   MQTT_CONNECT / MQTT_OK / MQTT_FAIL / DONE
+ * 节点扫描(原 startupPhase=3)仍走 scanPhase/drawScanScreen 旧逻辑, 不变 */
+static BootState bootState       = BOOT_NONE;
+static uint32_t  bootStateMs    = 0;     /* 进入当前状态的时刻 */
+static char      bootDetail[24] = {0};   /* 辅助信息: SSID/IP/原因 */
+static uint8_t   bootProgress    = 0;    /* 进度条百分比 (0-100) */
+static uint32_t  bootLastFrameMs = 0;    /* 动画帧上次时间 */
+static uint8_t   bootFrame       = 0;    /* 动画帧序号 */
+
+/* 临时消息(调试/告警): 调用方设置消息和到期时间, refresh 周期内绘制;
+ * 到期自动清空, 恢复正常画面. 非阻塞, OLED 未就绪时安全降级 */
+static char     tempMsgBuf[24] = {0};
+static uint32_t tempMsgUntilMs = 0;
 
 /* ==================== 8x8 ASCII 位图字库 ====================
  * 用法: font8x8[c - 0x20], c 为 ASCII 32..126
@@ -204,30 +223,55 @@ static void drawBars(int16_t x, int16_t y, uint8_t level, uint16_t color)
     }
 }
 
-/* MQTT 标志: 8x8 云朵位图 (每行高位=左, 1=白点) */
-static const uint8_t MQTT_LOGO[8] = {
-    0b00011000,   /* ...XX... */
-    0b00111100,   /* ..XXXX.. */
-    0b01111110,   /* .XXXXXX. */
-    0b11111111,   /* XXXXXXXX */
-    0b11111111,   /* XXXXXXXX */
-    0b11111111,   /* XXXXXXXX */
-    0b01111110,   /* .XXXXXX. */
-    0b00000000,   /* ........ */
-};
+/* WiFi 弧线图标 (🜿): 2 条同心圆弧(开口朝上 ±47°) + 底部中心圆点.
+ * arcCount 控制画到第几条弧 (0=只圆点, 1=圆点+内弧, 2=全画), 用于重连/启动的递增循环动画.
+ * scale 控制整体等比大小: scale=1 是主界面规格(厚2/间隙2/rBase=4/圆点半径1).
+ *   scale=N 时: 弧厚=2N, 圆点半径=N, 层距=4N, 起始rBase=3N+1.
+ *   结果: 圆点→内弧空白 = 弧间空白 = 2N, 永远相等, 比例与 scale=1 完全一致.
+ * 左右绝对对称 (roundf 正负舍入一致). */
+static void drawWifiLogo(int16_t cx, int16_t cy, int16_t rBase, uint16_t color,
+                         uint8_t arcCount = 2, uint8_t scale = 1)
+{
+    const float deg2rad = 3.14159265f / 180.0f;
+    display.fillCircle(cx, cy, scale, color);           /* 底部中心圆点 (半径=scale, 随缩放等比大) */
+    const int THICK   = 2 * scale;                      /* 每条弧厚度: 2*N */
+    const int LAYER_D = 4 * scale;                      /* 相邻弧内半径差: 厚2N + 间隙2N = 4N */
+    if (arcCount > 2) arcCount = 2;
+    for (int which = 0; which < arcCount; which++)
+    {
+        int inR  = rBase + which * LAYER_D;             /* 本层内半径 */
+        int outR = inR + THICK - 1;                     /* 本层外半径(含端点, 实THICK px厚) */
+        for (int off = -47; off <= 47; off += 1)
+        {
+            float rad = off * deg2rad;
+            for (int rr = inR; rr <= outR; rr++)
+            {
+                int16_t x = cx + (int16_t)roundf(rr * sinf(rad));
+                int16_t y = cy - (int16_t)roundf(rr * cosf(rad));
+                display.drawPixel(x, y, color);
+            }
+        }
+    }
+}
 
-/* MQTT 状态图标绘制 (8x8 云朵):
- *  mode 0=断开(白底黑云 反显), 1=已连(白云), 2=重连中(白云闪烁) */
+/* MQTT 16x8 云朵: 实心+空心两张位图
+ * 实心来自 oled-bitmapper weather-icons.c; 空心由用户手绘
+ * 16w x 8h, 底=y+7. 画在 y=4 → 底=11 (与PGW001和WiFi底对齐)
+ * mode0: 没网→空心云; mode1: 已连→实心云; mode2: 重连中→闪烁 */
+static const unsigned char cloudSolid[] = {
+    0x03, 0xC0, 0x07, 0xE0, 0x0F, 0xF0, 0x7F, 0xFE,
+    0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x7F, 0xFE
+};
+static const unsigned char cloudHollow[] = {
+    0x03, 0xC0, 0x04, 0x20, 0x08, 0x10, 0x70, 0x0E,
+    0x80, 0x01, 0x80, 0x01, 0x80, 0x01, 0x7F, 0xFE
+};
 static void drawMqttLogo(int16_t x, int16_t y, uint8_t mode)
 {
-    if (mode == 2 && ((millis() / OLED_ANIM_MS) & 1)) return;   /* 闪烁暗相: 不画 */
-    if (mode == 0)
-    {
-        display.fillRect(x, y, 8, 8, SSD1306_WHITE);            /* 反白底 */
-        display.drawBitmap(x, y, MQTT_LOGO, 8, 8, SSD1306_BLACK);
-    }
-    else
-        display.drawBitmap(x, y, MQTT_LOGO, 8, 8, SSD1306_WHITE);
+    const unsigned char *bmp = (mode == 0) ? cloudHollow : cloudSolid;
+    if (mode == 2 && ((millis() / OLED_ANIM_MS) & 1))
+        return;   /* MQTT重连中: 隔帧隐藏 */
+    display.drawBitmap(x, y, bmp, 16, 8, SSD1306_WHITE);
 }
 
 /* 上箭头 ▲ */
@@ -260,26 +304,17 @@ static const char *stateStr(uint8_t s)
     }
 }
 
-/* WiFi 信号等级 0..4 (基于 RSSI) */
-static uint8_t wifiLevel(void)
-{
-    if (WiFi.status() != WL_CONNECTED) return 0;
-    int32_t rssi = WiFi.RSSI();
-    if (rssi > -55) return 4;
-    if (rssi > -67) return 3;
-    if (rssi > -75) return 2;
-    return 1;
-}
-
-/* 节点"信号"等级 0..4: LoRa 帧无 RSSI 字段, 用距上次刷新时长模拟 */
+/* 节点"信号"等级 0..4: 基于节点上报帧携带的真实 RSSI(dBm) 换算.
+ * 来源: LoRa 模块 DRSSI 附加字节 → lora_handler 存入 NodeData.rssi.
+ * rssi=0 表示离线/未测到信号, 显示 0 格. (此前用距上次刷新时长模拟, 已废弃) */
 static uint8_t sigLevel(const NodeData &nd)
 {
-    if (!nd.online) return 0;
-    uint32_t age = (uint32_t)(millis() - nd.lastUpdate) / 1000;
-    if (age < 10) return 4;
-    if (age < 20) return 3;
-    if (age < 40) return 2;
-    return 1;
+    if (!nd.online || nd.rssi == 0) return 0;   /* 离线 或 未测到RSSI */
+    if (nd.rssi > -55) return 4;                /* 信号很好 */
+    if (nd.rssi > -67) return 3;                /* 好 */
+    if (nd.rssi > -78) return 2;                /* 一般 */
+    if (nd.rssi > -88) return 1;                /* 弱 */
+    return 0;                                   /* 极弱/不可用 */
 }
 
 /* 当前确认存活的节点数 (online=true):
@@ -291,6 +326,188 @@ static uint8_t scanFound(void)
     for (uint8_t i = 0; i < nodeCount; i++)
         if (nodes[i].online) n++;
     return n;
+}
+
+/* ==================== Boot 动画绘制函数 ====================
+ * 不引入 LVGL, 用 Adafruit_GFX 基础图元实现:
+ *   - drawSpinner:    4 点围绕中心旋转, 8 帧/圈, 150ms/帧
+ *   - drawProgressBar: 水平进度条 + 百分比文字 (预留扩展)
+ *   - drawStatusIcon:   ✓ 或 ✗ 反白圆图标 (偶数帧亮, 实现闪烁)
+ */
+
+/* Spinner: 4 个点围绕中心旋转
+ * frame: 0..7, 每帧整体旋转 45°, 视觉上像loader转圈 */
+static void drawSpinner(int16_t cx, int16_t cy, uint8_t frame)
+{
+    const int16_t r = 7;  /* 旋转半径 */
+    for (uint8_t i = 0; i < 4; i++)
+    {
+        int angle = (frame * 45 + i * 90) % 360;
+        float rad = angle * 3.14159265f / 180.0f;
+        int16_t x = cx + (int16_t)(r * cosf(rad));
+        int16_t y = cy + (int16_t)(r * sinf(rad));
+        display.fillCircle(x, y, 1, SSD1306_WHITE);
+    }
+}
+
+/* ProgressBar: 水平进度条 + 百分比文字 (右对齐) */
+static void drawProgressBar(int16_t x, int16_t y, int16_t w, int16_t h, uint8_t pct)
+{
+    if (pct > 100) pct = 100;
+    display.drawRect(x, y, w, h, SSD1306_WHITE);
+    int16_t fillW = (w - 4) * pct / 100;
+    if (fillW > 0)
+        display.fillRect(x + 2, y + 2, fillW, h - 4, SSD1306_WHITE);
+    /* 百分比文字紧跟右侧 */
+    oled8x8Printf(x + w + 4, y, SSD1306_WHITE, "%d%%", pct);
+}
+
+/* StatusIcon: ✓ 或 ✗ 反白圆图标
+ * frame 偶数=亮, 奇数=灭, 实现 150ms 闪烁
+ * ok=true 画 ✓ (两段折线: 左下→中下→右上)
+ * ok=false 画 ✗ (两条交叉线) */
+static void drawStatusIcon(int16_t cx, int16_t cy, bool ok, uint8_t frame)
+{
+    if (frame % 2 != 0) return;  /* 奇数帧不画, 实现"灭" */
+    /* 反白圆背景 */
+    display.fillCircle(cx, cy, 9, SSD1306_WHITE);
+    /* 黑色符号 */
+    if (ok)
+    {
+        display.drawLine(cx - 4, cy,     cx - 1, cy + 3, SSD1306_BLACK);
+        display.drawLine(cx - 1, cy + 3, cx + 5, cy - 4, SSD1306_BLACK);
+    }
+    else
+    {
+        display.drawLine(cx - 4, cy - 4, cx + 4, cy + 4, SSD1306_BLACK);
+        display.drawLine(cx - 4, cy + 4, cx + 4, cy - 4, SSD1306_BLACK);
+    }
+}
+
+/* drawBootScreen: 根据 bootState 画对应画面
+ * 布局 (128x64):
+ *   y=0..15:  顶部标题 (居中, 8x8 字体)
+ *   y=24..48: 中央动画区 (Spinner / StatusIcon)
+ *   y=52..60: 底部辅助信息 (SSID/IP/原因, 居中) */
+static void drawBootScreen(void)
+{
+    /* 帧计数: 150ms/帧 */
+    uint32_t now = millis();
+    if (now - bootLastFrameMs >= 150)
+    {
+        bootFrame++;
+        bootLastFrameMs = now;
+    }
+
+    display.clearDisplay();
+
+    /* 顶部标题 */
+    const char *title = "";
+    switch (bootState)
+    {
+        case BOOT_LOGO:          title = "GATEWAY V2";      break;
+        case BOOT_WIFI_CONNECT:  title = "WIFI CONNECTING"; break;
+        case BOOT_WIFI_OK:       title = "WIFI CONNECTED";  break;
+        case BOOT_WIFI_FAIL:     title = "WIFI FAILED";     break;
+        case BOOT_MQTT_CONNECT: title = "MQTT CONNECTING"; break;
+        case BOOT_MQTT_OK:       title = "MQTT CONNECTED"; break;
+        case BOOT_MQTT_FAIL:     title = "MQTT FAILED";    break;
+        default: break;
+    }
+    if (title[0])
+    {
+        int16_t titleW = (int16_t)strlen(title) * 8;
+        oled8x8Print((128 - titleW) / 2, 4, title, SSD1306_WHITE);
+    }
+
+    /* 中央动画区 */
+    int16_t cx = 64, cy = 36;
+
+    switch (bootState)
+    {
+        case BOOT_LOGO:
+            /* Logo 静态: 居中显示项目名 */
+            {
+                const char *logo = "SMART-PARK";
+                int16_t w = (int16_t)strlen(logo) * 8;
+                oled8x8Print((128 - w) / 2, 36, logo, SSD1306_WHITE);
+            }
+            break;
+        case BOOT_WIFI_CONNECT:
+        {
+            /* WiFi 递增加载动画, 节奏与 header 重连一致: 圆点→内弧→全画→停留, 150ms/帧循环.
+             * scale=2 等比大一倍: 弧厚4/间隙4/圆点半径2, 三条间隙全部相等(都是4px),
+             * 视觉比例和主界面(scale=1)完全一致, 只是撑满启动屏动画区更醒目. */
+            uint8_t arcN = (uint8_t)(bootFrame % 4);
+            arcN = (arcN == 3) ? 2 : arcN;
+            drawWifiLogo(cx, cy, 7, SSD1306_WHITE, arcN, 2);
+        }
+        break;
+        case BOOT_MQTT_CONNECT:
+            drawSpinner(cx, cy, bootFrame);
+            break;
+        case BOOT_WIFI_OK:
+        case BOOT_MQTT_OK:
+            drawStatusIcon(cx, cy, true, bootFrame);
+            break;
+        case BOOT_WIFI_FAIL:
+        case BOOT_MQTT_FAIL:
+            drawStatusIcon(cx, cy, false, bootFrame);
+            break;
+        default:
+            break;
+    }
+
+    /* 底部辅助信息 */
+    if (bootDetail[0])
+    {
+        int16_t w = (int16_t)strlen(bootDetail) * 8;
+        if (w > 128) w = 128;  /* 超屏宽: 左对齐截断 */
+        oled8x8Print((128 - w) / 2, 52, bootDetail, SSD1306_WHITE);
+    }
+
+    display.display();
+}
+
+/* oled_setBootState: 切换 boot 状态 + 立即刷一帧
+ * 不走 oled_refresh 间隔检查, 保证 setup 阶段即时反馈.
+ * OLED 未就绪时安全降级 (只更新内部状态, 不画屏) */
+void oled_setBootState(BootState state, const char *detail)
+{
+    bootState       = state;
+    bootStateMs     = millis();
+    bootFrame       = 0;  /* 进入新状态, 帧序号归零 */
+    bootLastFrameMs = millis();
+
+    if (detail)
+    {
+        strncpy(bootDetail, detail, sizeof(bootDetail) - 1);
+        bootDetail[sizeof(bootDetail) - 1] = 0;
+    }
+    else
+    {
+        bootDetail[0] = 0;
+    }
+
+    /* BOOT_DONE: 标记完成, 让 startupPhase/scanPhase 归零,
+     * 后续 oled_refresh 自动走 drawRuntime 主画面 */
+    if (state == BOOT_DONE)
+    {
+        startupPhase = 0;
+        scanPhase    = false;
+    }
+
+    /* 立即刷一帧 (BOOT_NONE/BOOT_DONE 不需要立即画, 后续 refresh 走主画面) */
+    if (displayReady && state != BOOT_DONE && state != BOOT_NONE)
+    {
+        drawBootScreen();
+        lastRefresh = millis();
+    }
+}
+
+void oled_setBootProgress(uint8_t pct)
+{
+    bootProgress = pct > 100 ? 100 : pct;
 }
 
 /* 启动搜索节点画面: 全屏居中, 动画圆点 + 已发现节点数 + 提示 */
@@ -379,14 +596,32 @@ void oled_startManualScan(void)
     startupPhase = 0;   /* 离开启动屏状态, 结束后回运行主界面 */
 }
 
-/* 配网模式显示: AP 名 + IP */
+/* 配网模式显示: WiFi图标 + AP名/密码 + 操作指引 (全英文, 无中文字库依赖)
+ * 顶部: WiFi图标 + "AP CONFIG" 标题
+ * 中部: Connect(热点名) / Pass(密码)
+ * 底部: 分隔线 + "Open any website" 指引 + IP 反显块(醒目) */
 static void drawConfigPortal(void)
 {
     display.clearDisplay();
-    oled8x8Printf(0, 0, SSD1306_WHITE, "Config Mode");
-    oled8x8Printf(0, 8, SSD1306_WHITE, "AP:%.10s", CONFIG_AP_SSID);
-    oled8x8Printf(0, 16, SSD1306_WHITE, "IP: 192.168.4.1");
-    oled8x8Printf(0, 24, SSD1306_WHITE, "Open any URL");
+
+    /* 顶部: WiFi 图标 + 标题 (图标直径14px, 标题右移避让) */
+    drawWifiLogo(14, 9, 4, SSD1306_WHITE);
+    oled8x8Print(26, 4, "AP CONFIG", SSD1306_WHITE);
+
+    /* 连接信息: SSID + 密码 (各占一行) */
+    oled8x8Printf(0, 16, SSD1306_WHITE, "SSID:%s", CONFIG_AP_SSID);
+    oled8x8Printf(0, 28, SSD1306_WHITE, "Pass:%s", CONFIG_AP_PASSWORD);
+
+    /* 分隔线 */
+    display.drawLine(0, 39, 127, 39, SSD1306_WHITE);
+
+    /* 操作指引 */
+    oled8x8Print(0, 42, "Open to config:", SSD1306_WHITE);
+
+    /* IP 反显块 (醒目, 128x64 底部) */
+    display.fillRect(4, 53, 120, 10, SSD1306_WHITE);
+    oled8x8Print(24, 54, "192.168.4.1", SSD1306_BLACK);
+
     display.display();
 }
 
@@ -398,20 +633,27 @@ static void drawHeader(void)
 {
     oled8x8Print(0, 4, ONENET_DEVID, SSD1306_WHITE);          /* 设备名 PGW001 */
 
-    /* WiFi 信号条: 已连画实际等级; 重连中逐格跳动(1→2→3→4 循环)
-     * 右对齐: 紧贴右侧 MQTT 云朵左侧 (信号条总宽 11px, 间隔 3px) */
+    /* WiFi 图标 (🜿): 已连=两条弧全画; 重连中=信号格式递增(只圆点→圆点+内弧→全画, 循环).
+     * 右 WiFi (cx=100), 右侧 MQTT 云朵 (x=112, 16px 宽), 左 PGW001 文字, 三者之间均留空白 */
     if (WiFi.status() == WL_CONNECTED)
-        drawBars(106, 4, wifiLevel(), SSD1306_WHITE);
+        drawWifiLogo(100, 10, 4, SSD1306_WHITE, 2);
     else
-        drawBars(106, 4, (millis() / OLED_ANIM_MS) % 4 + 1, SSD1306_WHITE);
+    {
+        uint8_t arcN = (uint8_t)((millis() / OLED_ANIM_MS) % 4);   /* 0/1/2/3 */
+        if (arcN == 3) arcN = 0;
+        /* 节奏: 帧0(圆点) → 帧1(圆点+内弧) → 帧2(全画) → 帧3(再全画一拍, 视觉停留) */
+        arcN = (arcN == 3) ? 2 : arcN;
+        drawWifiLogo(100, 10, 4, SSD1306_WHITE, arcN);
+    }
 
-    /* MQTT 状态图标(最右): 已连=白云; WiFi在线但MQTT重连中=云闪烁; 全断=云反显 */
+    /* MQTT 状态图标(16x8 云朵, 最右贴边):
+     * 已连=实心云; WiFi在线但MQTT重连中=云闪烁; 全断=空心云 */
     if (sysEventFlag & SYS_EVENT_MQTT_CONNECTED)
-        drawMqttLogo(120, 4, 1);
+        drawMqttLogo(112, 4, 1);
     else if (WiFi.status() == WL_CONNECTED)
-        drawMqttLogo(120, 4, 2);
+        drawMqttLogo(112, 4, 2);
     else
-        drawMqttLogo(120, 4, 0);
+        drawMqttLogo(112, 4, 0);
 }
 
 /* Footer: 上/下每分钟消息速率 + 页码
@@ -495,11 +737,65 @@ static void drawRuntime(void)
     display.display();
 }
 
+/* 显示一行临时消息, 持续 durationMs 毫秒后自动恢复正常画面.
+ * 非阻塞: 仅记下消息和到期时间, 实际绘制由 oled_refresh() 周期完成.
+ * OLED 未就绪时本函数也安全调用 (内部不直接写屏, 仅设状态) */
+void oled_showTempMessage(const char *msg, uint32_t durationMs)
+{
+    if (msg == 0 || msg[0] == 0 || durationMs == 0)
+    {
+        /* 空消息或零时长: 视为取消当前临时消息 */
+        tempMsgBuf[0]  = 0;
+        tempMsgUntilMs = 0;
+        return;
+    }
+    /* 截断到缓冲区容量-1 (最多 23 字符, 屏宽 128/8=16 实际显示 16) */
+    strncpy(tempMsgBuf, msg, sizeof(tempMsgBuf) - 1);
+    tempMsgBuf[sizeof(tempMsgBuf) - 1] = 0;
+    tempMsgUntilMs = millis() + durationMs;   /* 到期时间戳 */
+}
+
 void oled_refresh(void)
 {
     if (!displayReady) return;
 
     uint32_t now = millis();
+
+    /* 临时消息(调试/告警): 优先级最高, 在有效期内全屏居中显示,
+     * 到期自动清空, 恢复正常画面 */
+    if (tempMsgUntilMs != 0 && tempMsgBuf[0] != 0)
+    {
+        /* 用有符号差值判到期, 防 millis 回绕 */
+        int32_t remaining = (int32_t)(tempMsgUntilMs - now);
+        if (remaining > 0)
+        {
+            display.clearDisplay();
+            /* 屏宽 128, 8x8 字体 -> 一行最多 16 字符; 居中起始 x */
+            int16_t w = (int16_t)strlen(tempMsgBuf) * 8;
+            if (w > 128) w = 128;
+            oled8x8Print((128 - w) / 2, 28, tempMsgBuf, SSD1306_WHITE);
+            display.display();
+            /* 临时消息期间用快档刷新, 保证到期立即切换 */
+            lastRefresh = now;
+            return;
+        }
+        /* 到期: 清空消息槽, 下面的流程正常走 */
+        tempMsgBuf[0]   = 0;
+        tempMsgUntilMs  = 0;
+    }
+
+    /* Boot 状态机画面 (setup 启动阶段, 新逻辑):
+     * 覆盖旧 startupPhase 1/2 的静态画面, 提供 spinner 旋转动画 +
+     * 成功/失败视觉反馈. 节点扫描(原 phase 3)仍走下面 scanPhase 旧逻辑.
+     * boot 期间用 100ms 快档刷新, 保证 spinner/blink 动画流畅 */
+    if (bootState != BOOT_NONE && bootState != BOOT_DONE)
+    {
+        if (now - lastRefresh < 100) return;
+        lastRefresh = now;
+        drawBootScreen();
+        return;
+    }
+
     /* 刷新间隔: 扫描画面(第三屏)或重连动画时用快档 0.45s,
      * 保证 FOUND 数字/动画点实时更新; 全部在线才恢复 2s 慢刷.
      * 注意: 扫描画面若按 2s 慢刷, 会因搜索 1.6s 就结束而只画到

@@ -18,6 +18,7 @@
 #include "node_data.h"
 #include "ota_handler.h"  /* OTA 响应字节转发 */
 #include "onenet_handler.h" /* ⭐ 阈值下发结果补回服务调用回复 */
+#include "gateway_oled.h"  /* ⭐ AUX 超时时 OLED 提示 3s */
 
 #if defined(ESP32)
   #include <HardwareSerial.h>
@@ -46,7 +47,8 @@ enum RxState {
 static RxState  rxState     = RX_WAIT_HEADER;
 static uint16_t rxNeed      = 0;   /* 还需收多少字节 */
 static uint16_t rxGot       = 0;   /* 已收多少字节 */
-static uint8_t  rxBuf[sizeof(LoraNodeCert_t)]; /* 最大结构体大小够放 Cert */
+static uint32_t lastRxByteMs = 0;  /* 上次收到字节时刻, 状态机超时复位用 */
+static uint8_t  rxBuf[sizeof(LoraNodeCert_t) + 1]; /* ⭐ +1: DRSSI附加RSSI字节, 见DX-LR22手册5.3.11 */
 
 /* ---------- 轮询调度 ---------- */
 static uint8_t  currentNode   = LORA_POLL_FROM_NODE;   /* 当前处理节点 */
@@ -110,16 +112,72 @@ static char     pendingCmd[LORA_CMD_MAX_LEN];
 /* ==================== 内部函数 ==================== */
 
 /* 发送定点传输帧: [AddrH][AddrL][CH] + data
+ * AUX 忙闲状态判定 (状态码轨迹 [auxBefore->sawHigh->auxAfter]):
+ *   [0->1->0] 正常: 发前空闲 -> 发后捕到高(模块收到) -> 等回低(发送完成)
+ *   [1->?->?] 发前 AUX 一直高, 模块卡在发送/接收/切换
+ *   [0->0->0] 发后 AUX 没变高, 模块未收到数据 (串口/接线异常)
+ *   [0->1->1] 发后 AUX 一直高, 模块卡死在发送中
+ * 异常时 OLED 显示 "LoRa is OutTime!" 持续 3 秒便于调试
  * 注意: 参考项目每包分开写, 这里也分开避免一次性大缓冲 */
 static void sendFixedFrame(uint16_t dstAddr, uint8_t ch,
                            const uint8_t *data, uint16_t len)
 {
+    /* === 发前: 等 AUX 低(模块空闲), 超时强制发送 === */
+    uint32_t t0 = millis();
+    while (digitalRead(LORA_AUX_PIN) == HIGH &&
+           (millis() - t0) <= LORA_AUX_WAIT_MS) { }
+    uint8_t auxBefore = (uint8_t)digitalRead(LORA_AUX_PIN);   /* 期望 0=空闲 */
+    uint32_t durBefore = millis() - t0;
+
+    /* === 发数据 === */
     uint8_t header[3];
     header[0] = (uint8_t)(dstAddr >> 8);
     header[1] = (uint8_t)(dstAddr & 0xFF);
     header[2] = ch;
     loraSerial.write(header, 3);
     if (len > 0) loraSerial.write(data, len);
+
+    /* === 发后: 等 AUX 高(模块收到开始处理) -> 等 AUX 低(发送完成) === */
+    uint32_t t1 = millis();
+    while (digitalRead(LORA_AUX_PIN) == LOW &&
+           (millis() - t1) <= LORA_AUX_WAIT_MS) { }   /* 等高 */
+    uint8_t sawHigh = (uint8_t)digitalRead(LORA_AUX_PIN);   /* 期望 1=已变高 */
+    uint32_t durHigh = millis() - t1;
+
+    uint32_t t2 = millis();
+    while (digitalRead(LORA_AUX_PIN) == HIGH &&
+           (millis() - t2) <= LORA_AUX_WAIT_MS) { }   /* 等低 */
+    uint8_t auxAfter = (uint8_t)digitalRead(LORA_AUX_PIN);   /* 期望 0=完成 */
+    uint32_t durLow = millis() - t2;
+
+    /* === 日志输出 ===
+     * 正常: 一行 OK, 带节点地址 + 轨迹码 + 总耗时
+     * 异常: 一行 FAIL, 带节点地址 + 轨迹码 + 原因 + 各阶段耗时(便于定位) */
+    bool ok = (auxBefore == LOW && sawHigh == HIGH && auxAfter == LOW);
+    if (ok)
+    {
+        DBG_PRINTF("[LoRa] TX 0x%04X OK [%d->%d->%d] %lums\n",
+                   dstAddr, auxBefore, sawHigh, auxAfter,
+                   (unsigned long)(durBefore + durHigh + durLow));
+    }
+    else
+    {
+        const char *reason;
+        if (auxBefore == HIGH)
+            reason = "发前AUX忙, 模块卡在发送/接收/切换";
+        else if (sawHigh == LOW)
+            reason = "模块未收到数据, 串口/接线异常";
+        else if (auxAfter == HIGH)
+            reason = "发后AUX一直高, 模块卡死在发送中";
+        else
+            reason = "未知异常";
+        DBG_PRINTF("[LoRa] TX 0x%04X FAIL [%d->%d->%d] %s (前%lu/等高%lu/等低%lu ms)\n",
+                   dstAddr, auxBefore, sawHigh, auxAfter, reason,
+                   (unsigned long)durBefore,
+                   (unsigned long)durHigh,
+                   (unsigned long)durLow);
+        oled_showTempMessage("LoRa is OutTime!", 3000);
+    }
 }
 
 /* 把 "AT+<prefix>\r\n" 或 "AT+<prefix>=<value>\r\n" 发到指定节点
@@ -140,6 +198,21 @@ static void sendAT(uint8_t nodeId, const char *prefix, int value, bool hasValue)
     DBG_PRINTF("[LoRa] 发送-> 节点%d: %s", nodeId, cmd);
 }
 
+/* ⭐ 证书字段 ASCII 校验: ProductKey/DeviceName 必须是可见 ASCII(0x20-0x7E) 且有 \0 结尾
+ * 防止 CRC 巧合漏检(1/65536) 的乱码证书被 updateNodeCert 持久化到 LittleFS,
+ * 重启后每次加载乱码证书、subLogin 被 ASCII 校验拦截 → 节点永久无法上线 */
+static bool certFieldIsAscii(const char *s, size_t maxLen)
+{
+    if (!s) return false;
+    for (size_t i = 0; i < maxLen; i++)
+    {
+        if (s[i] == '\0') return true;   /* 正常结尾 */
+        uint8_t c = (uint8_t)s[i];
+        if (c < 0x20 || c > 0x7E) return false;
+    }
+    return false;   /* 走到 maxLen 仍无 \0, 视为非法 */
+}
+
 /* ---------- 处理一条完整上行帧 ---------- */
 static bool handleCompleteFrame(uint8_t header)
 {
@@ -152,36 +225,77 @@ static bool handleCompleteFrame(uint8_t header)
     switch (header)
     {
     case LORA_FRAME_DATA:
-        if (rxGot != sizeof(LoraNodeData_t))
+        if (rxGot != sizeof(LoraNodeData_t) + 1)   /* ⭐ +1: 末字节为DRSSI附加RSSI */
         {
             DBG_PRINTF("[LoRa] 数据长度不匹配 (%u vs %u)\n",
-                       (unsigned)rxGot, (unsigned)sizeof(LoraNodeData_t));
+                       (unsigned)rxGot, (unsigned)(sizeof(LoraNodeData_t) + 1));
             break;
         }
-        updateNodeFromRaw(nodeId, (const LoraNodeData_t *)rxBuf);
-        gotData = true;
+        /* ⭐ v2 协议: CRC16 校验, 不计末字节RSSI, 防止链路错位/噪声/状态机
+         * 残留被解析成"合法帧"导致垃圾数据上报到 OneNET 平台 */
         {
+            /* 剥离末字节RSSI: 换算公式 -(0xFF - byte), 见DX-LR22手册5.3.11 */
+            int8_t rssi = (int8_t)(0 - (int)(0xFF - (uint8_t)rxBuf[rxGot - 1]));
             LoraNodeData_t *d = (LoraNodeData_t *)rxBuf;
-            DBG_PRINTF("[LoRa] 收到<- 节点%d 数据: 车位=%d 距离=%d 地磁=%d 时长=%lu LED=%d 使能=%d\n",
+            uint16_t calc = lora_crc16(rxBuf, offsetof(LoraNodeData_t, crc16));
+            if (calc != d->crc16)
+            {
+                DBG_PRINTF("[LoRa] 数据帧 CRC 错 (节点%d seq=%d 算=%04X 收=%04X) → 丢弃\n",
+                           nodeId, d->seq, calc, d->crc16);
+                break;   /* CRC 错: 不调 updateNodeFromRaw, 直接丢 */
+            }
+            /* ⭐ 双保险: 字段合理性校验 (即便 CRC 通过, 也挡巧合值) */
+            if (d->ParkStatus > 2 || d->Ultrasonic > 1000 || d->OccupiedTime > 86400)
+            {
+                DBG_PRINTF("[LoRa] 数据帧字段越界 (节点%d ParkStatus=%d 距离=%d 时长=%lu) → 丢弃\n",
+                           nodeId, d->ParkStatus, d->Ultrasonic,
+                           (unsigned long)d->OccupiedTime);
+                break;
+            }
+            updateNodeFromRaw(nodeId, d);
+            /* ⭐ RSSI 存入对应节点, 供 MQTT 代子设备上报 */
+            int slot = findNode(nodeId);
+            if (slot >= 0)
+                nodes[slot].rssi = rssi;
+            gotData = true;
+            DBG_PRINTF("[LoRa] 收到<- 节点%d 数据: 车位=%d 距离=%d 地磁=%d 时长=%lu LED=%d 使能=%d (seq=%d) RSSI=%ddBm\n",
                        nodeId, d->ParkStatus, d->Ultrasonic,
                        d->GeoMagnetic, (unsigned long)d->OccupiedTime,
-                       d->LED, d->LedEnable);
-            (void)d;
+                       d->LED, d->LedEnable, d->seq, rssi);
         }
         break;
 
     case LORA_FRAME_CERT:
-        if (rxGot != sizeof(LoraNodeCert_t))
+        if (rxGot != sizeof(LoraNodeCert_t) + 1)   /* ⭐ +1: 末字节为DRSSI附加RSSI */
         {
             DBG_PRINTF("[LoRa] 证书长度不匹配 (%u vs %u)\n",
-                       (unsigned)rxGot, (unsigned)sizeof(LoraNodeCert_t));
+                       (unsigned)rxGot, (unsigned)(sizeof(LoraNodeCert_t) + 1));
             break;
         }
         {
             const LoraNodeCert_t *cert = (const LoraNodeCert_t *)rxBuf;
+            /* ⭐ v2 协议: CRC16 校验, 防止证书字节流错位导致 productKey/deviceName
+             * 是乱码仍触发代上线请求, OneNET 平台返回 code=2402 request format error */
+            uint16_t calc = lora_crc16(rxBuf, offsetof(LoraNodeCert_t, crc16));
+            if (calc != cert->crc16)
+            {
+                DBG_PRINTF("[LoRa] 证书帧 CRC 错 (节点%d seq=%d 算=%04X 收=%04X) → 丢弃\n",
+                           nodeId, cert->seq, calc, cert->crc16);
+                break;
+            }
+            /* ⭐ 第三层防御: CRC 通过后再校验 ProductKey/DeviceName 是可见 ASCII,
+             * 防止 CRC 巧合漏检(1/65536)的乱码证书被持久化到 LittleFS,
+             * 重启后加载乱码证书导致 subLogin 永久被拦截、节点无法上线 */
+            if (!certFieldIsAscii(cert->ProductKey, sizeof(cert->ProductKey)) ||
+                !certFieldIsAscii(cert->DeviceName, sizeof(cert->DeviceName)))
+            {
+                DBG_PRINTF("[LoRa] 证书帧字段非可见 ASCII (节点%d) → 丢弃, 不持久化\n",
+                           nodeId);
+                break;
+            }
             updateNodeCert(nodeId, cert);
-            DBG_PRINTF("[LoRa] 收到<- 节点%d 证书 (有效=%d 产品=%s 设备=%s)\n",
-                       nodeId, cert->valid, cert->ProductKey, cert->DeviceName);
+            DBG_PRINTF("[LoRa] 收到<- 节点%d 证书 (有效=%d 产品=%s 设备=%s seq=%d)\n",
+                       nodeId, cert->valid, cert->ProductKey, cert->DeviceName, cert->seq);
         }
         gotData = true;
         break;
@@ -269,24 +383,36 @@ static bool feedRx(uint8_t c)
             ota_feedByte(c);
             break;
         }
+        /* ⭐ 严格帧头白名单: 只接受 5 个合法帧头字节, 其他字节直接丢弃
+         * 防止 AT 命令回执/串口噪声/状态机错位被误识别为帧头 */
         if (c == LORA_FRAME_CERT || c == LORA_FRAME_DATA || c == LORA_FRAME_ACK
          || c == LORA_FRAME_OTA_OK || c == LORA_FRAME_OTA_RETRY)
         {
             rxState = (c == LORA_FRAME_CERT) ? RX_FRAME_CERT
                    : (c == LORA_FRAME_DATA) ? RX_FRAME_DATA
                    :                          RX_FRAME_ACK;
-            rxNeed  = (rxState == RX_FRAME_CERT) ? (uint16_t)sizeof(LoraNodeCert_t)
-                   : (rxState == RX_FRAME_DATA) ? (uint16_t)sizeof(LoraNodeData_t)
+            /* ⭐ DRSSI: 接收端模块开启数据包RSSI后, 收包末尾会被附加1字节
+             * 实时RSSI(见DX-LR22手册5.3.11). 故 DATA/CERT 都多收1字节,
+             * 解析时最后一字节作RSSI剥离, 不参与CRC/字段校验. ACK以\r结尾
+             * 不受影响(附加字节在\r后, 会作为垃圾帧头被丢弃). */
+            rxNeed  = (rxState == RX_FRAME_CERT) ? (uint16_t)(sizeof(LoraNodeCert_t) + 1)
+                   : (rxState == RX_FRAME_DATA) ? (uint16_t)(sizeof(LoraNodeData_t) + 1)
                    :                              (uint16_t)(sizeof(rxBuf) - 1);
             rxGot   = 0;
+            /* ⭐ v2 加固: 进入新状态时清零 rxBuf, 防止上次残留字节污染本次解析
+             * 历史乱码 bug 根因之一: rxBuf 上次未清零, 凑齐长度后解析出垃圾 */
+            memset(rxBuf, 0, rxNeed);
+            lastRxByteMs = millis();
             /* 把帧头字节保留, 供 handleCompleteFrame 读取:
              * 我们不存到rxBuf里, 而是通过函数参数传header */
             (void)c;
         }
+        /* ⭐ 非合法帧头字节: 直接 break 丢弃, 状态保持 RX_WAIT_HEADER 等下个字节 */
         break;
 
     case RX_FRAME_ACK:
         /* ACK 字符串, 以 \r 结尾 (节点端命令行协议以 \r\n 结尾) */
+        lastRxByteMs = millis();
         if (c == '\r' || rxGot >= rxNeed - 1)
         {
             rxBuf[rxGot] = '\0';
@@ -301,6 +427,7 @@ static bool feedRx(uint8_t c)
 
     case RX_FRAME_DATA:
     case RX_FRAME_CERT:
+        lastRxByteMs = millis();
         rxBuf[rxGot++] = c;
         if (rxGot >= rxNeed)
         {
@@ -337,6 +464,9 @@ static void advanceNextNode(void)
 
 void lora_init(void)
 {
+    /* AUX 输入: 模块忙闲状态. M0/M1 直连 GND 不占 GPIO */
+    pinMode(LORA_AUX_PIN, INPUT);
+
 #if defined(ESP32)
     loraSerial.begin(LORA_BAUD, SERIAL_8N1, LORA_RX_PIN, LORA_TX_PIN);
 #else
@@ -355,6 +485,19 @@ bool lora_tick(void)
 {
     bool gotData = false;
     uint32_t now = millis();
+
+    /* --- 0. 状态机超时复位: 某次进入 RX_FRAME_DATA/CERT/ACK 后未收齐
+     * (节点发了短帧/丢包/串口中断), 状态机卡死, 下次 0xB1 帧头会被
+     * 当作数据字节污染 rxBuf → 凑齐长度后解析出垃圾 → 乱码上线请求.
+     * 500ms 未收齐强制回 RX_WAIT_HEADER + rxGot=0 + rxBuf 清零 */
+    if (rxState != RX_WAIT_HEADER && (now - lastRxByteMs) > 500)
+    {
+        DBG_PRINTF("[LoRa] RX 状态机超时 (state=%d, %lums), 强制复位\n",
+                   (int)rxState, (unsigned long)(now - lastRxByteMs));
+        rxState = RX_WAIT_HEADER;
+        rxGot   = 0;
+        memset(rxBuf, 0, sizeof(rxBuf));
+    }
 
     /* --- 1. 先把串口数据吃干净 --- */
     while (loraSerial.available())

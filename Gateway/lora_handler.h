@@ -5,7 +5,10 @@
 #include <Arduino.h>
 #include "lora_protocol.h"
 
-/* 初始化 LoRa 串口(硬件或软串) */
+/* 初始化 LoRa 串口(硬件或软串). 会配置 AUX 输入方向,
+ * 等 AUX 拉低(模块初始化完成/空闲)后才开串口,
+ * 避免上电首帧被模块内部初始化吞掉.
+ * M0/M1 硬件直连 GND (强制 M0=M1=0 高时效模式), 不再占用 GPIO. */
 void lora_init(void);
 
 /* 主循环周期调用:

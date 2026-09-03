@@ -6,6 +6,7 @@ import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../../../shared/widgets/card_container.dart';
 import '../../../../shared/widgets/status_badge.dart';
+import '../../../../shared/widgets/page_header.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_dims.dart';
 import '../../../../core/models/spot_model.dart';
@@ -14,6 +15,8 @@ import '../../../../core/providers/parking_provider.dart';
 import '../../../profile/presentation/pages/diagnosis_page.dart';
 import '../../../profile/presentation/pages/firmware_upgrade_page.dart';
 import '../../../profile/presentation/pages/policy_config_page.dart';
+import '../../../stats/presentation/pages/stats_page.dart';
+import '../../../devices/presentation/pages/device_center_page.dart';
 
 /// 首页: 可长按拖动的卡片式首页 (还原自早期提交).
 /// 5 张卡片支持长按 1 秒震动后拖动排序, 顺序持久化到本地.
@@ -28,7 +31,7 @@ class OverviewPage extends StatefulWidget {
 }
 
 class _OverviewPageState extends State<OverviewPage> {
-  static const _allCards = ['greeting', 'quickActions', 'deviceStatus', 'stats', 'latestAlert'];
+  static const _allCards = ['greeting', 'quickActions', 'dataCenter', 'device', 'latestAlert'];
   List<String> _cardOrder = List.from(_allCards);
 
   @override
@@ -52,18 +55,18 @@ class _OverviewPageState extends State<OverviewPage> {
     await prefs.setStringList('overview_card_order', _cardOrder);
   }
 
-  Widget _buildCardById(String id, List<SpotModel> spots, List<AlertModel> alerts) {
+  Widget _buildCardById(String id, ParkingProvider provider) {
     switch (id) {
       case 'greeting':
         return _buildGreetingCard();
       case 'quickActions':
         return _buildQuickActions();
-      case 'deviceStatus':
-        return _buildDeviceStatusCard(spots);
-      case 'stats':
-        return _buildStatsCard(spots);
+      case 'dataCenter':
+        return _buildDataCenterCard(provider);
+      case 'device':
+        return _buildDeviceCenterCard(provider);
       case 'latestAlert':
-        return _buildLatestAlertCard(alerts);
+        return _buildLatestAlertCard(provider.alerts);
       default:
         return _buildGreetingCard();
     }
@@ -72,11 +75,9 @@ class _OverviewPageState extends State<OverviewPage> {
   @override
   Widget build(BuildContext context) {
     final provider = context.watch<ParkingProvider>();
-    final spots = provider.spots;
-    final alerts = provider.alerts;
     return Scaffold(
       backgroundColor: AppColors.background,
-      body: provider.isLoading && spots.isEmpty
+      body: provider.isLoading && provider.spots.isEmpty
           ? const Center(child: CircularProgressIndicator())
           : RefreshIndicator(
               color: AppColors.primary,
@@ -90,7 +91,7 @@ class _OverviewPageState extends State<OverviewPage> {
                 ),
                 header: Column(
                   children: [
-                    _buildHeader(context),
+                    _buildHeader(context, provider),
                     const SizedBox(height: 16),
                   ],
                 ),
@@ -99,7 +100,7 @@ class _OverviewPageState extends State<OverviewPage> {
                   return _LongPressDraggable(
                     key: ValueKey(id),
                     index: _cardOrder.indexOf(id),
-                    child: _buildCardById(id, spots, alerts),
+                    child: _buildCardById(id, provider),
                   );
                 }).toList(),
                 onReorderItem: (oldIndex, newIndex) {
@@ -114,44 +115,54 @@ class _OverviewPageState extends State<OverviewPage> {
     );
   }
 
-  Widget _buildHeader(BuildContext context) {
-    return Padding(
-      padding: EdgeInsets.only(
-        top: MediaQuery.of(context).padding.top + 16,
-        left: AppDims.paddingPage,
-        right: AppDims.paddingPage,
+  Widget _buildHeader(BuildContext context, ParkingProvider provider) {
+    final online = provider.gatewayOnline;
+    final badgeColor = online ? AppColors.success : AppColors.danger;
+    /* ⭐ 网关状态徽章: 系统中枢, 在线绿/离线红, 离线时醒目提醒 */
+    final badge = Container(
+      margin: const EdgeInsets.only(right: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        color: badgeColor.withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: badgeColor.withValues(alpha: 0.3), width: 1),
       ),
       child: Row(
+        mainAxisSize: MainAxisSize.min,
         children: [
-          const Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  '首页',
-                  style: TextStyle(
-                    fontSize: 28,
-                    fontWeight: FontWeight.w500,
-                    color: AppColors.textPrimary,
-                  ),
-                ),
-              ],
-            ),
+          Container(
+            width: 8, height: 8,
+            decoration: BoxDecoration(color: badgeColor, shape: BoxShape.circle),
           ),
-          GestureDetector(
-            onTap: () => widget.onSwitchTab?.call(2),
-            child: Container(
-              width: 40,
-              height: 40,
-              decoration: BoxDecoration(
-                color: AppColors.surface,
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: const Icon(Icons.notifications_none, color: AppColors.textSecondary, size: 22),
+          const SizedBox(width: 6),
+          Text(
+            online ? '网关在线' : '网关离线',
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+              color: badgeColor,
             ),
           ),
         ],
       ),
+    );
+    final bell = GestureDetector(
+      onTap: () => widget.onSwitchTab?.call(2),
+      child: Container(
+        width: 40,
+        height: 40,
+        decoration: BoxDecoration(
+          color: AppColors.surface,
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: const Icon(Icons.notifications_none, color: AppColors.textSecondary, size: 22),
+      ),
+    );
+    // 首页在 ReorderableListView 内, 列表已提供左右边距, 故 addHorizontalPadding=false
+    return PageHeader(
+      title: '首页',
+      addHorizontalPadding: false,
+      actions: [badge, bell],
     );
   }
 
@@ -273,37 +284,90 @@ class _OverviewPageState extends State<OverviewPage> {
     );
   }
 
-  Widget _buildStatsCard(List<SpotModel> spots) {
-    final totalSpots = spots.length;
-    final freeSpots = spots.where((s) => s.isFree).length;
-    final occupiedSpots = spots.where((s) => s.isOccupied).length;
-    final zombieSpots = spots.where((s) => s.isZombie).length;
-
+  /* ==================== 设备中心卡: 网关状态+节点在线率, 作为设备中心入口 ==================== */
+  Widget _buildDeviceCenterCard(ParkingProvider provider) {
+    final stats = provider.stats;
+    final onlineNodes = stats.onlineDevices - (stats.gatewayOnline ? 1 : 0);
+    final totalNodes = stats.totalSpots;
+    final rate = totalNodes > 0 ? onlineNodes / totalNodes : 0.0;
+    final onlinePct = (rate * 100).round();
+    final badgeColor = stats.gatewayOnline ? AppColors.success : AppColors.danger;
     return CardContainer(
+      onTap: () => _push(context, const DeviceCenterPage()),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Padding(
-            padding: EdgeInsets.only(bottom: 12),
-            child: Text(
-              '车位概览',
-              style: TextStyle(
-                fontSize: 15,
-                fontWeight: FontWeight.w600,
-                color: AppColors.textPrimary,
-              ),
-            ),
-          ),
+          /* 标题行: 设备中心 + 查看全部 */
           Row(
-            mainAxisAlignment: MainAxisAlignment.spaceAround,
             children: [
-              _buildStatItem('$totalSpots', '总车位', AppColors.textPrimary),
-              Container(width: 1, height: 40, color: AppColors.textSecondary.withValues(alpha: 0.3)),
-              _buildStatItem('$freeSpots', '空闲', AppColors.success),
-              Container(width: 1, height: 40, color: AppColors.textSecondary.withValues(alpha: 0.3)),
-              _buildStatItem('$occupiedSpots', '占用', AppColors.warning),
-              Container(width: 1, height: 40, color: AppColors.textSecondary.withValues(alpha: 0.3)),
-              _buildStatItem('$zombieSpots', '僵尸车', AppColors.danger),
+              const Icon(Icons.router, size: 18, color: AppColors.primary),
+              const SizedBox(width: 8),
+              const Text(
+                '设备中心',
+                style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: AppColors.textPrimary),
+              ),
+              const Spacer(),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                decoration: BoxDecoration(
+                  color: AppColors.primary.withValues(alpha: 0.08),
+                  borderRadius: BorderRadius.circular(AppDims.radiusSmall),
+                ),
+                child: const Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text('查看全部', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.primary)),
+                    SizedBox(width: 4),
+                    Icon(Icons.arrow_forward, size: 14, color: AppColors.primary),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          /* 网关状态行 */
+          Row(
+            children: [
+              Icon(Icons.wifi_tethering, size: 16, color: badgeColor),
+              const SizedBox(width: 6),
+              const Text('网关 PGW001', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w500, color: AppColors.textPrimary)),
+              const Spacer(),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(
+                  color: badgeColor.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Container(width: 6, height: 6, decoration: BoxDecoration(color: badgeColor, shape: BoxShape.circle)),
+                    const SizedBox(width: 4),
+                    Text(stats.gatewayOnline ? '在线' : '离线', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: badgeColor)),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          /* 节点在线率条 */
+          Row(
+            children: [
+              Text('节点在线 $onlineNodes/$totalNodes', style: const TextStyle(fontSize: 12, color: AppColors.textSecondary)),
+              const SizedBox(width: 8),
+              Expanded(
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(3),
+                  child: LinearProgressIndicator(
+                    value: rate,
+                    backgroundColor: AppColors.textSecondary.withValues(alpha: 0.1),
+                    valueColor: AlwaysStoppedAnimation(onlineNodes > 0 ? AppColors.success : Colors.grey),
+                    minHeight: 6,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Text('$onlinePct%', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.textSecondary)),
             ],
           ),
         ],
@@ -311,54 +375,23 @@ class _OverviewPageState extends State<OverviewPage> {
     );
   }
 
-  Widget _buildStatItem(String value, String label, Color color) {
-    return Expanded(
-      child: GestureDetector(
-        onTap: () {
-          if (label == '僵尸车') {
-            widget.onSwitchTab?.call(2);
-          }
-        },
-        child: Column(
-          children: [
-            Text(
-              value,
-              style: TextStyle(
-                fontSize: 22,
-                fontWeight: FontWeight.w700,
-                color: color,
-              ),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              label,
-              style: const TextStyle(
-                fontSize: 12,
-                color: AppColors.textSecondary,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildDeviceStatusCard(List<SpotModel> spots) {
-    final total = spots.length;
-    final normal = spots.where((s) => s.isFree).length;
-    final disabled = spots.where((s) => s.isDisabledSpot).length;
-    final abnormal = total - normal - disabled;  /* 异常/告警设备: 停用单独列为"停用" */
-
+  /* ==================== 数据中心卡: 合并原车位概览+设备状态, 作为数据页入口 ==================== */
+  Widget _buildDataCenterCard(ParkingProvider provider) {
+    final stats = provider.stats;
+    final occPct = (stats.occupancyRate * 100).round();
+    final onlineTotal = stats.totalSpots + 1; // 含网关
     return CardContainer(
+      onTap: () => _push(context, const StatsPage()),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          /* 标题行: 数据中心 + 查看全部 */
           Row(
             children: [
-              const Icon(Icons.sensors, size: 18, color: AppColors.primary),
+              const Icon(Icons.insights, size: 18, color: AppColors.primary),
               const SizedBox(width: 8),
               const Text(
-                '设备状态',
+                '数据中心',
                 style: TextStyle(
                   fontSize: 15,
                   fontWeight: FontWeight.w600,
@@ -366,103 +399,104 @@ class _OverviewPageState extends State<OverviewPage> {
                 ),
               ),
               const Spacer(),
-              Text(
-                '共 $total 个节点',
-                style: const TextStyle(
-                  fontSize: 12,
-                  color: AppColors.textSecondary,
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                decoration: BoxDecoration(
+                  color: AppColors.primary.withValues(alpha: 0.08),
+                  borderRadius: BorderRadius.circular(AppDims.radiusSmall),
+                ),
+                child: const Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      '查看全部',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: AppColors.primary,
+                      ),
+                    ),
+                    SizedBox(width: 4),
+                    Icon(Icons.arrow_forward, size: 14, color: AppColors.primary),
+                  ],
                 ),
               ),
             ],
           ),
           const SizedBox(height: 14),
+          /* KPI 行: 总/空/占/僵尸 (紧凑, 复用数据页同源 stats) */
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceAround,
+            children: [
+              _buildDcStatItem('${stats.totalSpots}', '总车位', AppColors.textPrimary),
+              Container(width: 1, height: 40, color: AppColors.textSecondary.withValues(alpha: 0.2)),
+              _buildDcStatItem('${stats.freeSpots}', '空闲', AppColors.success),
+              Container(width: 1, height: 40, color: AppColors.textSecondary.withValues(alpha: 0.2)),
+              _buildDcStatItem('${stats.occupiedSpots}', '占用', AppColors.warning),
+              Container(width: 1, height: 40, color: AppColors.textSecondary.withValues(alpha: 0.2)),
+              _buildDcStatItem('${stats.zombieSpots}', '僵尸车', AppColors.danger),
+            ],
+          ),
+          const SizedBox(height: 14),
+          /* 占用率条 + 在线设备 */
           Row(
             children: [
+              Text(
+                '占用率 $occPct%',
+                style: const TextStyle(fontSize: 12, color: AppColors.textSecondary),
+              ),
+              const SizedBox(width: 8),
               Expanded(
-                child: Container(
-                  padding: const EdgeInsets.symmetric(vertical: 10),
-                  decoration: BoxDecoration(
-                    color: AppColors.success.withValues(alpha: 0.08),
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: Column(
-                    children: [
-                      Text(
-                        '$normal',
-                        style: const TextStyle(
-                          fontSize: 22,
-                          fontWeight: FontWeight.w700,
-                          color: AppColors.success,
-                        ),
-                      ),
-                      const SizedBox(height: 2),
-                      const Text(
-                        '正常',
-                        style: TextStyle(fontSize: 12, color: AppColors.textSecondary),
-                      ),
-                    ],
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(3),
+                  child: LinearProgressIndicator(
+                    value: stats.occupancyRate,
+                    backgroundColor: AppColors.textSecondary.withValues(alpha: 0.1),
+                    valueColor: AlwaysStoppedAnimation(
+                      stats.occupiedSpots > 0 ? AppColors.warning : AppColors.success,
+                    ),
+                    minHeight: 6,
                   ),
                 ),
               ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Container(
-                  padding: const EdgeInsets.symmetric(vertical: 10),
-                  decoration: BoxDecoration(
-                    color: abnormal > 0
-                        ? AppColors.warning.withValues(alpha: 0.08)
-                        : AppColors.textSecondary.withValues(alpha: 0.05),
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: Column(
-                    children: [
-                      Text(
-                        '$abnormal',
-                        style: TextStyle(
-                          fontSize: 22,
-                          fontWeight: FontWeight.w700,
-                          color: abnormal > 0 ? AppColors.warning : AppColors.textSecondary,
-                        ),
-                      ),
-                      const SizedBox(height: 2),
-                      const Text(
-                        '异常',
-                        style: TextStyle(fontSize: 12, color: AppColors.textSecondary),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Container(
-                  padding: const EdgeInsets.symmetric(vertical: 10),
-                  decoration: BoxDecoration(
-                    color: disabled > 0
-                        ? AppColors.textSecondary.withValues(alpha: 0.08)
-                        : AppColors.textSecondary.withValues(alpha: 0.05),
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: Column(
-                    children: [
-                      Text(
-                        '$disabled',
-                        style: const TextStyle(
-                          fontSize: 22,
-                          fontWeight: FontWeight.w700,
-                          color: AppColors.textSecondary,
-                        ),
-                      ),
-                      const SizedBox(height: 2),
-                      const Text(
-                        '停用',
-                        style: TextStyle(fontSize: 12, color: AppColors.textSecondary),
-                      ),
-                    ],
-                  ),
+              const SizedBox(width: 12),
+              Icon(Icons.wifi, size: 14, color: stats.gatewayOnline ? AppColors.success : Colors.grey),
+              const SizedBox(width: 4),
+              Text(
+                '${stats.onlineDevices}/$onlineTotal',
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  color: stats.gatewayOnline ? AppColors.success : Colors.grey,
                 ),
               ),
             ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDcStatItem(String value, String label, Color color) {
+    return Expanded(
+      child: Column(
+        children: [
+          Text(
+            value,
+            style: TextStyle(
+              fontSize: 22,
+              fontWeight: FontWeight.w700,
+              color: color,
+              height: 1,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            label,
+            style: const TextStyle(
+              fontSize: 12,
+              color: AppColors.textSecondary,
+            ),
           ),
         ],
       ),

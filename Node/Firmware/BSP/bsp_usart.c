@@ -67,7 +67,7 @@ void Usart1_Init(unsigned int baud)
 
     nvicInitStruct.NVIC_IRQChannel = USART1_IRQn;
     nvicInitStruct.NVIC_IRQChannelCmd = ENABLE;
-    nvicInitStruct.NVIC_IRQChannelPreemptionPriority = 0;
+    nvicInitStruct.NVIC_IRQChannelPreemptionPriority = 1;  /* ⭐ 抢占级1, 让出0给USART2(LoRa收), LoRa字节不能等 */
     nvicInitStruct.NVIC_IRQChannelSubPriority = 2;
     NVIC_Init(&nvicInitStruct);
 }
@@ -228,22 +228,22 @@ volatile uint32_t usart2_rxCount = 0;
 
 void USART2_IRQHandler(void)
 {
-    /* Overrun Error 处理: ORE 会阻止 RXNE 中断产生，
-     * 如果不清除 ORE，串口会"卡死" */
-    if (USART_GetFlagStatus(USART2, USART_FLAG_ORE) != RESET)
-    {
-        usart2_oreCount++;
-        /* STM32F1 清除 ORE: 读 SR(通过 GetFlagStatus 已读) + 读 DR */
-        (void)USART_ReceiveData(USART2);
-        USART_ClearFlag(USART2, USART_FLAG_ORE);
-    }
-
+    /* ⭐ 顺序修复: 必须先处理 RXNE 再处理 ORE.
+     * 旧代码先查 ORE, ORE 置位时读 DR 清 ORE 会顺便清掉 RXNE,
+     * 导致当前字节被丢弃 -> 命令残缺(如 AT+PING 丢 G 变 AT+PIN),
+     * 喂给上层 s_rxBuf 凑不成 \r\n -> 最终触发缓冲区死锁, 节点掉线.
+     *
+     * STM32F1 ORE/RXNE 正确处理:
+     *   - ORE 置位时 RXNE 可能同时置位(新字节已在 DR)
+     *   - 先读 RXNE: 读 DR 取走新字节 + 顺带清 RXNE 和 ORE
+     *   - 若仍残留 ORE(如纯 overrun 无新字节): 读 SR+读 DR 清除
+     */
     if (USART_GetITStatus(USART2, USART_IT_RXNE) != RESET)
     {
         uint16_t nextHead;
         uint8_t data;
 
-        data = (uint8_t)USART_ReceiveData(USART2);
+        data = (uint8_t)USART_ReceiveData(USART2);  /* 读 DR: 取数据 + 清 RXNE + 清 ORE */
 
         nextHead = (usart2_rhead + 1) % USART2_RBUF_SIZE;
         if (nextHead == usart2_rtail)
@@ -256,8 +256,18 @@ void USART2_IRQHandler(void)
             usart2_rhead = nextHead;
             usart2_rxCount++;
         }
+    }
 
-        USART_ClearFlag(USART2, USART_FLAG_RXNE);
+    /* ORE 残留兜底: 上面读 DR 已清掉大多数 ORE,
+     * 但纯 overrun(无新字节) 时 RXNE 不会置位, 需这里补清,
+     * 否则 ORE 一直置位会阻止后续 RXNE 中断产生 -> 串口"卡死" */
+    if (USART_GetFlagStatus(USART2, USART_FLAG_ORE) != RESET)
+    {
+        usart2_oreCount++;
+        (void)USART_ReceiveData(USART2);   /* 读 DR 清 ORE */
+        /* USART_ClearFlag 对 ORE 在 F1 上实际无效(ORE 为 rc_w0/read-clear),
+         * 但保留以兼容其他 STM32 系列 */
+        USART_ClearFlag(USART2, USART_FLAG_ORE);
     }
 }
 

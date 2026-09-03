@@ -22,6 +22,16 @@ class ApiService {
 
   final http.Client _client = http.Client();
 
+  /// 统一 GET, 带 5s 超时(防 OneNET 卡死拖死刷新链)
+  Future<http.Response> _get(Uri url, {Map<String, String>? headers}) {
+    return _client.get(url, headers: headers).timeout(const Duration(seconds: 5));
+  }
+
+  /// 统一 POST, 带 5s 超时
+  Future<http.Response> _post(Uri url, {Map<String, String>? headers, Object? body}) {
+    return _client.post(url, headers: headers, body: body).timeout(const Duration(seconds: 5));
+  }
+
   String _generateAuthorization() {
     const version = '2020-05-29';
     // 主用户资源标识: userid/{userid}，末尾不带斜杠
@@ -105,7 +115,7 @@ class ApiService {
       final url = Uri.parse('$_baseUrl/device/list?product_id=$productId&offset=0&limit=20');
       debugPrint('>>> OneNET 请求: $url');
 
-      final response = await _client.get(
+      final response = await _get(
         url,
         headers: {
           'Authorization': auth,
@@ -176,7 +186,7 @@ class ApiService {
         final auth = _generateAuthorization();
         final url = Uri.parse('$_baseUrl/thingmodel/query-device-property?product_id=$productId&device_name=${Uri.encodeComponent(deviceName)}');
 
-        final response = await _client.get(
+        final response = await _get(
           url,
           headers: {
             'Authorization': auth,
@@ -235,7 +245,7 @@ class ApiService {
       final auth = _generateAuthorization();
       final url = Uri.parse('$_baseUrl/thingmodel/query-device-property?product_id=$pid&device_name=${Uri.encodeComponent(deviceName)}');
 
-      final response = await _client.get(
+      final response = await _get(
         url,
         headers: {
           'Authorization': auth,
@@ -334,7 +344,7 @@ class ApiService {
 
       final url = Uri.parse('$_baseUrl/thingmodel/set-device-property');
 
-      final response = await _client.post(
+      final response = await _post(
         url,
         headers: {
           'Authorization': auth,
@@ -379,7 +389,7 @@ class ApiService {
       final auth = _generateAuthorization();
       final url = Uri.parse('$_baseUrl/thingmodel/call-service');
 
-      final response = await _client.post(
+      final response = await _post(
         url,
         headers: {
           'Authorization': auth,
@@ -423,7 +433,7 @@ class ApiService {
       final auth = _generateAuthorization();
       final url = Uri.parse('$_baseUrl/device/list?product_id=$gatewayProductId&offset=0&limit=20');
 
-      final response = await _client.get(
+      final response = await _get(
         url,
         headers: {
           'Authorization': auth,
@@ -453,6 +463,62 @@ class ApiService {
     } catch (e) {
       debugPrint('❌ isGatewayOnline exception: $e');
       return false;
+    }
+  }
+
+  /// 获取所有网关设备 (网关产品下所有设备 = 网关列表, 用于设备中心多网关展示)
+  Future<List<Map<String, dynamic>>> getGateways() async {
+    return _fetchProductDevices(gatewayProductId);
+  }
+
+  /// 获取网关下挂子设备 (OneNET childdevice/list API), 拉属性后解析成 SpotModel
+  Future<List<SpotModel>> getGatewayChildren(String gatewayName) async {
+    try {
+      final auth = _generateAuthorization();
+      final url = Uri.parse(
+        '$_baseUrl/device/childdevice/list?product_id=$gatewayProductId'
+        '&device_name=${Uri.encodeComponent(gatewayName)}&offset=0&limit=100',
+      );
+      debugPrint('>>> 网关子设备请求: $url');
+      final response = await _get(
+        url,
+        headers: {'Authorization': auth, 'Content-Type': 'application/json'},
+      );
+      debugPrint('>>> 子设备 HTTP ${response.statusCode}: ${response.body}');
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        if (data['code'] == 0) {
+          final List<dynamic> rawList = data['data']['list'] ?? [];
+          final devices = <Map<String, dynamic>>[];
+          for (var d in rawList) {
+            final device = Map<String, dynamic>.from(d as Map);
+            device['product_id'] = device['pid'] ?? _nodeProductId; // 子设备产品id
+            final statusValue = device['status'];
+            device['online'] = statusValue == 1 || statusValue == 'online' || statusValue == true;
+            final enabled = device['enable_status'];
+            device['is_disabled'] = enabled == false || enabled == 'false';
+            devices.add(device);
+          }
+          final devicesWithProps = await _fetchDeviceProperties(devices);
+          final parsed = <SpotModel>[];
+          for (final e in devicesWithProps) {
+            try {
+              parsed.add(SpotModel.fromJson(e));
+            } catch (err) {
+              debugPrint('>>> 子设备解析失败: ${e['name']} -> $err');
+            }
+          }
+          parsed.sort((a, b) => _numericId(a.id).compareTo(_numericId(b.id)));
+          debugPrint('>>> 网关 $gatewayName 子设备: ${parsed.length} 台');
+          return parsed;
+        } else {
+          debugPrint('>>> 子设备查询错误: code=${data['code']}, msg=${data['msg']}');
+        }
+      }
+      return [];
+    } catch (e) {
+      debugPrint('>>> getGatewayChildren exception: $e');
+      return [];
     }
   }
 
@@ -486,7 +552,7 @@ class ApiService {
     try {
       final auth = _generateOtaAuthorization();
       final url = Uri.parse('$_baseUrl/fuse-ota/$_nodeProductId/${Uri.encodeComponent(deviceName)}/version');
-      final response = await _client.get(
+      final response = await _get(
         url,
         headers: {'Authorization': auth, 'Content-Type': 'application/json'},
       );
@@ -512,7 +578,7 @@ class ApiService {
     try {
       final auth = _generateOtaAuthorization();
       final url = Uri.parse('$_baseUrl/fuse-ota/$_nodeProductId/${Uri.encodeComponent(deviceName)}/check?type=2&version=${Uri.encodeComponent(version)}');
-      final response = await _client.get(
+      final response = await _get(
         url,
         headers: {'Authorization': auth, 'Content-Type': 'application/json'},
       );
@@ -541,7 +607,7 @@ class ApiService {
       final auth = _generateOtaAuthorization();
       final url = Uri.parse(
           '$_baseUrl/fuse-ota/$_nodeProductId/${Uri.encodeComponent(deviceName)}/$tid/check');
-      final response = await _client.get(
+      final response = await _get(
         url,
         headers: {'Authorization': auth, 'Content-Type': 'application/json'},
       );
@@ -569,7 +635,7 @@ class ApiService {
     try {
       final auth = _generateAuthorization();
       final url = Uri.parse('$_baseUrl/thingmodel/query-device-property?product_id=$gatewayProductId&device_name=${Uri.encodeComponent(gatewayDeviceId)}');
-      final response = await _client.get(
+      final response = await _get(
         url,
         headers: {'Authorization': auth, 'Content-Type': 'application/json'},
       );
@@ -657,6 +723,14 @@ class ApiService {
         zombieSpots: zombie,
         occupancyRate: rate,
         hourlyTrend: [],
+        freeSpots: total - occupied - zombie,
+        onlineDevices: 0,
+        gatewayOnline: false,
+        notifiedToday: 0,
+        dispatchedToday: 0,
+        resolvedToday: 0,
+        avgOccupiedMin: 0,
+        lastRefreshAgo: '-',
       );
     } catch (e) {
       return StatsModel.empty();

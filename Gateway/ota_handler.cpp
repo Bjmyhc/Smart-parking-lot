@@ -12,6 +12,7 @@
 #include "lora_protocol.h"
 #include "hw_cfg.h"
 #include "app_cfg.h"
+#include "node_data.h"    /* ⭐ findNode/nodes: OTA成功后重新标记阈值下发 */
 
 #include <ESP8266HTTPClient.h>
 #include <WiFiClient.h>
@@ -41,6 +42,11 @@ static uint32_t s_stateStart;           /* 当前状态进入时间戳 */
 static uint32_t s_otaStart;             /* OTA开始时间戳 */
 static uint8_t s_otaResp;               /* 收到的 OTA 响应字节 */
 static volatile bool s_hasResp;         /* 是否已收到 OTA 响应 */
+
+/* ⭐ AT+OTA 触发命令可靠投递: 发命令后等节点 ACK, 丢包则重发 */
+static volatile bool s_triggerAcked;    /* 节点已回复 AT+OTA:ack */
+static uint8_t  s_triggerSendCount;     /* AT+OTA 已发送次数(含首次) */
+static uint32_t s_triggerSentAt;        /* 上次发送 AT+OTA 的时间戳 */
 
 /* CRC16 表 (XMODEM poly 0x1021, 与节点端一致) */
 static const uint16_t s_crc16Table[256] = {
@@ -289,6 +295,9 @@ bool ota_start(uint8_t nodeId, const char *url, const char *version)
     s_otaStart = millis();
     s_hasResp = false;
     s_seq = 1;
+    s_triggerAcked = false;
+    s_triggerSendCount = 0;
+    s_triggerSentAt = 0;
 
     DBG_PRINTF("[OTA] 启动: 节点%d, 版本=%s, URL=%s\n", nodeId, s_progress.version, s_otaUrl);
 
@@ -325,6 +334,9 @@ bool ota_startFromFile(uint8_t nodeId, const char *version)
     s_otaStart = millis();
     s_hasResp = false;
     s_seq = 1;
+    s_triggerAcked = false;
+    s_triggerSendCount = 0;
+    s_triggerSentAt = 0;
     s_fileReady = true;
 
     DBG_PRINTF("[OTA] 启动(平台固件): 节点%d, 版本=%s\n",
@@ -345,25 +357,63 @@ void ota_tick(void)
         /* 什么都不做 */
         break;
 
-    /* ---------- 阶段1: 触发节点复位进 BootLoader ---------- */
+    /* ---------- 阶段1: 触发节点复位进 BootLoader ----------
+     * ⭐ 可靠投递: 发 AT+OTA 后等节点回复 ACK, 丢包则重发(最多3次),
+     * 收到 ACK 才进入复位等待, 避免节点没收到命令导致盲等超时 */
     case OTA_TRIGGER_NODE:
     {
-        /* 等 LoRa 信道空闲: ota_startFromFile 通常在节点刚回复 DATA 后被调用,
-         * 此时节点 LoRa 模块可能还在 TX 模式, 立即发 AT+OTA 会因半双工冲突丢失.
-         * 等 500ms 确保节点回到 RX 模式再发 */
-        if (now - s_stateStart < 500)
-            break;
-
-        /* 通过 LoRa 发送 AT+OTA=start,V<m>.<n> 触发节点升级 */
-        char cmd[LORA_CMD_MAX_LEN];
-        int n = snprintf(cmd, sizeof(cmd), "AT+OTA=start,%s\r\n", s_progress.version);
-        if (n > 0)
+        /* 首次进入: 等 500ms LoRa 信道空闲再发 AT+OTA
+         * (ota_startFromFile 通常在节点刚回复 DATA 后被调用,
+         *  节点 LoRa 模块可能还在 TX 模式, 立即发会因半双工冲突丢失) */
+        if (s_triggerSentAt == 0)
         {
-            sendRawFrame((uint16_t)s_progress.nodeId, LORA_CHANNEL,
-                         (const uint8_t *)cmd, (uint16_t)n);
-            DBG_PRINTF("[OTA] 触发节点%d: %s", s_progress.nodeId, cmd);
+            if (now - s_stateStart < 500)
+                break;
+            char cmd[LORA_CMD_MAX_LEN];
+            int n = snprintf(cmd, sizeof(cmd), "AT+OTA=start,%s\r\n", s_progress.version);
+            if (n > 0)
+            {
+                sendRawFrame((uint16_t)s_progress.nodeId, LORA_CHANNEL,
+                             (const uint8_t *)cmd, (uint16_t)n);
+                DBG_PRINTF("[OTA] 触发节点%d: %s", s_progress.nodeId, cmd);
+            }
+            s_triggerSentAt = now;
+            s_triggerSendCount = 1;
+            break;
         }
-        setState(OTA_WAIT_NODE_RESET);
+
+        /* 收到节点 ACK: 确认命令已送达, 进入复位等待 */
+        if (s_triggerAcked)
+        {
+            DBG_PRINTLN("[OTA] 节点已确认触发命令, 等待复位");
+            setState(OTA_WAIT_NODE_RESET);
+            break;
+        }
+
+        /* 等待 ACK 超时: 重发 AT+OTA (防 LoRa 丢包), 最多发 OTA_TRIGGER_MAX_SEND 次 */
+        if (now - s_triggerSentAt >= OTA_TRIGGER_ACK_TIMEOUT_MS)
+        {
+            if (s_triggerSendCount < OTA_TRIGGER_MAX_SEND)
+            {
+                char cmd[LORA_CMD_MAX_LEN];
+                int n = snprintf(cmd, sizeof(cmd), "AT+OTA=start,%s\r\n", s_progress.version);
+                if (n > 0)
+                {
+                    sendRawFrame((uint16_t)s_progress.nodeId, LORA_CHANNEL,
+                                 (const uint8_t *)cmd, (uint16_t)n);
+                    DBG_PRINTF("[OTA] 触发节点%d (第%d次, 无ACK重发): %s",
+                               s_progress.nodeId, s_triggerSendCount + 1, cmd);
+                }
+                s_triggerSentAt = now;
+                s_triggerSendCount++;
+            }
+            else
+            {
+                DBG_PRINTF("[OTA] 触发节点%d 失败: 无ACK, 已发%d次\n",
+                           s_progress.nodeId, s_triggerSendCount);
+                setState(OTA_FAILED);
+            }
+        }
         break;
     }
 
@@ -546,6 +596,27 @@ void ota_tick(void)
         LittleFS.remove(OTA_FW_FILE);
         DBG_PRINTF("[OTA] 完成, 耗时 %lu 秒\n",
                    (unsigned long)(s_progress.elapsedMs / 1000));
+        /* ⭐ 升级成功后, 重新标记节点需要下发阈值:
+         * 新固件可能丢失了之前的阈值配置(Flash布局变化/默认值不同),
+         * 节点重新上线(PONG)时自动重新下发之前保存的阈值 */
+        {
+            int slot = findNode((uint8_t)s_progress.nodeId);
+            if (slot >= 0 && nodes[slot].thresholdValue > 0)
+            {
+                nodes[slot].thresholdNeedsUpdate = true;
+                nodes[slot].thresholdRetryCount = 0;
+                DBG_PRINTF("[OTA] 节点%d 升级成功, 标记重新下发僵尸车阈值=%lu秒\n",
+                           s_progress.nodeId, (unsigned long)nodes[slot].thresholdValue);
+            }
+            /* ⭐ 超声波距离阈值同理重新标记下发 */
+            if (slot >= 0 && nodes[slot].sensorDistanceValue > 0)
+            {
+                nodes[slot].sensorDistanceNeedsUpdate = true;
+                nodes[slot].sensorDistanceRetryCount = 0;
+                DBG_PRINTF("[OTA] 节点%d 升级成功, 标记重新下发超声波距离阈值=%ucm\n",
+                           s_progress.nodeId, nodes[slot].sensorDistanceValue);
+            }
+        }
         s_progress.state = OTA_IDLE;
         break;
 
@@ -593,4 +664,13 @@ void ota_cancel(void)
         DBG_PRINTLN("[OTA] 已取消");
         s_progress.state = OTA_IDLE;
     }
+}
+
+/* ⭐ 通知 OTA 处理器: 节点已回复 AT+OTA:ack
+ * 由 lora_handler 在收到节点 ACK 帧时调用,
+ * 让 OTA_TRIGGER_NODE 状态确认命令已送达, 进入复位等待 */
+void ota_notifyTriggerAck(void)
+{
+    if (s_progress.state == OTA_TRIGGER_NODE)
+        s_triggerAcked = true;
 }

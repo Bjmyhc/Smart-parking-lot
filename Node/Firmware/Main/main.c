@@ -72,6 +72,13 @@ int main(void)
     /* 设置向量表偏移: OTA 后 APP 从 0x08004000 启动 */
     SCB->VTOR = FLASH_BASE | 0x4000;
 
+    /* ⭐ 中断优先级分组: 2 位抢占 + 2 位子优先级(Group_2, 工程惯例).
+     * 必须在任何 NVIC_Init 之前调用一次且仅一次, 否则默认 Group_0
+     * (0 抢占位), PreemptionPriority 字段被忽略, 所有中断不能互相抢占.
+     * 现有配置: USART2(LoRa收) Pre=0 Sub=0, USART1(Debug) Pre=1 Sub=2,
+     * USART2 抢占级更高 -> LoRa 收字节能打断 debug 打印 ISR, 通信更稳 */
+    NVIC_PriorityGroupConfig(NVIC_PriorityGroup_2);
+
     /* 恢复总中断使能 */
     __enable_irq();
 
@@ -102,6 +109,10 @@ int main(void)
             s_lastWdgLogTick = Get_Tick();
             Usart_Printf(USART_DEBUG, "[WDG] 喂狗正常, 运行 %lu 秒\r\n",
                          (unsigned long)(Get_Tick() / 1000));
+            /* ⭐ USART2 ISR 诊断: oreCount 持续涨=串口过载; rxCount 不涨=RX中断没触发,
+             * 用于定位"LoRa 模块有输出但 STM32 收不到命令"类故障 */
+            Usart_Printf(USART_DEBUG, "[USART2] ore=%u rxBytes=%lu\r\n",
+                         (unsigned)usart2_oreCount, (unsigned long)usart2_rxCount);
         }
 		
         /* 最后一步才喂狗: 完整跑完全部任务才有资格, 任何一步卡死都不喂 */

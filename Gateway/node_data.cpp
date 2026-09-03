@@ -13,9 +13,10 @@ typedef struct {
     char     deviceName[33];       /* 子设备设备名 */
     bool     certSent;             /* 是否收到过证书 */
     uint32_t zombieThresholdSec;   /* 僵尸车判定阈值(秒), 0=未设置/使用默认 */
+    uint16_t sensorDistanceCm;     /* ⭐ 超声波距离阈值(cm), 0=未设置/使用默认 */
 } PersistedCert_t;
 
-static const uint8_t CERTS_MAGIC = 0xA5;  /* 文件有效性标识 */
+static const uint8_t CERTS_MAGIC = 0xA6;  /* 文件有效性标识 (含sensorDistanceCm) */
 
 void saveCertsToLittleFS(void)
 {
@@ -40,6 +41,9 @@ void saveCertsToLittleFS(void)
         /* ⭐ 保存僵尸车阈值: 只有已设置的节点才保存 (非0值) */
         pc.zombieThresholdSec = (nodes[i].thresholdValue > 0) ?
                                 nodes[i].thresholdValue : 0;
+        /* ⭐ 保存超声波距离阈值 */
+        pc.sensorDistanceCm = (nodes[i].sensorDistanceValue > 0) ?
+                              nodes[i].sensorDistanceValue : 0;
         f.write((uint8_t *)&pc, sizeof(PersistedCert_t));
     }
     f.close();
@@ -89,6 +93,15 @@ void loadCertsFromLittleFS(void)
             DBG_PRINTF("[LFS] 节点%d 僵尸车阈值=%lu秒 (待PONG下发)\n",
                        pc.nodeId, (unsigned long)pc.zombieThresholdSec);
         }
+        /* ⭐ 加载超声波距离阈值: 如有保存则设置待下发标志 */
+        if (pc.sensorDistanceCm > 0)
+        {
+            nodes[slot].sensorDistanceValue = pc.sensorDistanceCm;
+            nodes[slot].sensorDistanceNeedsUpdate = true;
+            nodes[slot].sensorDistanceRetryCount = 0;
+            DBG_PRINTF("[LFS] 节点%d 超声波距离阈值=%ucm (待PONG下发)\n",
+                       pc.nodeId, pc.sensorDistanceCm);
+        }
     }
     f.close();
     LittleFS.end();
@@ -131,20 +144,31 @@ void updateNodeFromRaw(uint8_t nodeId, const LoraNodeData_t *raw)
     if (slot < 0) return;
 
     NodeData &nd = nodes[slot];
+
+    /* ⭐ v2 双保险: 即便 lora_handler.cpp handleCompleteFrame 已校验过 CRC + 字段,
+     * 这里再做一次截断兜底, 防止任何路径漏判导致垃圾值上报到 OneNET 平台.
+     * 历史乱码 bug 根因之一: 数据帧错位解析后 ParkStatus=47/Ultrasonic=6530 等
+     * 垃圾值被原样存入 NodeData, 平台物模型收到非法值引发连锁异常 */
+    uint8_t  parkStatus   = raw->ParkStatus;
+    uint16_t ultrasonic   = raw->Ultrasonic;
+    uint32_t occupiedTime = raw->OccupiedTime;
+    if (parkStatus > 2)    { parkStatus    = 2; }   /* 截断到最大合法值 */
+    if (ultrasonic > 1000) { ultrasonic    = 1000; }   /* 距离上限 1000cm */
+    if (occupiedTime > 86400) { occupiedTime = 86400; } /* 时长上限 1 天 */
+
     /* ⭐ 仅车位状态变化才触发立即上报; 距离/地磁/LED/阈值等走 15s 定时兜底,
      * 避免距离微小抖动导致每次轮询都上报刷屏平台 */
-    bool changed = (nd.parkStatus != raw->ParkStatus);
+    bool changed = (nd.parkStatus != parkStatus);
 
     bool wasOffline = !nd.online;
-    nd.parkStatus   = raw->ParkStatus;
-    nd.geoMagnetic   = raw->GeoMagnetic;
-    nd.ultrasonic   = raw->Ultrasonic;
-    nd.occupiedTime = raw->OccupiedTime;
+    nd.parkStatus   = parkStatus;
+    nd.geoMagnetic   = (raw->GeoMagnetic != 0);   /* 任意非零值转 0/1 */
+    nd.ultrasonic   = ultrasonic;
+    nd.occupiedTime = occupiedTime;
     nd.led          = (raw->LED != 0);
     nd.ledEnable    = (raw->LedEnable != 0);
     nd.zombieThresholdSec = raw->ZombieThreshold;   /* ⭐ 节点当前生效阈值, 供 pack/post 上报观看 */
-    strncpy(nd.fwVersion, raw->FwVersion, sizeof(nd.fwVersion) - 1);
-    nd.fwVersion[sizeof(nd.fwVersion) - 1] = '\0';   /* 节点上报固件版本串, OTA 检测据此自动更新 */
+    nd.sensorDistanceCm   = raw->SensorDistanceCm;   /* ⭐ 节点当前生效超声波距离阈值 */
     nd.lastUpdate   = millis();
     nd.online       = true;
     sysEventFlag |= (1 << (nd.nodeId - 1));   /* 同步事件标志位 */
@@ -181,6 +205,8 @@ void updateNodeCert(uint8_t nodeId, const LoraNodeCert_t *cert)
     nd.productKey[sizeof(nd.productKey) - 1] = '\0';
     strncpy(nd.deviceName, cert->DeviceName, sizeof(nd.deviceName) - 1);
     nd.deviceName[sizeof(nd.deviceName) - 1] = '\0';
+    strncpy(nd.fwVersion, cert->FwVersion, sizeof(nd.fwVersion) - 1);
+    nd.fwVersion[sizeof(nd.fwVersion) - 1] = '\0';   /* ⭐ 节点固件版本从证书帧取, OTA 检测据此自动更新 */
 
     /* 证书有效且信息完整才允许代上线 */
     nd.loginPending = (cert->valid != 0) &&

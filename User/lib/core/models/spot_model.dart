@@ -25,6 +25,7 @@ class SpotModel {
   final int geoMagnetic; // 地磁检测值: 0=未感应 / 1=感应到车
   final int ultrasonic;  // 超声波距离(cm)
   final int? zombieThresholdSec; // 🆕 节点端真实僵尸判定阈值(秒), null=未知(离线/未上报)
+  final int? sensorDistanceCm;  // 🆕 节点端真实超声波距离阈值(cm), null=未知(离线/未上报)
 
   /* 本地模拟字段 (处理记录): 仅内存态, 3s 刷新后由 ParkingProvider 回写, 重启即丢 */
   String notifyStatus; // 'none'=未通知 / 'notified'=已通知
@@ -46,6 +47,7 @@ class SpotModel {
     this.geoMagnetic = 0,
     this.ultrasonic = 0,
     this.zombieThresholdSec,
+    this.sensorDistanceCm,
     this.plateNumber,
     this.lastUpdated,
     this.isOnline = true,
@@ -99,6 +101,17 @@ class SpotModel {
         ?? properties['ZombieThreshold'] as int?
         ?? properties['ThresholdValue'] as int?
         ?? properties['threshold_value'] as int?;
+    // 🆕 节点端超声波距离阈值属性
+    int? sensorDistanceCm = properties['SensorDistanceCm'] as int?;
+    // ⭐ 节点信号强度(OneNET物模型真实identifier=SignalRssi, 网关代上报dBm)
+    // 读取失败/离线 → null, UI 侧显示占位, 不再用硬编码假值
+    final rawRssi = properties['SignalRssi'];
+    int? signalStrength;
+    if (rawRssi is int) {
+      signalStrength = rawRssi;         // 平台返回数值(可能已是int/字符串解析后的int)
+    } else if (rawRssi is String && rawRssi.trim().isNotEmpty) {
+      signalStrength = int.tryParse(rawRssi); // 兼容字符串形式 "-84"
+    }
     final rawName = json['name'] as String? ?? json['deviceName'] as String? ?? '';
     // 调试输出: 真实在线节点阈值未读到 → 打印所有属性key用于排查OneNET真实标识符
     if (isOnline && !isDisabled && zombieThresholdSec == null && rawName.startsWith(RegExp(r'Park|park'))) {
@@ -112,11 +125,12 @@ class SpotModel {
       status: status,
       occupiedHours: occupiedHours,
       occupiedSec: isOnline ? occupiedTime : 0, // 🆕 原始占用秒数, 离线=0
-      batteryLevel: isOnline ? 85.0 : 0.0,
-      signalStrength: isOnline ? -65 : 0,
+      batteryLevel: isOnline ? 100.0 : 0.0, // 电量: 节点接电源无真实采集, 固定显示100%
+      signalStrength: isOnline && signalStrength != null ? signalStrength : 0, // ⭐ 读信号强度(网关DRSSI上报)
       geoMagnetic: geoMagnetic,
       ultrasonic: ultrasonic,
       zombieThresholdSec: zombieThresholdSec, // 🆕 节点端上报的真实阈值
+      sensorDistanceCm: sensorDistanceCm,   // 🆕 节点端上报的真实超声波距离阈值
       plateNumber: json['plate_number'] as String?,
       lastUpdated: json['updated_at'] as String?,
       isOnline: isOnline,
@@ -172,6 +186,7 @@ class SpotModel {
     int? geoMagnetic,
     int? ultrasonic,
     int? zombieThresholdSec,
+    int? sensorDistanceCm,
   }) {
     return SpotModel(
       id: id,
@@ -185,6 +200,7 @@ class SpotModel {
       geoMagnetic: geoMagnetic ?? this.geoMagnetic,
       ultrasonic: ultrasonic ?? this.ultrasonic,
       zombieThresholdSec: zombieThresholdSec ?? this.zombieThresholdSec,
+      sensorDistanceCm: sensorDistanceCm ?? this.sensorDistanceCm,
       plateNumber: plateNumber ?? this.plateNumber,
       lastUpdated: lastUpdated ?? this.lastUpdated,
       isOnline: isOnline ?? this.isOnline,

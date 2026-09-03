@@ -7,8 +7,56 @@ import '../../../../core/theme/app_colors.dart';
 import '../../../../shared/widgets/card_container.dart';
 
 /// 策略配置页 (极简卡片风格): 告警/传感器/刷新/OTA 四组策略, 修改即时生效并持久化.
-class PolicyConfigPage extends StatelessWidget {
+class PolicyConfigPage extends StatefulWidget {
   const PolicyConfigPage({super.key});
+
+  @override
+  State<PolicyConfigPage> createState() => _PolicyConfigPageState();
+}
+
+class _PolicyConfigPageState extends State<PolicyConfigPage> {
+  static const _cooldownMs = 5000;  /* 下发冷却 5 秒 */
+  bool _isDispatching = false;       /* 是否正在下发(控制 loading) */
+  int _lastDispatchAt = 0;           /* 上次下发时间戳(millisecondsSinceEpoch) */
+
+  /// 检查冷却, 返回剩余秒数 (0=可下发)
+  int _cooldownLeft() {
+    final elapsed = DateTime.now().millisecondsSinceEpoch - _lastDispatchAt;
+    final remaining = (_cooldownMs - elapsed) ~/ 1000;
+    return remaining > 0 ? remaining : 0;
+  }
+
+  /// 执行节点策略下发, 带 loading + 冷却
+  Future<void> _dispatchNodePolicy(
+    Future<bool> Function() action, {
+    required VoidCallback onSuccess,
+    required VoidCallback onFailure,
+  }) async {
+    if (_isDispatching) return;
+    /* ⭐ 先查缓存的网关在线状态, 离线直接拦截 */
+    if (!context.read<ParkingProvider>().gatewayOnline) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('网关离线，无法下发节点策略'), backgroundColor: Colors.red, duration: Duration(seconds: 2)),
+      );
+      return;
+    }
+    final cd = _cooldownLeft();
+    if (cd > 0) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('操作太频繁，请 ${cd} 秒后再试'), backgroundColor: Colors.orange, duration: Duration(seconds: 2)),
+      );
+      return;
+    }
+    setState(() => _isDispatching = true);
+    final success = await action();
+    if (!mounted) return;
+    setState(() {
+      _isDispatching = false;
+      _lastDispatchAt = DateTime.now().millisecondsSinceEpoch;
+    });
+    if (success) onSuccess();
+    else onFailure();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -34,30 +82,59 @@ class PolicyConfigPage extends StatelessWidget {
           ),
         ),
       ),
-      body: SafeArea(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Padding(
-                padding: const EdgeInsets.only(left: 4, bottom: 12),
-                child: Text(
-                  '修改后即时生效，无需重启',
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: AppColors.textSecondary.withValues(alpha: 0.8),
+      body: Stack(
+        children: [
+          SafeArea(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.only(left: 4, bottom: 12),
+                    child: Text(
+                      '修改后即时生效，无需重启',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: AppColors.textSecondary.withValues(alpha: 0.8),
+                      ),
+                    ),
+                  ),
+                  _buildNodeStrategyGroup(context, provider, policy),
+                  const SizedBox(height: 12),
+                  _buildPlatformStrategyGroup(context, provider, policy),
+                  const SizedBox(height: 20),
+                  _buildResetButton(context, provider),
+                ],
+              ),
+            ),
+          ),
+          if (_isDispatching)
+            Positioned.fill(
+              child: Container(
+                color: Colors.black.withValues(alpha: 0.3),
+                child: const Center(
+                  child: Card(
+                    child: Padding(
+                      padding: EdgeInsets.all(20),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          SizedBox(
+                            width: 32,
+                            height: 32,
+                            child: CircularProgressIndicator(strokeWidth: 3),
+                          ),
+                          SizedBox(height: 12),
+                          Text('正在下发...'),
+                        ],
+                      ),
+                    ),
                   ),
                 ),
               ),
-              _buildNodeStrategyGroup(context, provider, policy),
-              const SizedBox(height: 12),
-              _buildPlatformStrategyGroup(context, provider, policy),
-              const SizedBox(height: 20),
-              _buildResetButton(context, provider),
-            ],
-          ),
-        ),
+            ),
+        ],
       ),
     );
   }
@@ -78,47 +155,64 @@ class PolicyConfigPage extends StatelessWidget {
           subtitle: '节点端占用超过该时长判定为僵尸车',
           totalSeconds: policy.zombieThresholdSec,
           enabled: gatewayOnline,
-          onChanged: (totalSeconds) async {
-            final success = await provider.updatePolicy(policy.copyWith(zombieThresholdSec: totalSeconds));
-            if (context.mounted) {
-              final Color bgColor;
-              final String message;
-              if (provider.policyPartial) {
-                /* 部分成功: 琥珀色提示成功/失败个数 */
-                bgColor = Colors.amber.shade700;
-                message = '⚠️ 部分下发：${provider.policyError ?? '成功一部分节点'}';
-              } else if (success) {
-                bgColor = Colors.green;
-                message = '✅ 僵尸车判定阈值已下发至节点';
-              } else {
-                bgColor = Colors.red;
-                message = '❌ 修改失败：${provider.policyError ?? '未知错误'}';
-              }
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(
-                  content: Text(message),
-                  backgroundColor: bgColor,
-                  duration: const Duration(seconds: 2),
-                ),
-              );
-            }
+          onChanged: (totalSeconds) {
+            _dispatchNodePolicy(
+              () => provider.updatePolicy(policy.copyWith(zombieThresholdSec: totalSeconds)),
+              onSuccess: () {
+                final Color bgColor;
+                final String message;
+                if (provider.policyPartial) {
+                  bgColor = Colors.amber.shade700;
+                  message = '⚠️ 部分下发：${provider.policyError ?? '成功一部分节点'}';
+                } else {
+                  bgColor = Colors.green;
+                  message = '✅ 僵尸车判定阈值已下发至节点';
+                }
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text(message), backgroundColor: bgColor, duration: const Duration(seconds: 2)),
+                );
+              },
+              onFailure: () {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text('❌ 修改失败：${provider.policyError ?? '未知错误'}'), backgroundColor: Colors.red, duration: const Duration(seconds: 2)),
+                );
+              },
+            );
           },
         ),
-        _buildStepperRow(
+        _buildInputRow(
+          context: context,
           title: '超声波判定距离阈值',
-          subtitle: '距离 < 阈值判为有车，与设备固件一致',
+          subtitle: '距离 < 阈值判为有车，范围 2-400cm',
           value: policy.sensorDistanceCm,
           unit: 'cm',
-          min: 1,
-          max: 100,
+          min: 2,
+          max: 400,
           enabled: gatewayOnline,
-          onChanged: (v) async {
-            final success = await provider.updatePolicy(policy.copyWith(sensorDistanceCm: v));
-            if (!success && context.mounted) {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('修改失败，网关离线'), backgroundColor: Colors.red, duration: Duration(seconds: 2)),
-              );
-            }
+          onSubmitted: (v) {
+            if (v == policy.sensorDistanceCm) return;  /* 值没变, 跳过 */
+            _dispatchNodePolicy(
+              () => provider.updatePolicy(policy.copyWith(sensorDistanceCm: v)),
+              onSuccess: () {
+                final Color bgColor;
+                final String message;
+                if (provider.policyPartial) {
+                  bgColor = Colors.amber.shade700;
+                  message = '⚠️ 部分下发：${provider.policyError ?? '成功一部分节点'}';
+                } else {
+                  bgColor = Colors.green;
+                  message = '✅ 超声波距离阈值已下发至节点';
+                }
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text(message), backgroundColor: bgColor, duration: const Duration(seconds: 2)),
+                );
+              },
+              onFailure: () {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text('❌ 修改失败：${provider.policyError ?? '未知错误'}'), backgroundColor: Colors.red, duration: const Duration(seconds: 2)),
+                );
+              },
+            );
           },
         ),
       ],
@@ -314,6 +408,126 @@ class PolicyConfigPage extends StatelessWidget {
             ),
             const SizedBox(width: 12),
             _buildStepper(value, unit, min, max, enabled, onChanged),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// ⭐ 数值输入行: 标题/描述在左, 输入框+单位在右. 回车/失焦时触发 onSubmitted.
+  Widget _buildInputRow({
+    required BuildContext context,
+    required String title,
+    required String subtitle,
+    required int value,
+    required String unit,
+    required int min,
+    required int max,
+    required ValueChanged<int> onSubmitted,
+    bool enabled = true,
+  }) {
+    final opacity = enabled ? 1.0 : 0.4;
+    final controller = TextEditingController(text: '$value');
+    final focusNode = FocusNode();
+    return Opacity(
+      opacity: opacity,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
+        child: Row(
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: const TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w500,
+                      color: AppColors.textPrimary,
+                    ),
+                  ),
+                  const SizedBox(height: 3),
+                  Text(
+                    subtitle,
+                    style: const TextStyle(
+                      fontSize: 11,
+                      color: AppColors.textSecondary,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 12),
+            SizedBox(
+              width: 100,
+              height: 36,
+              child: TextField(
+                controller: controller,
+                focusNode: focusNode,
+                enabled: enabled,
+                textAlign: TextAlign.center,
+                textAlignVertical: TextAlignVertical.center,
+                keyboardType: TextInputType.number,
+                decoration: InputDecoration(
+                  isDense: true,
+                  contentPadding: EdgeInsets.zero,
+                  suffixText: unit,
+                  suffixStyle: TextStyle(
+                    fontSize: 12,
+                    color: enabled ? AppColors.textSecondary : AppColors.textSecondary.withValues(alpha: 0.5),
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                    borderSide: BorderSide(
+                      color: AppColors.textSecondary.withValues(alpha: 0.3),
+                      width: 0.5,
+                    ),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                    borderSide: BorderSide(
+                      color: AppColors.primary,
+                      width: 1.0,
+                    ),
+                  ),
+                  disabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                    borderSide: BorderSide(
+                      color: AppColors.textSecondary.withValues(alpha: 0.2),
+                      width: 0.5,
+                    ),
+                  ),
+                ),
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                  color: enabled ? AppColors.textPrimary : AppColors.textSecondary,
+                ),
+                onSubmitted: (text) {
+                  final parsed = int.tryParse(text.trim());
+                  if (parsed == null) {
+                    if (context.mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text('请输入 $min-$max 之间的整数'), backgroundColor: Colors.orange, duration: Duration(seconds: 2)),
+                      );
+                    }
+                    controller.text = '$value';  /* 恢复原值 */
+                    return;
+                  }
+                  final clamped = parsed.clamp(min, max);
+                  if (clamped != parsed) {
+                    if (context.mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text('已限制到合法范围 $min-$max'), backgroundColor: Colors.orange, duration: Duration(seconds: 2)),
+                      );
+                    }
+                    controller.text = '$clamped';
+                  }
+                  onSubmitted(clamped);
+                },
+              ),
+            ),
           ],
         ),
       ),

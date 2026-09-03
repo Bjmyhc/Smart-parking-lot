@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../../../shared/widgets/card_container.dart';
 import '../../../../shared/widgets/status_badge.dart';
+import '../../../../shared/widgets/page_header.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_dims.dart';
 import '../../../../core/models/alert_model.dart';
@@ -42,6 +43,7 @@ class _AlertsPageState extends State<AlertsPage> {
       body: Column(
         children: [
           _buildHeader(provider),
+          const SizedBox(height: 16),
           _buildFilterTabs(),
           if (_batchMode) ...[
             _buildBatchBar(context, provider, alerts),
@@ -58,63 +60,41 @@ class _AlertsPageState extends State<AlertsPage> {
   }
 
   Widget _buildHeader(ParkingProvider provider) {
-    return Padding(
-      padding: EdgeInsets.only(
-        top: MediaQuery.of(context).padding.top + 16,
-        left: AppDims.paddingPage,
-        right: AppDims.paddingPage,
-        bottom: 16,
+    final batchBtn = GestureDetector(
+      onTap: () {
+        setState(() {
+          _batchMode = !_batchMode;
+        });
+        if (!_batchMode) {
+          provider.clearAlertSelection();
+        }
+      },
+      child: Container(
+        width: 40,
+        height: 40,
+        decoration: BoxDecoration(
+          color: _batchMode ? AppColors.primary : AppColors.surface,
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Icon(
+          _batchMode ? Icons.close : Icons.checklist,
+          color: _batchMode ? Colors.white : AppColors.textSecondary,
+          size: 22,
+        ),
       ),
-      child: Row(
-        children: [
-          const Expanded(
-            child: Padding(
-              padding: EdgeInsets.only(left: 8),
-              child: Text(
-                '告警管理',
-                style: TextStyle(
-                  fontSize: 28,
-                  fontWeight: FontWeight.w500,
-                  color: AppColors.textPrimary,
-                ),
-              ),
-            ),
-          ),
-          GestureDetector(
-            onTap: () {
-              setState(() {
-                _batchMode = !_batchMode;
-              });
-              if (!_batchMode) {
-                provider.clearAlertSelection();
-              }
-            },
-            child: Container(
-              width: 40,
-              height: 40,
-              decoration: BoxDecoration(
-                color: _batchMode ? AppColors.primary : AppColors.surface,
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Icon(
-                _batchMode ? Icons.close : Icons.checklist,
-                color: _batchMode ? Colors.white : AppColors.textSecondary,
-                size: 22,
-              ),
-            ),
-          ),
-          const SizedBox(width: 10),
-          Container(
-            width: 40,
-            height: 40,
-            decoration: BoxDecoration(
-              color: AppColors.surface,
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: const Icon(Icons.notifications_none, color: AppColors.textSecondary, size: 22),
-          ),
-        ],
+    );
+    final bell = Container(
+      width: 40,
+      height: 40,
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(12),
       ),
+      child: const Icon(Icons.notifications_none, color: AppColors.textSecondary, size: 22),
+    );
+    return PageHeader(
+      title: '告警管理',
+      actions: [batchBtn, const SizedBox(width: 10), bell],
     );
   }
 

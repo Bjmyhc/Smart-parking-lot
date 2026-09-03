@@ -67,6 +67,7 @@ volatile uint8_t StatusChanged = 1;     /* 车位状态变化标志
                                          * 触发立即上传, 不用等定时
                                          * 周期, 保证状态变化实时可见 */
 uint32_t g_zombieThreshold = 3600;      /* ⭐ 僵尸车判定阈值(秒), 默认1小时 */
+uint16_t g_sensorDistanceCm = DIST_THRESHOLD_CM;  /* ⭐ 超声波判定距离阈值(cm), 默认10cm, 可动态下发 */
 
 /****************************************************************************
  * 函数名: US_Task
@@ -188,7 +189,7 @@ void ParkingStatus_Check(void)
 
     if (Get_Tick() - lastCheckTick >= PARK_CHECK_INTERVAL)
     {
-        uint8_t carPresent = (Distance > 0 && Distance < DIST_THRESHOLD_CM) && MagCarPresent;
+        uint8_t carPresent = (Distance > 0 && Distance < g_sensorDistanceCm) && MagCarPresent;
 
         /* ⭐ 车离去抖: 连续 CAR_ABSENT_DEBOUNCE 次检测无车才判定车离开.
          * 单次毛刺只累加计数不触发切换, 计时继续, 不再被清零 */
@@ -300,8 +301,7 @@ static void PackNodeData(void)
     NodeDataCache.LED           = LED_GetState() ? 1 : 0;
     NodeDataCache.LedEnable     = LEDEnable;
     NodeDataCache.ZombieThreshold = g_zombieThreshold;   /* ⭐ 当前生效阈值上报给平台观看 */
-    strncpy(NodeDataCache.FwVersion, NODE_FW_VERSION, sizeof(NodeDataCache.FwVersion) - 1);
-    NodeDataCache.FwVersion[sizeof(NodeDataCache.FwVersion) - 1] = '\0';   /* 固件版本串, 网关据此更新 OTA 版本 */
+    NodeDataCache.SensorDistanceCm = g_sensorDistanceCm;  /* ⭐ 当前生效超声波距离阈值上报 */
 }
 
 /****************************************************************************
@@ -368,6 +368,7 @@ static void LoRa_CmdCallback(const char *cmd, const char *value)
         cert.valid = 1;
         strncpy(cert.ProductKey, LORA_SUB_PRODUCT_KEY, sizeof(cert.ProductKey) - 1);
         strncpy(cert.DeviceName, LORA_SUB_DEVICE_NAME, sizeof(cert.DeviceName) - 1);
+        strncpy(cert.FwVersion, NODE_FW_VERSION, sizeof(cert.FwVersion) - 1);
         LoRa_Node_SendCert(&cert);
     }
     /* 网关下发 LED 使能控制: AT+LedEnable=<v> */
@@ -396,13 +397,30 @@ static void LoRa_CmdCallback(const char *cmd, const char *value)
         }
         LoRa_Node_SendAck("AT+ZombieThreshold");
     }
+    /* ⭐ 网关下发超声波判定距离阈值: AT+SensorDistance=<cm>
+     * 默认10cm, APP端可动态下发覆盖 */
+    else if (strcmp(cmd, "AT+SensorDistance") == 0)
+    {
+        if (value != NULL)
+        {
+            long v = strtol(value, NULL, 10);
+            if (v >= US_MIN_VALID && v <= US_MAX_VALID)  /* 允许范围: 2cm ~ 400cm (传感器有效量程) */
+            {
+                g_sensorDistanceCm = (uint16_t)v;
+                Usart_Printf(USART_DEBUG, "[CTRL] 超声波距离阈值 -> %ucm\r\n", g_sensorDistanceCm);
+            }
+        }
+        LoRa_Node_SendAck("AT+SensorDistance");
+    }
     /* 网关心跳查询: AT+PING -> 回复 PONG */
     else if (strcmp(cmd, "AT+PING") == 0)
     {
         LoRa_Node_SendAck("PONG");
     }
     /* 网关触发 OTA 升级: AT+OTA=start,<版本串>
-     * 触发后: 写升级标志 → 复位 → BootLoader 接收固件 */
+     * 触发后: 回复ACK → 写升级标志 → 复位 → BootLoader 接收固件
+     * ⭐ 先回复ACK再复位: 防 LoRa 丢包导致网关盲等,
+     * 网关收到ACK才进入复位等待, 收不到则重发命令 */
     else if (strcmp(cmd, "AT+OTA") == 0)
     {
         /* 提取目标版本串: 兼容 "start,V2.321" / "start,v2.321" / 纯版本串 */
@@ -421,6 +439,10 @@ static void LoRa_CmdCallback(const char *cmd, const char *value)
         if (targetVer == NULL || *targetVer == '\0' ||
             ota_version_compare(targetVer, NODE_FW_VERSION) > 0)
         {
+            /* ⭐ 先回复ACK: 让网关确认收到命令, 再写标志复位 */
+            LoRa_Node_SendAck("AT+OTA:ack");
+            Usart_Printf(USART_DEBUG, "[OTA] 已回复ACK, 写升级标志...\r\n");
+
             FLASH_Unlock();
             FLASH_ErasePage(OTA_FLAG_ADDR);
             FLASH_ProgramHalfWord(OTA_FLAG_ADDR, (uint16_t)(OTA_FLAG_GO & 0xFFFF));
@@ -428,6 +450,7 @@ static void LoRa_CmdCallback(const char *cmd, const char *value)
             FLASH_Lock();
 
             Usart_Printf(USART_DEBUG, "[OTA] 升级标志已写入, 即将复位...\r\n");
+            /* 200ms: 确保 LoRa 模块完成 ACK 无线发送 + Flash 写入稳定 */
             DelayXms(200);
             NVIC_SystemReset();
         }

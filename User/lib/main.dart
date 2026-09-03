@@ -1,11 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'core/theme/app_colors.dart';
 import 'core/providers/parking_provider.dart';
 import 'features/overview/presentation/pages/overview_page.dart';
 import 'features/spots/presentation/pages/spots_page.dart';
 import 'features/alerts/presentation/pages/alerts_page.dart';
-import 'features/stats/presentation/pages/stats_page.dart';
 import 'features/profile/presentation/pages/profile_page.dart';
 import 'features/profile/presentation/widgets/ota_upgrade_dialog.dart';
 
@@ -70,6 +70,7 @@ class MainShell extends StatefulWidget {
 class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
   int _currentIndex = 0;
   bool _otaDialogShowing = false;
+  DateTime? _lastBackPressed; /* ⭐ 两次退出: 记录上次返回键时间 */
 
   late final List<Widget> _pages;
 
@@ -87,7 +88,6 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
       ),
       const SpotsPage(),
       const AlertsPage(),
-      const StatsPage(),
       const ProfilePage(),
     ];
     WidgetsBinding.instance.addObserver(this);
@@ -121,9 +121,12 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted || _otaDialogShowing || !provider.otaPromptVisible) return;
         _otaDialogShowing = true;
-        showDialog<void>(
+        showModalBottomSheet<void>(
           context: context,
-          barrierDismissible: false,
+          isScrollControlled: true,
+          isDismissible: false,
+          enableDrag: true,
+          backgroundColor: Colors.transparent,
           builder: (_) => OtaUpgradeDialog(provider: provider),
         ).whenComplete(() {
           _otaDialogShowing = false;
@@ -133,7 +136,36 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
       });
     }
 
-    return Scaffold(
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) async {
+        if (didPop) return;
+        // 有子页面(如数据中心/策略配置)优先退出子页, 不触发退出机制
+        final nav = Navigator.of(context);
+        if (nav.canPop()) {
+          nav.pop();
+          return;
+        }
+        // 无子页面: 两次退出机制(2秒内再按一次才退出)
+        final now = DateTime.now();
+        if (_lastBackPressed == null ||
+            now.difference(_lastBackPressed!) > const Duration(seconds: 2)) {
+          _lastBackPressed = now;
+          ScaffoldMessenger.of(context)
+            ..hideCurrentSnackBar()
+            ..showSnackBar(
+              const SnackBar(
+                content: Text('再按一次退出应用'),
+                duration: Duration(seconds: 2),
+                behavior: SnackBarBehavior.floating,
+              ),
+            );
+          return;
+        }
+        // 2秒内第二次按下: 退出应用
+        SystemNavigator.pop();
+      },
+      child: Scaffold(
       body: IndexedStack(
         index: _currentIndex,
         children: _pages,
@@ -157,12 +189,12 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
                 Expanded(child: _buildNavItem(0, Icons.home_outlined, Icons.home, '首页')),
                 Expanded(child: _buildNavItem(1, Icons.local_parking_outlined, Icons.local_parking, '车位')),
                 Expanded(child: _buildNavItem(2, Icons.warning_amber_outlined, Icons.warning_amber, '告警')),
-                Expanded(child: _buildNavItem(3, Icons.bar_chart_outlined, Icons.bar_chart, '数据')),
-                Expanded(child: _buildNavItem(4, Icons.person_outline, Icons.person, '我的')),
+                Expanded(child: _buildNavItem(3, Icons.person_outline, Icons.person, '我的')),
               ],
             ),
           ),
         ),
+      ),
       ),
     );
   }
