@@ -29,7 +29,6 @@
 #define SUB_PROP_GEO_MAGNETIC    "GeoMagnetic"
 #define SUB_PROP_OCCUPIED_TIME   "OccupiedTime"
 #define SUB_PROP_LED             "LED"
-#define SUB_PROP_LED_ENABLE      "LedEnable"
 /* ⭐ 节点信号强度(dBm): 来自网关LoRa模块DRSSI附加字节, 网关代子设备上报只读属性,
  * 定义在节点产品物模型上, 每个节点各有其值 */
 #define SUB_PROP_RSSI            "SignalRssi"
@@ -49,6 +48,8 @@
 #define SUB_SERVICE_ZOMBIE_THRESHOLD "SetZombieThreshold"
 /* ⭐ 超声波判定距离阈值服务: APP 经 call-service 同步调用, 输入 DistanceValue */
 #define SUB_SERVICE_SENSOR_DISTANCE  "SetSensorDistance"
+/* ⭐ LED 控制服务: 替代原 LedEnable 属性, 直接控制节点 LED 开关 */
+#define SUB_SERVICE_LED_CONTROL      "SetLed"
 /* 同步服务调用截止(ms): 平台同步调用超时约10s, 网关须赶在前面回 invoke_reply */
 #define SUB_SERVICE_DEADLINE_MS    9000
 
@@ -168,7 +169,6 @@ static void subPost(uint8_t slot)
     props[SUB_PROP_GEO_MAGNETIC]["value"]    = nd.geoMagnetic;
     props[SUB_PROP_OCCUPIED_TIME]["value"]   = (long)nd.occupiedTime;
     props[SUB_PROP_LED]["value"]             = nd.led;
-    props[SUB_PROP_LED_ENABLE]["value"]      = nd.ledEnable;
     props[SUB_PROP_ZOMBIE_THRESHOLD]["value"] = (long)nd.zombieThresholdSec;   /* ⭐ 只读属性: 节点当前生效阈值 */
     props[SUB_PROP_SENSOR_DISTANCE]["value"] = (long)nd.sensorDistanceCm;     /* ⭐ 只读属性: 节点当前生效超声波距离阈值 */
     props[SUB_PROP_RSSI]["value"]            = nd.rssi;                      /* ⭐ 只读属性: 节点信号强度(dBm) */
@@ -213,7 +213,6 @@ static void subPostBatch(void)
         props[SUB_PROP_GEO_MAGNETIC]["value"]    = nd.geoMagnetic;
         props[SUB_PROP_OCCUPIED_TIME]["value"]   = (long)nd.occupiedTime;
         props[SUB_PROP_LED]["value"]             = nd.led;
-        props[SUB_PROP_LED_ENABLE]["value"]      = nd.ledEnable;
         props[SUB_PROP_ZOMBIE_THRESHOLD]["value"] = (long)nd.zombieThresholdSec;   /* ⭐ 只读属性: 节点当前生效阈值 */
         props[SUB_PROP_SENSOR_DISTANCE]["value"] = (long)nd.sensorDistanceCm;     /* ⭐ 只读属性: 节点当前生效超声波距离阈值 */
         props[SUB_PROP_RSSI]["value"]            = nd.rssi;                      /* ⭐ 只读属性: 节点信号强度(dBm) */
@@ -263,14 +262,7 @@ static void handleSubPropertySet(JsonDocument &doc)
         else if (val.is<const char*>())  v = atoi(val.as<const char *>());
         else                             v = 0;
 
-        if (key == SUB_PROP_LED_ENABLE)
-        {
-            nodes[slot].ledEnable = (v != 0);
-            lora_sendControl(nodes[slot].nodeId, "LedEnable", v);
-            DBG_PRINTF("[MQTT] 节点%d LED使能=%d\n", nodes[slot].nodeId, v);
-        }
-        /* ⭐ 僵尸车判定阈值: 按节点设置, 标记待下发 + 保存到 Flash */
-        else if (key == SUB_PROP_ZOMBIE_THRESHOLD)
+        if (key == SUB_PROP_ZOMBIE_THRESHOLD)
         {
             if (v >= 5 && v <= 2592000) {
                 nodes[slot].thresholdNeedsUpdate = true;
@@ -349,10 +341,11 @@ static void handleSubServiceInvoke(JsonDocument &doc)
         return;
     }
 
-    /* 支持的子设备服务: 僵尸车阈值 + 超声波距离阈值 */
+    /* 支持的子设备服务: 僵尸车阈值 + 超声波距离阈值 + LED控制 */
     bool isZombie    = (strcmp(identifier, SUB_SERVICE_ZOMBIE_THRESHOLD) == 0);
     bool isSensorDist = (strcmp(identifier, SUB_SERVICE_SENSOR_DISTANCE) == 0);
-    if (!isZombie && !isSensorDist)
+    bool isLed       = (strcmp(identifier, SUB_SERVICE_LED_CONTROL) == 0);
+    if (!isZombie && !isSensorDist && !isLed)
     {
         DBG_PRINTF("[MQTT] 服务调用: 不支持的 identifier=%s\n", identifier);
         replySubServiceInvoke(msgId, pk, dn, identifier, 404, "unsupported service", 0, 0);
@@ -370,13 +363,23 @@ static void handleSubServiceInvoke(JsonDocument &doc)
             return;
         }
     }
-    else  /* isSensorDist */
+    else if (isSensorDist)
     {
         value = input["DistanceValue"] | 0;
         if (value < 2 || value > 400)   /* 传感器有效量程: 2cm ~ 400cm */
         {
             DBG_PRINTF("[MQTT] 服务调用距离越界: %d\n", value);
             replySubServiceInvoke(msgId, pk, dn, identifier, 400, "DistanceValue out of range", 0, 0);
+            return;
+        }
+    }
+    else  /* isLed */
+    {
+        value = input["LedState"] | 0;
+        if (value != 0 && value != 1)
+        {
+            DBG_PRINTF("[MQTT] 服务调用 LED 状态无效: %d\n", value);
+            replySubServiceInvoke(msgId, pk, dn, identifier, 400, "LedState must be 0 or 1", 0, 0);
             return;
         }
     }
@@ -410,20 +413,25 @@ static void handleSubServiceInvoke(JsonDocument &doc)
         return;
     }
 
-    /* 在线: 写阈值 + 标记待下发(LoRa) + 记录待回复状态 */
+    /* 在线: 写阈值/发命令 + 记录待回复状态 */
     if (isZombie)
     {
         nodes[slot].thresholdValue = (uint32_t)value;
         nodes[slot].thresholdRetryCount = 0;
         nodes[slot].thresholdNeedsUpdate = true;
+        saveCertsToLittleFS();   /* 阈值立即存 Flash, 断电不丢 */
     }
-    else
+    else if (isSensorDist)
     {
         nodes[slot].sensorDistanceValue = (uint16_t)value;
         nodes[slot].sensorDistanceRetryCount = 0;
         nodes[slot].sensorDistanceNeedsUpdate = true;
+        saveCertsToLittleFS();   /* 阈值立即存 Flash, 断电不丢 */
     }
-    saveCertsToLittleFS();   /* 立即存 Flash, 断电不丢 */
+    else  /* isLed: 直接 LoRa 下发, 等 ACK 回复 */
+    {
+        lora_sendControl(nodes[slot].nodeId, "LedEnable", value);
+    }
 
     s_pendingServiceReply.active = true;
     snprintf(s_pendingServiceReply.msgId, sizeof(s_pendingServiceReply.msgId),
@@ -674,7 +682,7 @@ void onenet_loop(void)
         DBG_PRINTF("[MQTT] 服务调用超时(%dms), 回失败\n", (int)SUB_SERVICE_DEADLINE_MS);
         replySubServiceInvoke(s_pendingServiceReply.msgId,
                               nd.productKey, nd.deviceName,
-                              SUB_SERVICE_ZOMBIE_THRESHOLD,
+                              s_pendingServiceReply.identifier,
                               200, "timeout", 0, 0);
         s_pendingServiceReply.active = false;
     }

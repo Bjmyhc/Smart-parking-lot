@@ -317,6 +317,13 @@ static bool handleCompleteFrame(uint8_t header)
                 onenet_notifyServiceResult(slot, true, nodes[slot].thresholdValue);
             }
         }
+        /* ⭐ LED 控制下发成功: 收到 ACK 后向平台补回"同步服务调用"回复 */
+        if (strcmp((char *)rxBuf, "AT+LedEnable") == 0)
+        {
+            int slot = findNode(nodeId);
+            if (slot >= 0)
+                onenet_notifyServiceResult(slot, true, 1);
+        }
         /* PING 通(PONG)即视为节点存活: 刷新在线状态与活性时间,
          * 并处理"掉线恢复"需要重新代上线(与收到数据的恢复逻辑一致) */
         if (strcmp((char *)rxBuf, "PONG") == 0)
