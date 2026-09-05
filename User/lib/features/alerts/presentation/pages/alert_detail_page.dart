@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../../../shared/widgets/card_container.dart';
 import '../../../../shared/widgets/status_badge.dart';
+import '../../../../shared/widgets/plate_badge.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_dims.dart';
 import '../../../../core/models/alert_model.dart';
@@ -334,35 +335,26 @@ class _AlertDetailPageState extends State<AlertDetailPage> {
                     ],
                   ),
                   const SizedBox(height: 22),
-                  /* 仿真车牌展示 */
+                  /* 仿真车牌展示: 有拍照识别颜色按真实车牌配色, 无颜色信息回退蓝渐变(原样式) */
                   Center(
-                    child: Container(
+                    child: PlateBadge(
+                      text: alert.plateNumber,
+                      color: alert.plateColor,
+                      blueIfUnknown: true,
+                      fontSize: 28,
+                      fontWeight: FontWeight.bold,
                       padding: const EdgeInsets.symmetric(horizontal: 26, vertical: 10),
-                      decoration: BoxDecoration(
-                        gradient: const LinearGradient(
-                          colors: [Color(0xFF1A6FFF), Color(0xFF0052D4)],
-                          begin: Alignment.topCenter,
-                          end: Alignment.bottomCenter,
+                      radius: 6,
+                      letterSpacing: 4,
+                      boxShadow: [
+                        BoxShadow(
+                          color: const Color(0xFF0052D4).withValues(alpha: 0.25),
+                          blurRadius: 10,
+                          offset: const Offset(0, 3),
                         ),
-                        borderRadius: BorderRadius.circular(6),
-                        boxShadow: [
-                          BoxShadow(
-                            color: const Color(0xFF0052D4).withValues(alpha: 0.25),
-                            blurRadius: 10,
-                            offset: const Offset(0, 3),
-                          ),
-                        ],
-                        border: Border.all(color: Colors.white.withValues(alpha: 0.5), width: 1.5),
-                      ),
-                      child: Text(
-                        alert.plateNumber,
-                        style: const TextStyle(
-                          fontSize: 28,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.white,
-                          letterSpacing: 4,
-                        ),
-                      ),
+                      ],
+                      borderWidth: 1.5,
+                      borderColor: Colors.white.withValues(alpha: 0.5),
                     ),
                   ),
                   const SizedBox(height: 22),

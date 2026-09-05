@@ -103,6 +103,8 @@ class _PolicyConfigPageState extends State<PolicyConfigPage> {
                   _buildNodeStrategyGroup(context, provider, policy),
                   const SizedBox(height: 12),
                   _buildPlatformStrategyGroup(context, provider, policy),
+                  const SizedBox(height: 12),
+                  _buildAutoCaptureGroup(context, provider, policy),
                   const SizedBox(height: 20),
                   _buildResetButton(context, provider),
                 ],
@@ -215,6 +217,37 @@ class _PolicyConfigPageState extends State<PolicyConfigPage> {
             );
           },
         ),
+        _buildSwitchRow(
+          title: '报警灯使能',
+          subtitle: policy.ledAlarmEnabled ? '开启：僵尸车占用时自动点亮报警灯' : '关闭：僵尸车占用不再点亮报警灯',
+          value: policy.ledAlarmEnabled,
+          enabled: gatewayOnline,
+          onChanged: (v) {
+            if (v == policy.ledAlarmEnabled) return;  /* 值没变, 跳过 */
+            _dispatchNodePolicy(
+              () => provider.updatePolicy(policy.copyWith(ledAlarmEnabled: v)),
+              onSuccess: () {
+                final Color bgColor;
+                final String message;
+                if (provider.policyPartial) {
+                  bgColor = Colors.amber.shade700;
+                  message = '⚠️ 部分下发：${provider.policyError ?? '成功一部分节点'}';
+                } else {
+                  bgColor = Colors.green;
+                  message = v ? '✅ 报警灯已开启' : '✅ 报警灯已关闭';
+                }
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text(message), backgroundColor: bgColor, duration: const Duration(seconds: 2)),
+                );
+              },
+              onFailure: () {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text('❌ 修改失败：${provider.policyError ?? '未知错误'}'), backgroundColor: Colors.red, duration: const Duration(seconds: 2)),
+                );
+              },
+            );
+          },
+        ),
       ],
     );
   }
@@ -277,6 +310,149 @@ class _PolicyConfigPageState extends State<PolicyConfigPage> {
     );
   }
 
+  /// 🆕 自动拍照策略组: 纯APP本地生效(不开节点/网关), 轮询检测到车位事件后自动调摄像头拍照.
+  /// 开关: 总开关; 时机: 有车就拍 / 僵尸车才拍 (僵尸车才拍可显著节省百度OCR额度).
+  Widget _buildAutoCaptureGroup(BuildContext context, ParkingProvider provider, PolicyConfig policy) {
+    final on = policy.autoCaptureEnabled;
+    final modeZombie = policy.autoCaptureMode == 1;
+    return _buildGroup(
+      icon: Icons.photo_camera_outlined,
+      title: '自动拍照策略',
+      description: '车位事件自动拍照识别车牌',
+      rows: [
+        _buildSwitchRow(
+          title: '自动拍照',
+          subtitle: on
+              ? (modeZombie ? '生效中: 变僵尸后拍照, 识别成功才通知' : '生效中: 检测到有车进入即拍照')
+              : '关闭: 不自动拍照',
+          value: on,
+          onChanged: (v) => provider.updatePolicy(policy.copyWith(autoCaptureEnabled: v)),
+        ),
+        if (on) ...[
+          _buildChoiceRow(
+            title: '拍照时机',
+            subtitle: modeZombie
+                ? '车变僵尸时拍, 失败重试3次'
+                : '车进入即拍, 较耗OCR额度',
+            value: modeZombie ? 1 : 0,
+            options: const [(0, '有车就拍'), (1, '僵尸车才拍')],
+            onChanged: (v) => provider.updatePolicy(policy.copyWith(autoCaptureMode: v)),
+          ),
+          _buildInfoRow(
+            modeZombie
+                ? '拍照对象: Park001。无牌先拍, 拿到车牌才通知车主; 3次失败按未知车牌保底通知'
+                : '拍照对象: Park001。防抖确认后拍一次, 车离开后可再拍',
+          ),
+        ],
+      ],
+    );
+  }
+
+  /// 只读提示行 (标题区下方灰字说明, 用于策略生效细节).
+  Widget _buildInfoRow(String text) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(Icons.info_outline, size: 14, color: AppColors.textSecondary.withValues(alpha: 0.7)),
+          const SizedBox(width: 6),
+          Expanded(
+            child: Text(
+              text,
+              style: TextStyle(
+                fontSize: 11,
+                height: 1.5,
+                color: AppColors.textSecondary.withValues(alpha: 0.9),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 二选一行: 标题/描述在左, 两个胶囊选项在右.
+  Widget _buildChoiceRow({
+    required String title,
+    required String subtitle,
+    required int value,
+    required List<(int, String)> options,
+    required ValueChanged<int> onChanged,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: const TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w500,
+                    color: AppColors.textPrimary,
+                  ),
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  subtitle,
+                  style: const TextStyle(
+                    fontSize: 11,
+                    color: AppColors.textSecondary,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 12),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              for (final (v, label) in options)
+                Padding(
+                  padding: const EdgeInsets.only(top: 4),
+                  child: _modeChip(label: label, selected: value == v, onTap: () {
+                    if (value == v) return;
+                    onChanged(v);
+                  }),
+                ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _modeChip({required String label, required bool selected, required VoidCallback onTap}) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        decoration: BoxDecoration(
+          color: selected
+              ? AppColors.primary.withValues(alpha: 0.12)
+              : AppColors.textSecondary.withValues(alpha: 0.06),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(
+            color: selected ? AppColors.primary : AppColors.textSecondary.withValues(alpha: 0.2),
+            width: selected ? 1.2 : 0.5,
+          ),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            fontSize: 12,
+            fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
+            color: selected ? AppColors.primary : AppColors.textSecondary,
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _buildResetButton(BuildContext context, ParkingProvider provider) {
     return SizedBox(
       width: double.infinity,
@@ -324,26 +500,28 @@ class _PolicyConfigPageState extends State<PolicyConfigPage> {
                   child: Icon(icon, size: 18, color: AppColors.primary),
                 ),
                 const SizedBox(width: 10),
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      title,
-                      style: const TextStyle(
-                        fontSize: 15,
-                        fontWeight: FontWeight.w600,
-                        color: AppColors.textPrimary,
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        title,
+                        style: const TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.textPrimary,
+                        ),
                       ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      description,
-                      style: const TextStyle(
-                        fontSize: 11,
-                        color: AppColors.textSecondary,
+                      const SizedBox(height: 2),
+                      Text(
+                        description,
+                        style: const TextStyle(
+                          fontSize: 11,
+                          color: AppColors.textSecondary,
+                        ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
               ],
             ),
@@ -534,48 +712,53 @@ class _PolicyConfigPageState extends State<PolicyConfigPage> {
     );
   }
 
-  /// 开关行: 标题/描述在左, Switch 在右.
+  /// 开关行: 标题/描述在左, Switch 在右. 网关离线(enabled=false)时置灰不可操作.
   Widget _buildSwitchRow({
     required String title,
     required String subtitle,
     required bool value,
     required ValueChanged<bool> onChanged,
+    bool enabled = true,  /* ⭐ 节点策略: 网关离线时禁用 */
   }) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-      child: Row(
-        children: [
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  title,
-                  style: const TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w500,
-                    color: AppColors.textPrimary,
+    final opacity = enabled ? 1.0 : 0.4;
+    return Opacity(
+      opacity: opacity,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        child: Row(
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w500,
+                      color: enabled ? AppColors.textPrimary : AppColors.textSecondary,
+                    ),
                   ),
-                ),
-                const SizedBox(height: 3),
-                Text(
-                  subtitle,
-                  style: const TextStyle(
-                    fontSize: 11,
-                    color: AppColors.textSecondary,
+                  const SizedBox(height: 3),
+                  Text(
+                    subtitle,
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: enabled ? AppColors.textSecondary : AppColors.textSecondary.withValues(alpha: 0.5),
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
-          ),
-          Switch(
-            value: value,
-            activeColor: AppColors.primary,
-            inactiveThumbColor: AppColors.textSecondary.withValues(alpha: 0.5),
-            inactiveTrackColor: AppColors.textSecondary.withValues(alpha: 0.15),
-            onChanged: onChanged,
-          ),
-        ],
+            Switch(
+              value: value,
+              activeColor: AppColors.primary,
+              inactiveThumbColor: AppColors.textSecondary.withValues(alpha: 0.5),
+              inactiveTrackColor: AppColors.textSecondary.withValues(alpha: 0.15),
+              onChanged: enabled ? onChanged : null,
+            ),
+          ],
+        ),
       ),
     );
   }

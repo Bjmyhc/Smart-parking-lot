@@ -6,6 +6,19 @@ import '../models/spot_model.dart';
 import '../models/alert_model.dart';
 import '../models/stats_model.dart';
 
+/// 摄像头一次识别结果: 车牌 + 颜色(中文) + 置信度(0~1) + 识别时间.
+/// 来自 OneNET 摄像头物模型属性 (PlateNumber/PlateColor/PlateConfidence/CaptureTime).
+class CameraPlateInfo {
+  final String? plate;
+  final String? color;
+  final double? confidence;
+  final String? captureTime;
+
+  const CameraPlateInfo({this.plate, this.color, this.confidence, this.captureTime});
+
+  bool get hasPlate => plate != null && plate!.isNotEmpty;
+}
+
 class ApiService {
   static const String _baseUrl = 'https://iot-api.heclouds.com';
   // 车位列表只展示节点产品(04kjwU9TC7)下的设备; 网关产品(9YIs0S7V11)不是车位, 不纳入列表
@@ -27,9 +40,11 @@ class ApiService {
     return _client.get(url, headers: headers).timeout(const Duration(seconds: 5));
   }
 
-  /// 统一 POST, 带 5s 超时
-  Future<http.Response> _post(Uri url, {Map<String, String>? headers, Object? body}) {
-    return _client.post(url, headers: headers, body: body).timeout(const Duration(seconds: 5));
+  /// 统一 POST, 默认 5s 超时(防 OneNET 卡死拖死刷新链).
+  /// [timeout] 可放宽: 同步服务调用(call-service)要等设备回 invoke_reply, 触发类服务需给足时间.
+  Future<http.Response> _post(Uri url,
+      {Map<String, String>? headers, Object? body, Duration timeout = const Duration(seconds: 5)}) {
+    return _client.post(url, headers: headers, body: body).timeout(timeout);
   }
 
   String _generateAuthorization() {
@@ -74,8 +89,8 @@ class ApiService {
         }
         realSpots = parsed;
         debugPrint('>>> 真实设备: ${realSpots.length} 台');
-        // ⭐ 补摄像头识别到的真实车牌: 必须 Park001 节点在线才查 Cam001(HTTP API 查询, 不用MQTT), 不在线跳过
-        realSpots = await _patchCameraPlates(realSpots);
+        // ⭐ 车牌不再从摄像头 PlateNumber 属性无条件贴牌: 属性是"最近一次识别"的残留值,
+        //    不代表当前占位车辆。车牌只在拍照OCR成功(见 invoke_reply Result)后由 Provider 主动拉取写入。
       }
     } catch (e) {
       debugPrint('>>> 获取真实设备失败: $e');
@@ -293,47 +308,33 @@ class ApiService {
     }
   }
 
-  /// 把摄像头 Cam001 识别到的真实车牌补到关联车位卡片上.
-  /// 关联规则(当前硬编码, 以后可扩展为映射表):
-  ///   车位 Park001 在线 → 从摄像头 Cam001(产品 4enONCu0Y7) 拉 PlateNumber 属性,
-  ///   摄像头离线 / PlateNumber 为空 / 查询失败 → 不补, 保持车位原 plateNumber(未知车牌).
-  /// ⚠️ 用户要求严格顺序: 必须 Park001 节点在线才查摄像头, 不在线直接跳过不查.
-  Future<List<SpotModel>> _patchCameraPlates(List<SpotModel> spots) async {
+  /// 拉取摄像头 Cam001 一次识别结果: 车牌 + 颜色 + 置信度 + 识别时间 (物模型属性).
+  /// 摄像头离线 / 识别未更新 → 返回空信息. 供"拍照OCR成功(Result=true)后"拉取本次结果入库用;
+  /// ⚠️ 属性有平台入库延迟, 调用方需短间隔轮询几次(拍照后 PlateNumber 需约1~2s 才能查到).
+  Future<CameraPlateInfo> fetchCameraPlate() async {
     try {
-      // 1. 先找 Park001 且在线的车位 → 用户要求: 不在线就不查摄像头, 直接跳过
-      final park001Idx = spots.indexWhere(
-        (s) => s.id == 'Park001' && s.isOnline && !s.isDisabled,
-      );
-      if (park001Idx < 0) {
-        debugPrint('>>> 摄像头补车牌: Park001 离线/不存在/已停用, 跳过查询');
-        return spots;
-      }
-
-      // 2. Park001 在线 → 查 Cam001 摄像头设备属性
-      debugPrint('>>> 摄像头补车牌: Park001 在线, 查询 Cam001 属性...');
       final camDetail = await getDeviceDetail(cameraDeviceId, productId: cameraProductId);
       final camProps = camDetail['properties'] as Map?;
-      if (camProps == null) {
-        debugPrint('>>> 摄像头补车牌: Cam001 无属性(离线/未上报), 跳过');
-        return spots;
+      if (camProps == null) return const CameraPlateInfo();
+      final rawPlate = (camProps['PlateNumber'] as String?)?.trim() ?? '';
+      final rawColor = (camProps['PlateColor'] as String?)?.trim() ?? '';
+      final rawConf = camProps['PlateConfidence'];
+      final rawTime = (camProps['CaptureTime'] as String?)?.trim() ?? '';
+      double? conf;
+      if (rawConf is num) {
+        conf = rawConf.toDouble();
+      } else if (rawConf is String && rawConf.trim().isNotEmpty) {
+        conf = double.tryParse(rawConf.trim());
       }
-
-      // 3. 提取 PlateNumber, 空字符串就不补 (用户说不管准确性, 先连通, 有值就填)
-      final rawPlate = camProps['PlateNumber'];
-      final plate = rawPlate?.toString().trim();
-      if (plate == null || plate.isEmpty) {
-        debugPrint('>>> 摄像头补车牌: Cam001 PlateNumber 为空, 跳过');
-        return spots;
-      }
-
-      // 4. 填到 Park001 车位上 (copyWith 重建对象避免副作用)
-      final newList = List<SpotModel>.from(spots);
-      newList[park001Idx] = newList[park001Idx].copyWith(plateNumber: plate);
-      debugPrint('✅ 摄像头补车牌: Park001 ← $plate');
-      return newList;
+      return CameraPlateInfo(
+        plate: rawPlate.isEmpty ? null : rawPlate,
+        color: rawColor.isEmpty ? null : rawColor,
+        confidence: conf,
+        captureTime: rawTime.isEmpty ? null : rawTime,
+      );
     } catch (e) {
-      debugPrint('⚠️ 摄像头补车牌失败(不影响车位列表加载): $e');
-      return spots;   /* 查询异常就返回原列表, 绝不破坏主流程 */
+      debugPrint('⚠️ fetchCameraPlate 失败: $e');
+      return const CameraPlateInfo();
     }
   }
 
@@ -378,11 +379,13 @@ class ApiService {
   /// 调用物模型服务 (同步): 平台在 ~10s 内返回服务执行结果.
   /// 用于节点物模型服务 SetZombieThreshold 等; 返回解析后的 output(Map) 或 null(失败/异常).
   /// 注: 服务定义在节点产品物模型上, product_id 需传节点产品 (默认).
+  /// [timeoutSeconds] 默认 5s; 摄像头 TriggerCapture 这类"触发后需先执行再回包"的服务请放宽(如 15s).
   Future<Map<String, dynamic>?> callService(
     String deviceName,
     String identifier,
     Map<String, dynamic> params, {
     String? productId,
+    int timeoutSeconds = 5,
   }) async {
     try {
       final pid = productId ?? _nodeProductId;
@@ -401,6 +404,7 @@ class ApiService {
           'identifier': identifier,
           'params': params,
         }),
+        timeout: Duration(seconds: timeoutSeconds),
       );
 
       if (response.statusCode == 200) {
@@ -412,8 +416,16 @@ class ApiService {
           if (out is Map) {
             // 平台可能把输出直接放在 data 下, 也可能包一层 output
             final output = out['output'];
-            if (output is Map) return Map<String, dynamic>.from(output);
-            return Map<String, dynamic>.from(out);
+            final raw = output is Map
+                ? Map<String, dynamic>.from(output)
+                : Map<String, dynamic>.from(out);
+            // ⭐ OneNET 服务出参统一带 value 包装: {"Result": {"value": true}},
+            //    这里解包成 {"Result": true}, 兼容"包装/裸值"两种结构, 供上层直接取值判断
+            final unwrapped = <String, dynamic>{};
+            raw.forEach((k, v) {
+              unwrapped[k] = (v is Map && v.containsKey('value')) ? v['value'] : v;
+            });
+            return unwrapped;
           }
         }
         return null;
@@ -774,7 +786,6 @@ class ApiService {
         'Ultrasonic': 350,
         'OccupiedTime': 0,
         'LED': 0,
-        'LedEnable': 1,
       },
       'updated_at': DateTime.now().toIso8601String(),
     };

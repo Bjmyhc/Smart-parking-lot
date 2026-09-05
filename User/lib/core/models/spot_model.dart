@@ -9,6 +9,15 @@ class SpotModel {
   final double batteryLevel;
   final int signalStrength;
   final String? plateNumber;
+  /* ⭐⭐⭐ 拍照识别附加信息 (车牌只由拍照成功驱动, 摄像头Cam001属性回传):
+   * plateColor       = 车牌颜色 (中文: 蓝色/黄色/绿色/白色/黑色/红色/灰色)
+   * plateConfidence  = 识别置信度 0~1
+   * capturedAt       = 识别时间 (摄像头 CaptureTime)
+   * captureFailed    = 本占用事件内已尝试拍照但未识别出车牌 (区别于从未拍照) */
+  final String? plateColor;
+  final double? plateConfidence;
+  final String? capturedAt;
+  final bool captureFailed;
   final String? lastUpdated;
   final bool isOnline;
 
@@ -49,6 +58,10 @@ class SpotModel {
     this.zombieThresholdSec,
     this.sensorDistanceCm,
     this.plateNumber,
+    this.plateColor,
+    this.plateConfidence,
+    this.capturedAt,
+    this.captureFailed = false,
     this.lastUpdated,
     this.isOnline = true,
     this.isDisabled = false,
@@ -132,6 +145,10 @@ class SpotModel {
       zombieThresholdSec: zombieThresholdSec, // 🆕 节点端上报的真实阈值
       sensorDistanceCm: sensorDistanceCm,   // 🆕 节点端上报的真实超声波距离阈值
       plateNumber: json['plate_number'] as String?,
+      plateColor: json['plate_color'] as String?,
+      plateConfidence: (json['plate_confidence'] as num?)?.toDouble(),
+      capturedAt: json['captured_at'] as String?,
+      captureFailed: json['capture_failed'] == true,
       lastUpdated: json['updated_at'] as String?,
       isOnline: isOnline,
       isDisabled: isDisabled,
@@ -154,6 +171,10 @@ class SpotModel {
       'battery_level': batteryLevel,
       'signal_strength': signalStrength,
       'plate_number': plateNumber,
+      'plate_color': plateColor,
+      'plate_confidence': plateConfidence,
+      'captured_at': capturedAt,
+      'capture_failed': captureFailed,
       'last_updated': lastUpdated,
       'is_online': isOnline,
       'is_real': isReal,
@@ -171,6 +192,10 @@ class SpotModel {
     int? occupiedSec,
     DateTime? occupiedSince, // ⭐ 进入占用状态的本地时间戳
     String? plateNumber,
+    String? plateColor,
+    double? plateConfidence,
+    String? capturedAt,
+    bool? captureFailed,
     String? lastUpdated,
     bool? isOnline,
     bool? isDisabled,
@@ -202,6 +227,10 @@ class SpotModel {
       zombieThresholdSec: zombieThresholdSec ?? this.zombieThresholdSec,
       sensorDistanceCm: sensorDistanceCm ?? this.sensorDistanceCm,
       plateNumber: plateNumber ?? this.plateNumber,
+      plateColor: plateColor ?? this.plateColor,
+      plateConfidence: plateConfidence ?? this.plateConfidence,
+      capturedAt: capturedAt ?? this.capturedAt,
+      captureFailed: captureFailed ?? this.captureFailed,
       lastUpdated: lastUpdated ?? this.lastUpdated,
       isOnline: isOnline ?? this.isOnline,
       isDisabled: isDisabled ?? this.isDisabled,

@@ -1,22 +1,39 @@
 {
   "version": "1.0",
   "profile": {
-    "industryId": "2",
-    "sceneId": "19",
-    "categoryId": "46",
-    "productId": "这里替换成ParkCamera新产品的实际产品ID"
+    "industryId": "5",
+    "sceneId": "31",
+    "categoryId": "91",
+    "productId": "4enONCu0Y7"
   },
   "properties": [
     {
-      "identifier": "PlateNumber",
-      "name": "车牌号码",
+      "identifier": "CaptureTime",
+      "name": "拍照时间",
       "functionType": "u",
       "accessMode": "r",
-      "desc": "百度OCR识别结果，如京Q06666",
+      "desc": "格式：2026-08-28 16:30:00",
       "dataType": {
         "type": "string",
         "specs": {
-          "length": "16"
+          "length": 32
+        }
+      },
+      "functionMode": "property",
+      "required": false
+    },
+    {
+      "identifier": "DeviceStatus",
+      "name": "设备状态",
+      "functionType": "u",
+      "accessMode": "r",
+      "desc": "0=空闲  1=识别成功  2=识别失败",
+      "dataType": {
+        "type": "enum",
+        "specs": {
+          "0": "空闲",
+          "1": "识别成功",
+          "2": "识别失败"
         }
       },
       "functionMode": "property",
@@ -31,7 +48,7 @@
       "dataType": {
         "type": "string",
         "specs": {
-          "length": "16"
+          "length": 16
         }
       },
       "functionMode": "property",
@@ -48,58 +65,22 @@
         "specs": {
           "max": "1",
           "min": "0",
-          "step": "0.01"
+          "step": "0.000001"
         }
       },
       "functionMode": "property",
       "required": false
     },
     {
-      "identifier": "CaptureTime",
-      "name": "拍照时间",
+      "identifier": "PlateNumber",
+      "name": "车牌号码",
       "functionType": "u",
       "accessMode": "r",
-      "desc": "格式：2026-08-28 16:30:00",
+      "desc": "百度OCR识别结果，如京Q06666",
       "dataType": {
         "type": "string",
         "specs": {
-          "length": "32"
-        }
-      },
-      "functionMode": "property",
-      "required": false
-    },
-    {
-      "identifier": "CaptureCmd",
-      "name": "拍照触发命令",
-      "functionType": "u",
-      "accessMode": "rw",
-      "desc": "0=空闲  1=触发拍照（APP写入，设备读取后清零）",
-      "dataType": {
-        "type": "int32",
-        "specs": {
-          "max": "1",
-          "min": "0",
-          "step": "1"
-        }
-      },
-      "functionMode": "property",
-      "required": false
-    },
-    {
-      "identifier": "DeviceStatus",
-      "name": "设备状态",
-      "functionType": "u",
-      "accessMode": "r",
-      "desc": "0=空闲  1=拍照中  2=识别中  3=成功  4=失败",
-      "dataType": {
-        "type": "enum",
-        "specs": {
-          "0": "空闲",
-          "1": "拍照中",
-          "2": "识别中",
-          "3": "识别成功",
-          "4": "识别失败"
+          "length": 16
         }
       },
       "functionMode": "property",
@@ -107,6 +88,41 @@
     }
   ],
   "events": [],
-  "services": [],
+  "services": [
+    {
+      "identifier": "TriggerCapture",
+      "name": "拍照触发服务",
+      "functionType": "u",
+      "desc": "远程拍照触发(原CaptureCmd属性迁移为服务)。无入参；空闲则执行拍照+车牌OCR并回Result/ActualValue，识别结果仍由属性异步上报",
+      "callType": "sync",
+      "input": [],
+      "output": [
+        {
+          "identifier": "Result",
+          "name": "服务执行结果",
+          "dataType": {
+            "type": "bool",
+            "specs": {
+              "true": "成功",
+              "false": "失败"
+            }
+          }
+        },
+        {
+          "identifier": "ActualValue",
+          "name": "实际触发状态",
+          "dataType": {
+            "type": "bool",
+            "specs": {
+              "true": "已触发",
+              "false": "未触发"
+            }
+          }
+        }
+      ],
+      "functionMode": "service",
+      "required": false
+    }
+  ],
   "combs": []
 }

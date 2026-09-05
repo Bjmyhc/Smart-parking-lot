@@ -60,8 +60,13 @@ const char* OCR_PATH = "/rest/2.0/ocr/v1/license_plate";
 #define ONENET_TOPIC_POSTPROP  "$sys/" ONENET_PID "/" ONENET_DEVNAME "/thing/property/post"
 // 属性上报回执Topic: $sys/{pid}/{device_name}/thing/property/post/reply  (平台在此回 code=200/错误码)
 #define ONENET_TOPIC_POSTPROP_REPLY  "$sys/" ONENET_PID "/" ONENET_DEVNAME "/thing/property/post/reply"
-// 下行属性设置Topic (CaptureCmd读写属性, 平台可下发0/1触发拍照)
-#define ONENET_TOPIC_PROP_SET  "$sys/" ONENET_PID "/" ONENET_DEVNAME "/thing/property/set"
+// 拍照触发服务(TriggerCapture): 平台 call-service 同步调用 → 设备订阅/回复下面 topic
+//   (替换原 CaptureCmd 读写属性: 拍照触发由属性下发迁移为服务调用)
+#define ONENET_SERVICE_TRIGGER   "TriggerCapture"   // 服务identifier, 必须与物模型一致
+// MQTT 服务 invoke 订阅: 通配+, 支持以后扩展其他服务 (不可含#多段通配)
+#define ONENET_TOPIC_SERVICE_INVOKE  "$sys/" ONENET_PID "/" ONENET_DEVNAME "/thing/service/+/invoke"
+// MQTT 服务 reply 主题模板: snprintf 注入 serviceId, 格式同网关 sub 服务 reply 机制
+#define ONENET_TOPIC_SERVICE_REPLY_FMT "$sys/" ONENET_PID "/" ONENET_DEVNAME "/thing/service/%s/invoke_reply"
 // OneNET上报DeviceStatus枚举值
 #define DEVSTAT_IDLE      0   // 空闲(平台枚举值0: 启动/会话结束后上报, APP下发闸门=0)
 #define DEVSTAT_SUCCESS   1   // 识别成功(平台枚举值1: 5属性包内携带, 结果态)
@@ -97,8 +102,14 @@ bool lastBtnState = HIGH;
 bool recognizeInProgress = false;
 // 拍照识别会话序号 (每次触发+1, 用于日志把一整个流程串联起来, 避免穿插时分不清)
 static uint32_t sessionSeq = 0;
-// 平台下发CaptureCmd拍照触发标志 (由MQTT回调置位, loop主循环检测后触发拍照流程)
-volatile bool captureCmdPending = false;
+// TriggerCapture 服务调用待执行: MQTT回调只登记(msgId/serviceId), 主循环拾取跑完识别后统一回 invoke_reply
+// ⚠️ 回调内不能直接跑识别流程: recognizePlate 内部 uploadToOneNET/wait 会再调 mqttClient.loop() → 回调重入
+volatile bool captureSvcPending = false;
+char captureSvcMsgId[32] = { 0 };   // 服务调用msgId (回调写, 主循环读)
+char captureSvcId[24]    = { 0 };   // 服务identifier
+// ⭐ 最近一次 TriggerCapture 识别的 OCR 是否真正识别出车牌 (成功=true, 失败/无牌=false)
+// 供主循环统一回 invoke_reply 时把 Result 填成真实识别结果(不再恒定1), App 据此判断要不要拉属性取牌
+static bool srvCapturePlateOk = false;
 #if !SERIAL_BRIDGE_MODE
 DynamicJsonDocument document(8192);
 const char base64Map[65] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
@@ -124,9 +135,11 @@ static uint32_t lookupSessionByMsg(uint32_t msgId) {
   }
   return 0;
 }
-// ---------- MQTT下行回调: 接收平台post/reply回执 + 属性设置(CaptureCmd拍照触发) ----------
+// ---------- MQTT下行回调: 接收平台post/reply回执 + 服务调用(TriggerCapture拍照触发) ----------
 // ⚠️  post/reply 回执才是唯一可信的"平台业务处理结果", 只有 code==200 才能打✅入库成功.
 //     publish() 返回 true 仅表示已投递给MQTT/TCP层, 不等于平台真正写入属性.
+// 前向声明 (实现见下方 #if !SERIAL_BRIDGE_MODE 工具函数区, 回调/主循环都会调用)
+static void srvTriggerReply(const char* msgId, const char* serviceId, int result, int actual);
 void mqttCallback(char* topic, byte* payload, unsigned int length) {
   payload[length] = 0;
   // --- 1. property/post/reply: 针对某次属性上报的业务回执 (一一对应msgId) ---
@@ -146,21 +159,36 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
     (void)tag; (void)idStr; (void)msg;  // 新格式不单独打回执, 统一由wait输出
     return;
   }
-  // --- 2. property/set: 平台下发CaptureCmd=1 远程触发拍照 ---
-  if (strstr(topic, "thing/property/set")) {
+  // --- 2. thing/service/+/invoke: 平台 call-service 同步服务调用 (TriggerCapture 远程拍照) ---
+  if (strstr(topic, "/thing/service/") && strstr(topic, "/invoke")) {
     StaticJsonDocument<512> doc;
     DeserializationError err = deserializeJson(doc, (char*)payload);
-    if (err) { Serial.printf("[MQTT] property/set解析失败: %s\n", err.c_str()); return; }
+    if (err) { Serial.printf("[MQTT] service/invoke 解析失败: %s\n", err.c_str()); return; }
     const char* msgId = doc["id"] | "";
-    JsonObject params = doc["params"];
-    if (params.containsKey("CaptureCmd")) {
-      int cmd = params["CaptureCmd"];
-      Serial.printf("[MQTT] 下发: CaptureCmd=%d (msgId=%s)\n", cmd, msgId);
-      if (cmd == 1) {
-        captureCmdPending = true;
-        Serial.println("[MQTT] 已置位拍照标志, 下一轮loop触发拍照识别");
-      }
+    // 从topic抽出服务identifier (service/ 与 /invoke 之间的段)
+    char serviceId[24]; serviceId[0] = 0;
+    const char* p = strstr(topic, "/thing/service/");
+    if (p) {
+      p += 15;  // 跳过 "/thing/service/"
+      const char* q = strstr(p, "/invoke");
+      if (q && (q - p) < (int)sizeof(serviceId)) { memcpy(serviceId, p, q - p); serviceId[q - p] = 0; }
     }
+    Serial.printf("[MQTT] 服务调用: %s (msgId=%s)\n", serviceId, msgId);
+    if (strcmp(serviceId, ONENET_SERVICE_TRIGGER) != 0) {
+      Serial.printf("[MQTT] 服务调用: 未支持服务, 忽略\n");
+      return;
+    }
+    /* 正在识别(如BOOT/服务触发中): 立即回 Result=0 (设备忙) */
+    if (recognizeInProgress) {
+      srvTriggerReply(msgId, serviceId, 0, 0);
+      return;
+    }
+    /* 空闲: 登记待执行, 主循环跑完流程后统一回 Result=1 */
+    strncpy(captureSvcMsgId, msgId, sizeof(captureSvcMsgId) - 1);
+    strncpy(captureSvcId, serviceId, sizeof(captureSvcId) - 1);
+    captureSvcPending = true;
+    Serial.println("[MQTT] 已排队, 下一轮loop执行拍照并回 invoke_reply");
+    return;
   }
 }
 PubSubClient mqttClient(mqttWifiClient);
@@ -171,7 +199,7 @@ char mqttTxBuf[MQTT_PACKET_BUF_SIZE];
 
 // ==================== 函数声明 ====================
 void vCameraInit(void);
-// trigger: 触发来源描述, 用于会话标题展示 (如"本地 BOOT 按钮"/"云端触发 CaptureCmd=1")
+// trigger: 触发来源描述, 用于会话标题展示 (如"本地 BOOT 按钮"/"云端服务 TriggerCapture")
 void recognizePlate(const char* trigger);
 #if SERIAL_BRIDGE_MODE
 // 串口转发模式: 把 JPEG 通过帧协议发到电脑
@@ -192,6 +220,8 @@ bool uploadToOneNET(const String& plate, const String& color, float confidence,
                     const String& captureTime, int deviceStatus);
 // OneNET: 只上报DeviceStatus (流程中状态变化时轻量调用)
 bool reportDeviceStatus(int deviceStatus);
+// TriggerCapture 服务: 主循环跑完识别后一次性回 invoke_reply (⚠️ 只能回一次)
+static void srvTriggerReply(const char* msgId, const char* serviceId, int result, int actual);
 // 获取当前时间字符串 "YYYY-MM-DD HH:MM:SS"
 String getTimeString();
 // 车牌颜色 英文→中文 (在recognizePlate表格化输出、upload中都会调用)
@@ -234,13 +264,19 @@ void setup() {
     wifiTimeout++;
   }
   if (WiFi.status() != WL_CONNECTED) {
-    Serial.printf(" 失败 status=%d\n", WiFi.status());
-    return;
+    // ⚠️ 修复: 首次连接失败不再 return 弃疗 —— return 会跳过下方
+    //   mqttClient.setServer/setCallback/setBufferSize 初始化, 导致之后 WiFi 即使恢复
+    //   (固件自动重连/热点打开) MQTT 也永远连不上, 表现为"必须重启才能连上".
+    //   setServer 等纯配置不依赖 WiFi, 照常执行; 真正建连交给 loop() 启动阶段的懒连接.
+    Serial.printf(" 失败 status=%d, 继续初始化(建连交给loop懒重连)\n", WiFi.status());
   }
+  WiFi.setAutoReconnect(true);   // ⭐ 断线自动重连(显式开启, 与网关行为对齐)
   WiFi.setSleep(false);
   WiFi.setTxPower(WIFI_POWER_19_5dBm);
-  Serial.printf(" 完成 IP=%s RSSI=%ddBm\n",
-                WiFi.localIP().toString().c_str(), WiFi.RSSI());
+  if (WiFi.status() == WL_CONNECTED) {
+    Serial.printf(" 完成 IP=%s RSSI=%ddBm\n",
+                  WiFi.localIP().toString().c_str(), WiFi.RSSI());
+  }
 
   // ⚠️ 关键时序: WiFi刚得到DHCP/链路起来后, lwIP tcpip_thread 仍在处理 ARP/DNS缓存等初始化,
   //    此时立即调用 UDP(NTP)/DNS(MQTT.connect) 可能触发 udp_new_ip_type 的核心锁 assert.
@@ -260,20 +296,22 @@ void setup() {
   mqttClient.setCallback(mqttCallback);
   mqttClient.setServer(ONENET_MQTT_HOST, ONENET_MQTT_PORT);
   mqttClient.setSocketTimeout(8);
-  mqttClient.setKeepAlive(60);
+  // ⭐ keepalive 60→30: 断网时底层更快感知链路失效(≤60s内)并打日志,
+  //    缩小"云平台已判离线但固件 connected() 仍为真"的静默盲区
+  mqttClient.setKeepAlive(30);
   Serial.printf("[MQTT] 产品=%s 设备=%s (OneNET上报启用, loop中连接)\n",
                 ONENET_PID, ONENET_DEVNAME);
 #else
   Serial.println("[MQTT] OneNET上报关闭 (仅串口打印)");
 #endif
   Serial.printf("[系统] 模式: %s\n", mode);
-  Serial.println("[系统] 就绪: 按BOOT按钮 / 云端CaptureCmd=1 触发拍照");
+  Serial.println("[系统] 就绪: 按BOOT按钮 / 云端服务 TriggerCapture 触发拍照");
 #endif
 }
 
 void loop() {
 #if ONENET_ENABLE && !SERIAL_BRIDGE_MODE
-  mqttClient.loop();  // 维持MQTT心跳与下行包处理 (post/reply回执 + CaptureCmd下发)
+  mqttClient.loop();  // 维持MQTT心跳与下行包处理 (post/reply回执 + 服务TriggerCapture调用)
 
   // ---- 一次性启动阶段任务: MQTT懒连接 + NTP后续补等 ----
   //      放在 loop 顶部 = FreeRTOS scheduler 已完整跑起, lwIP 核心锁就绪.
@@ -305,12 +343,88 @@ void loop() {
 
   if (recognizeInProgress) return;  // 正在拍照识别中, 忽略按键/命令
 
-  // ----- 触发源1: 平台下发CaptureCmd=1 (云平台/APP远程拍照) -----
-  if (captureCmdPending) {
-    captureCmdPending = false;
+  // ---- 运行期自愈 + 可观测性 (断网/掉线不再"静默", 日志能完整还原掉线-恢复全过程) ----
+  unsigned long nowMsLoop = millis();
+
+  // --- ① WiFi 看门狗: 断线边沿打日志 + 主动 reconnect (默认自动重连不可靠时自愈) ---
+  static bool   wifiWatchInit = false;
+  static bool   lastWifiUp = false;
+  static unsigned long lastWifiKickMs = 0;
+  bool wifiUp = (WiFi.status() == WL_CONNECTED);
+  if (!wifiWatchInit) {          // 首轮只建立基线, 不把启动中状态误报为事件
+    wifiWatchInit = true;
+    lastWifiUp = wifiUp;
+    if (!wifiUp) lastWifiKickMs = nowMsLoop;
+  } else if (wifiUp != lastWifiUp) {
+    if (wifiUp) {
+      Serial.printf("[WiFi] 重连成功 (IP=%s RSSI=%ddBm)\n",
+                    WiFi.localIP().toString().c_str(), WiFi.RSSI());
+    } else {
+      Serial.printf("[WiFi] 断开 (status=%d), 主动重连中\n", (int)WiFi.status());
+      WiFi.reconnect();
+      lastWifiKickMs = nowMsLoop;
+    }
+  }
+  lastWifiUp = wifiUp;
+  if (!wifiUp && nowMsLoop - lastWifiKickMs >= 10000UL) {   // 未恢复则每10s踢一次
+    lastWifiKickMs = nowMsLoop;
+    WiFi.reconnect();
+  }
+
+  // --- ② MQTT 连接状态边沿 + 空闲5s自动重连 (原逻辑) ---
+  //      掉线边沿就是"云平台已离线但此前日志无输出"盲区的出口:
+  //      connected() 由底层 keepalive 判定失效后翻转为 false, 这里立即留痕
+  static unsigned long lastMqttReconnectMs = 0;
+  static bool   mqttStateInit = false;
+  static bool   lastMqttUp = false;
+  bool mqttUp = mqttClient.connected();
+  if (!mqttStateInit) {          // 首轮建立基线, 不把启动期未连接误报为掉线
+    mqttStateInit = true;
+    lastMqttUp = mqttUp;
+  } else if (!mqttUp && lastMqttUp) {
+    Serial.printf("[MQTT] 掉线 (keepalive/底层判定链路失效), 进入自动重连\n");
+  }
+  lastMqttUp = mqttUp;
+  if (!mqttUp && nowMsLoop - lastMqttReconnectMs >= 5000UL) {
+    lastMqttReconnectMs = nowMsLoop;
+    onenetMqttEnsureConnected();   // 内部自带失败退避, 不会高频轰炸
+  }
+
+  // --- ③ 空闲心跳: 每10分钟上报一次IDLE, 用平台回执自检链路活性 ---
+  //      纯空闲期(无拍照)固件默认零上行, 半开连接(路由器静默丢包)可长期假在线;
+  //      心跳让"链路活着"在日志里有周期性铁证, 回执超时则强制断开触发重连
+  static unsigned long lastHeartbeatMs = 0;
+  if (mqttUp && nowMsLoop - lastHeartbeatMs >= 600000UL) {
+    lastHeartbeatMs = nowMsLoop;
+    Serial.println("[心跳] 空闲链路自检 (IDLE上报)");
+    if (reportDeviceStatus(DEVSTAT_IDLE)) {
+      // 最多等1s回执: 收不到说明链路假死, 强制断开让重连逻辑立刻接管
+      if (onenetMqttWaitAllReplies(1000) > 0) {
+        Serial.println("[心跳] 回执超时, 链路疑假死, 强制断开MQTT触发重连");
+        mqttClient.disconnect();
+      }
+    } else {
+      Serial.println("[心跳] IDLE上报投递失败, 交由重连逻辑接管");
+    }
+  }
+
+  // ----- 触发源1: 平台 TriggerCapture 服务调用 (云平台/APP远程拍照) -----
+  //      MQTT回调只登记msgId/serviceId, 这里空闲后拾取执行.
+  //      识别流程内部已按成功/失败自行上报 DeviceStatus(→IDLE开闸门),
+  //      流程结束后再统一回一次 invoke_reply (Result/ActualValue), 服务闭环.
+  if (captureSvcPending) {
+    captureSvcPending = false;
+    char svcMsgId[32]; memcpy(svcMsgId, captureSvcMsgId, sizeof(svcMsgId)); svcMsgId[sizeof(svcMsgId) - 1] = 0;
+    char svcId[24];    memcpy(svcId, captureSvcId, sizeof(svcId));          svcId[sizeof(svcId) - 1] = 0;
+    captureSvcMsgId[0] = 0;
+    captureSvcId[0]    = 0;
     recognizeInProgress = true;
-    recognizePlate("云端触发 CaptureCmd=1");
+    srvCapturePlateOk = false;            // 先复位: 失败出口保持 false
+    recognizePlate("云端服务 TriggerCapture");
     recognizeInProgress = false;
+    // ⭐ Result=本次OCR是否识别出车牌(真值), ActualValue=1(拍照动作确实触发执行)
+    //    App 据此: Result=true 才去拉 PlateNumber 属性(此时必为本次车牌), false=本次没识别到牌, 不拉不显示
+    srvTriggerReply(svcMsgId, svcId, srvCapturePlateOk ? 1 : 0, 1);
     return;
   }
 
@@ -639,6 +753,8 @@ void recognizePlate(const char* trigger)
                   plate.c_str(), plateColorZh(color).c_str(), color.c_str(), avgProb,
                   (unsigned long long)logId);
   }
+  // ⭐ 能走到这里 = OCR 已成功识别出车牌(失败路径早已 return) → 供 invoke_reply Result 填真值
+  srvCapturePlateOk = true;
 
   // OneNET 上报: 最终5属性(含SUCCESS态=1)打包 → 入库后延时1s(防平台限流) → 补IDLE=0开闸门
 #if ONENET_ENABLE
@@ -1115,10 +1231,24 @@ int httpTlsPost(const char* host, const char* path, const char* body, size_t bod
 // ⚠️ 成功日志保持 1 行; 仅在失败时才打印详细参数 + 排查清单, 避免启动日志刷屏
 bool onenetMqttEnsureConnected() {
   if (mqttClient.connected()) return true;
-  if (WiFi.status() != WL_CONNECTED) {
-    Serial.println("[MQTT] WiFi未连接, 跳过MQTT连接");
+  // ⭐ 节流: WiFi未关联/未获IP 提示最多每3s一条, 避免开机无网时疯狂刷屏.
+  //    WL_CONNECTED 只代表802.11关联成功, 未必已DHCP拿到IP(此时TCP连接必失败)
+  unsigned long nowMs = millis();
+  static unsigned long lastWarnMs = 0;
+  bool noWifi = (WiFi.status() != WL_CONNECTED);
+  bool noIp   = (WiFi.localIP() == IPAddress(0, 0, 0, 0));
+  if (noWifi || noIp) {
+    if (nowMs - lastWarnMs >= 3000UL) {
+      lastWarnMs = nowMs;
+      Serial.println(noWifi ? "[MQTT] WiFi未连接, 跳过MQTT连接"
+                            : "[MQTT] WiFi已关联但未获IP, 等待DHCP后重连");
+    }
     return false;
   }
+  // ⭐ 重连退避: 上一轮两连全失败后至少等5s再发起新一轮,
+  //    避免热点/网络刚恢复时高频重试把失败状态"咬死"(持续 state=-2 需重启才恢复)
+  static unsigned long lastFailMs = 0;
+  if (lastFailMs != 0 && nowMs - lastFailMs < 5000UL) return false;
   // 最多尝试2次, 避免卡死
   for (int attempt = 1; attempt <= 2; attempt++) {
     Serial.printf("[MQTT] 连接 %d/2 → %s:%d (cid=%s)\n",
@@ -1132,10 +1262,11 @@ bool onenetMqttEnsureConnected() {
         NULL, 0, false, NULL, true
     );
     if (ok) {
-      // 连接成功立刻订阅下行主题 (平台回执 + 下行拍照触发命令)
+      lastFailMs = 0;   // 连接成功, 清除失败退避标记
+      // 连接成功立刻订阅下行主题 (属性上报回执 + 服务调用: TriggerCapture远程拍照)
       bool sub1 = mqttClient.subscribe(ONENET_TOPIC_POSTPROP_REPLY);
-      bool sub2 = mqttClient.subscribe(ONENET_TOPIC_PROP_SET);
-      Serial.printf("[MQTT] 已连接, 订阅: post/reply=%d, prop/set=%d\n",
+      bool sub2 = mqttClient.subscribe(ONENET_TOPIC_SERVICE_INVOKE);
+      Serial.printf("[MQTT] 已连接, 订阅: post/reply=%d, service/+/invoke=%d\n",
                     sub1 ? 1 : 0, sub2 ? 1 : 0);
       return true;
     }
@@ -1163,8 +1294,12 @@ bool onenetMqttEnsureConnected() {
         Serial.println("[MQTT] 鉴权失败检查: Broker域名/设备密钥/res格式/Token过期/method/设备存在性");
       }
     }
+    // 失败后主动断开, 清理 PubSubClient/WiFiClient 内部残留socket状态,
+    // 防止"网络已恢复却持续 state=-2 无法自愈、必须重启"的问题
+    mqttClient.disconnect();
     delay(500);
   }
+  lastFailMs = millis();   // 记录本轮全失败时刻, 触发 ≥5s 重连退避
   return false;
 }
 
@@ -1238,6 +1373,43 @@ uint8_t onenetMqttWaitAllReplies(unsigned long timeoutMs) {
     Serial.printf("[MQTT] 响应: 超时，耗时 %lums\n", cost);
   }
   return mqttPendingReplies;
+}
+
+// ---------- TriggerCapture 服务回包: publish 到 thing/service/{id}/invoke_reply ----------
+// OneNET 物模型服务回复 (直连设备, 官方 detail/903):
+//   {"id":"<平台调用时的msgId>","code":200,"msg":"success","data":{"Result":true,"ActualValue":true}}
+// ⚠️ data 直接放服务输出参数的裸值, 不要再套 {"value":...} 包装 ——
+//    {"value":x} 是属性上报(property/post)的规则; 服务回复套了会被平台判 response invalid(2502)
+// ⚠️ 每次服务调用只能回一次: 主循环执行完识别后回一次; 设备忙时由回调直接回 (Result=0)
+// ⚠️ 可能被 mqttCallback 调用, 内部禁止 mqttClient.loop() 防回调重入; publish 直接走底层socket即发出
+static void srvTriggerReply(const char* msgId, const char* serviceId, int result, int actual) {
+  if (msgId == NULL || msgId[0] == '\0') {
+    Serial.println("[MQTT] 服务回包: 缺msgId, 跳过 invoke_reply");
+    return;
+  }
+  if (!onenetMqttEnsureConnected()) {
+    Serial.println("[MQTT] 服务回包: MQTT未连接, 无法回 invoke_reply");
+    return;
+  }
+  StaticJsonDocument<384> oneDoc;
+  oneDoc["id"] = msgId;
+  oneDoc["code"] = 200;
+  oneDoc["msg"] = "success";
+  JsonObject data = oneDoc.createNestedObject("data");
+  data["Result"]      = (result != 0);   // bool出参 → JSON true/false (勿写成数字1)
+  data["ActualValue"] = (actual != 0);
+  size_t payloadLen = serializeJson(oneDoc, mqttTxBuf, MQTT_PACKET_BUF_SIZE);
+  if (payloadLen == 0 || payloadLen >= MQTT_PACKET_BUF_SIZE - 1) {
+    Serial.printf("[MQTT] 服务回包: OneJSON序列化失败或超限 (len=%u)\n", (unsigned)payloadLen);
+    return;
+  }
+  char topic[128];
+  snprintf(topic, sizeof(topic), ONENET_TOPIC_SERVICE_REPLY_FMT, serviceId);
+  Serial.printf("[MQTT] 服务回包: Result=%d, ActualValue=%d (topic=%s)\n",
+                result, actual, topic);
+  if (!mqttClient.publish(topic, (const uint8_t*)mqttTxBuf, payloadLen, false)) {
+    Serial.println("[MQTT] 服务回包: publish失败");
+  }
 }
 
 // ---------- 轻量: 只上报DeviceStatus (三态: 0空闲/1成功/2失败) ----------

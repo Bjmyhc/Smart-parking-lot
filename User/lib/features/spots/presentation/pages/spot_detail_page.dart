@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import '../../../../shared/widgets/card_container.dart';
 import '../../../../shared/widgets/custom_app_bar.dart';
 import '../../../../shared/widgets/status_badge.dart';
+import '../../../../shared/widgets/plate_badge.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_dims.dart';
 import '../../../../core/models/spot_model.dart';
@@ -68,7 +69,7 @@ class _SpotDetailPageState extends State<SpotDetailPage> {
           children: [
             _buildHeader(spot),
             const SizedBox(height: AppDims.gapCard),
-            _buildPlateInfo(spot),
+            _buildPlateInfo(provider, spot),
             const SizedBox(height: AppDims.gapCard),
             _buildDeviceInfo(spot),
             if (_hasAlert(spot, provider.alertSec)) ...[
@@ -206,8 +207,23 @@ class _SpotDetailPageState extends State<SpotDetailPage> {
     );
   }
 
-  Widget _buildPlateInfo(SpotModel spot) {
-    final plateNumber = spot.plateNumber ?? '暂无车牌信息';
+  /// 摄像头 Cam001 只与真实车位 Park001 关联 (与车牌补全规则一致): 真实/在线/未停用才给远程拍照入口.
+  bool _isCameraPark001(SpotModel spot) =>
+      spot.id == 'Park001' && spot.isReal && !spot.isOffline && !spot.isDisabledSpot;
+
+  /// 远程拍照按钮点击: 调摄像头 TriggerCapture 服务, 识别结果由 3s 轮询自动刷新.
+  Future<void> _onRemoteCapture(ParkingProvider provider) async {
+    final reason = await provider.capturePlateRemote();
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(reason ?? '已触发远程拍照, 识别结果刷新后自动显示'),
+        duration: const Duration(seconds: 2),
+      ),
+    );
+  }
+
+  Widget _buildPlateInfo(ParkingProvider provider, SpotModel spot) {
     final isOccupied = spot.isOccupied || spot.isZombie;
 
     if (spot.isOffline) {
@@ -290,21 +306,7 @@ class _SpotDetailPageState extends State<SpotDetailPage> {
                   color: isOccupied ? AppColors.warning : AppColors.success,
                 ),
                 const SizedBox(height: 16),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                  decoration: BoxDecoration(
-                    color: AppColors.surface,
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Text(
-                    plateNumber,
-                    style: const TextStyle(
-                      fontSize: 22,
-                      fontWeight: FontWeight.w700,
-                      letterSpacing: 2,
-                    ),
-                  ),
-                ),
+                _buildPlateBadgeArea(spot),
                 const SizedBox(height: 12),
                 Text(
                   isOccupied ? '车辆已占用该车位' : '车位当前空闲',
@@ -313,8 +315,156 @@ class _SpotDetailPageState extends State<SpotDetailPage> {
                     color: AppColors.textSecondary,
                   ),
                 ),
+                /* ⭐ 拍照识别附加信息: 车牌颜色 / 识别置信度 / 识别时间 (有牌时显示) */
+                if (spot.plateNumber != null && spot.plateNumber!.isNotEmpty) ...[
+                  const SizedBox(height: 6),
+                  SizedBox(
+                    width: double.infinity,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        _buildCaptureInfoLine(
+                            Icons.palette_outlined, '车牌颜色', spot.plateColor ?? '未知'),
+                        _buildCaptureInfoLine(
+                            Icons.verified_outlined,
+                            '识别置信度',
+                            spot.plateConfidence != null
+                                ? '${(spot.plateConfidence! * 100).toStringAsFixed(1)}%'
+                                : '未知'),
+                        if (spot.capturedAt != null)
+                          _buildCaptureInfoLine(
+                              Icons.schedule, '识别时间', spot.capturedAt!),
+                      ],
+                    ),
+                  ),
+                ],
+                if (_isCameraPark001(spot)) ...[
+                  const SizedBox(height: 16),
+                  // 远程拍照入口: 车牌由摄像头 Cam001 抓拍识别, 服务化调用 TriggerCapture
+                  SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton.icon(
+                      onPressed: provider.capturingRemote
+                          ? null
+                          : () => _onRemoteCapture(provider),
+                      icon: provider.capturingRemote
+                          ? const SizedBox(
+                              width: 16,
+                              height: 16,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Icon(Icons.photo_camera_outlined, size: 18),
+                      label: Text(
+                        provider.capturingRemote ? '拍照识别中...' : '远程拍照',
+                        style: const TextStyle(fontWeight: FontWeight.w600),
+                      ),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: AppColors.primary,
+                        side: BorderSide(
+                          color: AppColors.primary.withValues(alpha: 0.5),
+                        ),
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(AppDims.radiusMedium),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
               ],
             ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// ⭐ 车牌展示区: 
+  ///  - 有牌 → PlateBadge 真实配色 + 车牌下方识别置信度小字(按阈值着色)
+  ///  - 拍过但没识别出 → 相机✕图标 + "已拍照, 未识别到车牌"
+  ///  - 从未拍照 → 原白底大字兜底
+  Widget _buildPlateBadgeArea(SpotModel spot) {
+    final plate = spot.plateNumber;
+    final conf = spot.plateConfidence;
+    final hasPlate = plate != null && plate.isNotEmpty;
+    if (hasPlate) {
+      return Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          PlateBadge(text: plate, color: spot.plateColor),
+          if (conf != null) ...[
+            const SizedBox(height: 6),
+            Text(
+              '识别置信度 ${(conf * 100).toStringAsFixed(1)}%',
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w500,
+                color: _confidenceColor(conf),
+              ),
+            ),
+          ],
+        ],
+      );
+    }
+    if (spot.captureFailed) {
+      // ⭐ "拍了但没拍明白": 与"从未拍照"明确区分
+      return const Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.no_photography_outlined, size: 42, color: AppColors.textSecondary),
+          SizedBox(height: 8),
+          Text(
+            '已拍照, 未识别到车牌',
+            style: TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w500,
+              color: AppColors.textSecondary,
+            ),
+          ),
+        ],
+      );
+    }
+    // 从未拍照 / 空车位 → 原白底兜底
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: const Text(
+        '暂无车牌信息',
+        style: TextStyle(
+          fontSize: 22,
+          fontWeight: FontWeight.w700,
+          letterSpacing: 2,
+        ),
+      ),
+    );
+  }
+
+  /// 置信度阈值着色: ≥90% 绿 / ≥70% 橙 / <70% 红
+  Color _confidenceColor(double conf) {
+    if (conf >= 0.9) return const Color(0xFF16A34A);
+    if (conf >= 0.7) return const Color(0xFFF59E0B);
+    return const Color(0xFFEF4444);
+  }
+
+  /// 拍照识别信息行 (车牌颜色 / 置信度 / 识别时间)
+  Widget _buildCaptureInfoLine(IconData icon, String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 3),
+      child: Row(
+        children: [
+          Icon(icon, size: 15, color: AppColors.textSecondary),
+          const SizedBox(width: 7),
+          Text(
+            label,
+            style: const TextStyle(fontSize: 13, color: AppColors.textSecondary),
+          ),
+          const Spacer(),
+          Text(
+            value,
+            style: const TextStyle(fontSize: 13, color: AppColors.textPrimary, fontWeight: FontWeight.w500),
           ),
         ],
       ),
