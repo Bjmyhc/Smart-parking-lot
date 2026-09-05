@@ -69,6 +69,8 @@
 /* ==================== 上报与超时 ==================== */
 #define UPLOAD_INTERVAL     5000    /* 定时上报周期(ms): 比赛演示要快, 5s 一推 */
 #define UPLOAD_MIN_INTERVAL_MS  1000  /* 上行最小间隔(ms): 配合平台"≤1次/s"限速, 锁死不超 */
+/* ⭐ 节点离线判定超时(ms): 实际离线门槛在 node_data.cpp checkNodeTimeout 中按
+ * 本动态值 ×2 执行(≈12s/单节点), 用于容忍 LoRa 偶发单帧丢包, 避免误判活节点离线 */
 #define NODE_DATA_TIMEOUT_BASE  3000   /* 节点超时基准(ms) */
 #define NODE_PER_NODE_TIMEOUT   3000    /* 每发现1个节点附加超时(ms), 适配轮询一圈耗时 */
 #define MQTT_RETRY_DELAY    5000    /* MQTT重连间隔(ms) */
@@ -79,7 +81,7 @@
  * 借鉴参考项目 main.h 的 32 位标志位设计, O(1) 判断系统状态.
  * 节点在线位使用动态位 (1 << (nodeId-1)), 由 node_data.cpp 维护.
  * MQTT 保活不占标志位: 底层由 PubSubClient keepalive 自动 PINGREQ
- * (60s) + 120s 无数据自动断开, 连接标志由 onenet_handler 收口维护 */
+ * (30s) + 60s 无数据自动断开, 连接标志由 onenet_handler 收口维护 */
 #define SYS_EVENT_MQTT_CONNECTED    0x80000000  /* MQTT 已连接(CONNACK收到) */
 #define SYS_EVENT_CONFIG_PORTAL     0x20000000  /* AP 配网模式 */
 /* ... 0x1F000000 及低 16 位按需扩展 (低16位每位对应一个节点) */

@@ -258,10 +258,10 @@ static bool handleCompleteFrame(uint8_t header)
             if (slot >= 0)
                 nodes[slot].rssi = rssi;
             gotData = true;
-            DBG_PRINTF("[LoRa] 收到<- 节点%d 数据: 车位=%d 距离=%d 地磁=%d 时长=%lu LED=%d 使能=%d (seq=%d) RSSI=%ddBm\n",
+            DBG_PRINTF("[LoRa] 收到<- 节点%d 数据: 车位=%d 距离=%d 地磁=%d 时长=%lu LED=%d (seq=%d) RSSI=%ddBm\n",
                        nodeId, d->ParkStatus, d->Ultrasonic,
                        d->GeoMagnetic, (unsigned long)d->OccupiedTime,
-                       d->LED, d->LedEnable, d->seq, rssi);
+                       d->LED, d->seq, rssi);
         }
         break;
 
@@ -317,12 +317,13 @@ static bool handleCompleteFrame(uint8_t header)
                 onenet_notifyServiceResult(slot, true, nodes[slot].thresholdValue);
             }
         }
-        /* ⭐ LED 控制下发成功: 收到 ACK 后向平台补回"同步服务调用"回复 */
-        if (strcmp((char *)rxBuf, "AT+LedEnable") == 0)
+        /* ⭐ LED 控制下发成功(SetLed 服务): 收到 ACK 后向平台补回"同步服务调用"回复,
+         * ActualValue 回节点实际命令目标值(ledSwitch) */
+        if (strcmp((char *)rxBuf, "AT+SetLed") == 0)
         {
             int slot = findNode(nodeId);
             if (slot >= 0)
-                onenet_notifyServiceResult(slot, true, 1);
+                onenet_notifyServiceResult(slot, true, nodes[slot].ledSwitch ? 1 : 0);
         }
         /* PING 通(PONG)即视为节点存活: 刷新在线状态与活性时间,
          * 并处理"掉线恢复"需要重新代上线(与收到数据的恢复逻辑一致) */
@@ -736,7 +737,7 @@ bool lora_discoveryActive(void)
 void lora_sendControl(uint8_t nodeId, const char *property, int value)
 {
     /* 组装 AT+<property>=<value>\r\n
-     * 节点端回调按纯名称匹配 (如 "AT+LedEnable"), 节点地址靠定点传输[AddrH][AddrL]区分,
+     * 节点端回调按纯名称匹配 (如 "AT+SetLed"), 节点地址靠定点传输[AddrH][AddrL]区分,
      * 命令名不包含 nodeId */
     int n = snprintf(pendingCmd, sizeof(pendingCmd), "AT+%s=%d\r\n", property, value);
     (void)n;

@@ -20,6 +20,11 @@
 #include "lora_handler.h"
 #include "onenet_ota.h"      /* ota_allow_set: App 全网升级确认门控 */
 #include <ArduinoJson.h>
+#if defined(ESP32)
+  #include <WiFi.h>
+#else
+  #include <ESP8266WiFi.h>
+#endif
 
 /* ==================== 子设备物模型属性标识符 ====================
  * 必须与 OneNET 平台子设备(park1/park2)物模型属性标识符完全一致
@@ -48,7 +53,7 @@
 #define SUB_SERVICE_ZOMBIE_THRESHOLD "SetZombieThreshold"
 /* ⭐ 超声波判定距离阈值服务: APP 经 call-service 同步调用, 输入 DistanceValue */
 #define SUB_SERVICE_SENSOR_DISTANCE  "SetSensorDistance"
-/* ⭐ LED 控制服务: 替代原 LedEnable 属性, 直接控制节点 LED 开关 */
+/* ⭐ LED 控制服务(SetLed): 控制节点报警灯(僵尸车报警灯)的使能开关 */
 #define SUB_SERVICE_LED_CONTROL      "SetLed"
 /* 同步服务调用截止(ms): 平台同步调用超时约10s, 网关须赶在前面回 invoke_reply */
 #define SUB_SERVICE_DEADLINE_MS    9000
@@ -375,7 +380,18 @@ static void handleSubServiceInvoke(JsonDocument &doc)
     }
     else  /* isLed */
     {
-        value = input["LedState"] | 0;
+        /* LedState 是物模型 bool: 兼容平台下发 true/false(bool)、0/1(数字) 及
+         * "true"/"1"(字符串) 形式. 不能直接 `| 0`, 否则 bool true 会被转成 0 */
+        JsonVariant ledState = input["LedState"];
+        if (ledState.is<bool>())
+            value = ledState.as<bool>() ? 1 : 0;
+        else if (ledState.is<int>())
+            value = ledState.as<int>();
+        else if (ledState.is<const char *>())
+            value = (strcmp(ledState.as<const char *>(), "true") == 0 ||
+                     strcmp(ledState.as<const char *>(), "1") == 0) ? 1 : 0;
+        else
+            value = 0;
         if (value != 0 && value != 1)
         {
             DBG_PRINTF("[MQTT] 服务调用 LED 状态无效: %d\n", value);
@@ -428,9 +444,10 @@ static void handleSubServiceInvoke(JsonDocument &doc)
         nodes[slot].sensorDistanceNeedsUpdate = true;
         saveCertsToLittleFS();   /* 阈值立即存 Flash, 断电不丢 */
     }
-    else  /* isLed: 直接 LoRa 下发, 等 ACK 回复 */
+    else  /* isLed: 记录命令目标并直接 LoRa 下发(AT+SetLed), 等 ACK 后回 ActualValue */
     {
-        lora_sendControl(nodes[slot].nodeId, "LedEnable", value);
+        nodes[slot].ledSwitch = (value != 0);
+        lora_sendControl(nodes[slot].nodeId, "SetLed", value);
     }
 
     s_pendingServiceReply.active = true;
@@ -599,15 +616,57 @@ void onenet_init(void)
     mqtt.setServer(ONENET_SERVER, ONENET_PORT);
     mqtt.setCallback(mqtt_callback);
     mqtt.setBufferSize(2048);
-    mqtt.setKeepAlive(60);
+    /* keepalive 60→30: 断网/链路假死时更快判定失效(≤60s内)并走重连,
+     * 缩短网关本身"静默掉线"时间, 也就缩短平台侧代子设备下线的空窗 */
+    mqtt.setKeepAlive(30);
     DBG_PRINTLN("[MQTT] OneNET 网关客户端已初始化");
 }
+
+/* ⭐ 防假离线: mqtt.connect() 是同步阻塞的, 卡顿期间主循环整个冻结,
+ * LoRa 轮询/节点超时判定全部停摆 → 恢复后 checkNodeTimeout 会把本来
+ * 活着的节点误判离线, 引发整网"代下线→再上线"抖动(平台看到网关+节点
+ * 同时掉线又恢复). 这里做两件事:
+ *  1) 域名只解析一次缓存成 IP: 之后重连不再每次做阻塞 DNS, 卡顿上界
+ *     从"DNS秒级"降到"纯TCP建连";
+ *  2) 连接阻塞超过阈值时把在线节点的超时时钟拨回当前, 抵消暂停期造成的
+ *     假离线(宁可多给一个周期重新确认, 也不误判整网离线). */
+#define MQTT_CONNECT_STALL_COMP_MS  1000   /* 连接阻塞超过该值(ms)才补偿节点时钟 */
 
 bool onenet_connect(void)
 {
     if (mqtt.connected()) return true;
+
+    /* ① 域名缓存: WiFi 关联成功后解析一次, 失败则保持 host 建连(继续尝试) */
+    static IPAddress s_brokerIp;
+    static bool      s_brokerIpOk = false;
+    if (!s_brokerIpOk && WiFi.status() == WL_CONNECTED)
+    {
+        if (WiFi.hostByName(ONENET_SERVER, s_brokerIp))
+        {
+            s_brokerIpOk = true;
+            mqtt.setServer(s_brokerIp, ONENET_PORT);
+        }
+    }
+
     DBG_PRINTLN("[MQTT] 正在连接 OneNET (网关)...");
+    uint32_t tConn = millis();
     bool ok = mqtt.connect(ONENET_DEVID, ONENET_PROID, ONENET_TOKEN);
+    uint32_t stallMs = millis() - tConn;
+
+    /* ② 阻塞补偿: 主循环被 connect 卡住期间节点没被轮询, 在线节点
+     * 超时时钟拨到当前, 防止"连接卡顿→节点集体假离线"的风暴 */
+    if (stallMs >= MQTT_CONNECT_STALL_COMP_MS)
+    {
+        DBG_PRINTF("[MQTT] 连接阻塞 %lums (%s), 已补偿节点超时时钟防假离线\n",
+                   (unsigned long)stallMs, ok ? "成功" : "失败");
+        uint32_t nowTick = millis();
+        for (uint8_t i = 0; i < nodeCount; i++)
+        {
+            if (nodes[i].online)
+                nodes[i].lastUpdate = nowTick;
+        }
+    }
+
     if (!ok)
     {
         /* CONNACK 错误码处理 (借鉴参考项目 wifi.c) */
@@ -669,6 +728,9 @@ void onenet_loop(void)
      * 底层断线(TCP RST/keepalive 超时)由 PubSubClient 检测并断开 */
     if (!mqtt.connected() && (sysEventFlag & SYS_EVENT_MQTT_CONNECTED))
     {
+        /* ⭐ 掉线边沿留痕: 之前掉线是"无任何日志"的静默过程, 这里
+         * 立即打印, 让 掉线时刻/原因 在串口上可追溯 */
+        DBG_PRINTF("[MQTT] 连接断开 (state=%d), 触发自动重连\n", mqtt.state());
         onenet_disconnect();
         s_pendingServiceReply.active = false;   /* 断线无法回 invoke_reply, 丢弃待回复状态 */
     }

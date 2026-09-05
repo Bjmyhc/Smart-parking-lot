@@ -11,7 +11,7 @@
  *   1. LoRa 轮询调度:  轮流发 AT+CERx / AT+DATAx
  *   2. 接收二进制帧:  [帧头 0xB1] + 10字节 NodeData  → 更新本地缓存
  *   3. OneNET MQTT:   代子设备上线 + 代子设备上报
- *   4. 下行命令:      OneNET 设置 LedEnable → LoRa 定点帧 AT+LedEnable=X
+ *   4. 下行命令:      OneNET 服务 SetLed(LedState) → LoRa 定点帧 AT+SetLed=0/1
  *
  * 事件驱动架构(借鉴参考项目):
  *   passiveEvent(): 串口/网络接收到的数据, 立即处理
@@ -175,7 +175,7 @@ static void activeEvent(void)
     uint32_t now = millis();
 
     /* 说明: MQTT 保活不在此处处理, 由 PubSubClient keepalive 负责:
-     *   60s 无活动自动发 PINGREQ, 120s 无任何数据自动断开;
+     *   30s 无活动自动发 PINGREQ, 60s 无任何数据自动断开;
      *   断线后 onenet_loop() 同步清除连接标志并走重连.
      *   简化: 移除了参考项目的 PING_SENT 标志位假死检测 */
 

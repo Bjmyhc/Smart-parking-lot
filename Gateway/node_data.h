@@ -14,8 +14,8 @@ struct NodeData {
     uint8_t  geoMagnetic;    /* 0/1 */
     uint16_t ultrasonic;    /* cm */
     uint32_t occupiedTime;  /* s */
-    bool     led;           /* LED当前状态 */
-    bool     ledEnable;     /* LED使能开关 */
+    bool     led;           /* LED(报警灯)实际状态 */
+    bool     ledSwitch;     /* ⭐ SetLed 服务最近一次命令目标值(0/1), LoRa ACK 后回 ActualValue */
     int8_t   rssi;          /* ⭐ 本次接收节点数据帧的信号强度(dBm, -120~0), 来自模块DRSSI附加字节 */
     char     fwVersion[16]; /* 节点固件版本字符串(如 "v2.321"), 节点上报帧携带 */
     uint32_t lastUpdate;    /* 最后收到数据时间(ms) */

@@ -58,7 +58,7 @@ uint16_t Distance = 0;
 ParkStatus_t ParkStatus = PARK_IDLE;
 uint32_t OccupiedTime = 0;
 uint32_t LastStatusChangeTick = 0;
-uint8_t LEDEnable = 1;
+uint8_t LEDAlarmEnable = 1;  /* 报警灯使能(僵尸车报警灯), 默认开启 */
 QMC5883P_Device_t qmc5883p;
 uint8_t MagCarPresent = 0;
 NodeData_t NodeDataCache;
@@ -265,13 +265,13 @@ void ParkingStatus_Check(void)
  * 功能:   LED指示灯控制任务
  * 参数:   无
  * 返回:   无
- * 说明:   使能时(LEDEnable=1), 根据车位状态控制LED亮灭
+ * 说明:   使能时(LEDAlarmEnable=1), 根据车位状态控制LED亮灭
  *         僵尸车位->常亮, 正常->熄灭
- *         禁用时(LEDEnable=0), 强制熄灭LED
+ *         禁用时(LEDAlarmEnable=0), 强制熄灭LED
  ****************************************************************************/
 void LED_Task(void)
 {
-    if (LEDEnable)
+    if (LEDAlarmEnable)
     {
         if (ParkStatus == PARK_ZOMBIE)
             LED_ON();
@@ -298,8 +298,7 @@ static void PackNodeData(void)
     NodeDataCache.GeoMagnetic   = MagCarPresent;
     NodeDataCache.Ultrasonic    = Distance;
     NodeDataCache.OccupiedTime  = OccupiedTime;
-    NodeDataCache.LED           = LED_GetState() ? 1 : 0;
-    NodeDataCache.LedEnable     = LEDEnable;
+    NodeDataCache.LED           = LED_GetState() ? 1 : 0;   /* LED(报警灯)实际状态, 上报平台 LED 属性 */
     NodeDataCache.ZombieThreshold = g_zombieThreshold;   /* ⭐ 当前生效阈值上报给平台观看 */
     NodeDataCache.SensorDistanceCm = g_sensorDistanceCm;  /* ⭐ 当前生效超声波距离阈值上报 */
 }
@@ -335,7 +334,7 @@ static int ota_version_compare(const char *a, const char *b)
 /****************************************************************************
  * 函数名: LoRa_CmdCallback
  * 功能:   LoRa 下行命令回调函数
- * 参数:   cmd - 命令名称 (如 "AT+DATA", "AT+CER", "AT+LedEnable")
+ * 参数:   cmd - 命令名称 (如 "AT+DATA", "AT+CER", "AT+SetLed")
  *         value - 命令参数值 (如 "0", "1", 无参数时为NULL)
  * 返回:   无
  * 说明:   网关通过 LoRa 定点传输发送 AT 命令轮询节点,
@@ -371,16 +370,16 @@ static void LoRa_CmdCallback(const char *cmd, const char *value)
         strncpy(cert.FwVersion, NODE_FW_VERSION, sizeof(cert.FwVersion) - 1);
         LoRa_Node_SendCert(&cert);
     }
-    /* 网关下发 LED 使能控制: AT+LedEnable=<v> */
-    else if (strcmp(cmd, "AT+LedEnable") == 0)
+    /* 平台 SetLed 服务 → 网关转发: AT+SetLed=<v> (报警灯使能 0/1) */
+    else if (strcmp(cmd, "AT+SetLed") == 0)
     {
         if (value != NULL)
         {
-            LEDEnable = (uint8_t)atoi(value);
+            LEDAlarmEnable = (uint8_t)atoi(value);
             StatusChanged = 1;
-            Usart_Printf(USART_DEBUG, "[CTRL] LED 使能 -> %d\r\n", LEDEnable);
+            Usart_Printf(USART_DEBUG, "[CTRL] 报警灯使能 -> %d\r\n", LEDAlarmEnable);
         }
-        LoRa_Node_SendAck("AT+LedEnable");
+        LoRa_Node_SendAck("AT+SetLed");
     }
     /* ⭐ 网关下发僵尸车判定阈值: AT+ZombieThreshold=<秒数>
      * 默认3600秒(1小时), APP端可动态下发覆盖, 支持演示用短阈值 */
@@ -474,7 +473,7 @@ static void LoRa_CmdCallback(const char *cmd, const char *value)
  * 说明:   轮询接收网关命令并响应, 采用网关轮询模式:
  *         - 网关定时发送 AT+DATA 查询数据 → 节点回传 NodeData
  *         - 网关首次发送 AT+CER 查询证书 → 节点回传证书
- *         - 网关转发平台命令 AT+LedEnable=0 → 节点执行并确认
+ *         - 网关转发平台 SetLed 服务命令 AT+SetLed=0/1 → 节点执行并确认
  *         节点不主动发送, 避免多节点 LoRa 碰撞
  ****************************************************************************/
 void LoRa_Task(void)

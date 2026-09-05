@@ -67,7 +67,7 @@
 #define LORA_FRAME_OTA_RETRY 0xE1       /* OTA 要求重发 */
 
 /* ==================== 协议版本 ==================== */
-#define LORA_PROTO_VERSION    2   /* v2: 加 seq + crc16 字段 */
+#define LORA_PROTO_VERSION    3   /* v3: 移除 LedEnable 字段(LedEnable 属性已迁移为 SetLed 服务) */
 
 /* ==================== CRC16/MODBUS (工业标准, 多项式 0xA001) ====================
  * 覆盖范围: 整个结构体除 crc16 字段外的所有字节
@@ -92,7 +92,8 @@ static inline uint16_t lora_crc16(const uint8_t *data, size_t len)
 
 /* ==================== 数据结构 ==================== */
 
-/* 节点传感器数据(v2: 19 字节, 加 seq + crc16)
+/* 节点传感器数据(v3: 18 字节, 加 seq + crc16)
+ * ⭐ v3 协议: 移除 LedEnable 字段(平台原 LedEnable 属性已迁移为 SetLed 服务), 19B → 18B
  * ⭐ v2 协议: 末尾追加 seq(1B) + crc16(2B), 16B → 19B
  *   - seq: 节点每次发送 ++, 0..255 循环 (网关端可记录检测重复/丢包)
  *   - crc16: CRC16/MODBUS, 覆盖 [结构体首, offsetof(crc16)) 字节
@@ -103,8 +104,7 @@ typedef struct {
     uint8_t  GeoMagnetic;     /* 0/1 */
     uint16_t Ultrasonic;      /* 距离(cm) */
     uint32_t OccupiedTime;    /* 占用时长(秒) */
-    uint8_t  LED;             /* LED 当前状态 0/1 */
-    uint8_t  LedEnable;       /* LED 使能 0/1 */
+    uint8_t  LED;             /* LED(报警灯)当前状态 0/1 */
     uint32_t ZombieThreshold; /* ⭐ 僵尸车判定阈值(秒), 当前生效值, 上报给平台观看 */
     uint16_t SensorDistanceCm; /* ⭐ 超声波判定距离阈值(cm), 当前生效值 */
     /* === v2 协议新增字段 (放末尾, 兼容前向布局) === */
@@ -129,7 +129,7 @@ typedef struct {
 
 /* ==================== 命令回调 ==================== */
 /* 网关下行命令回调函数类型
- * cmd:  命令名称(如 "AT+DATA", "AT+CER", "AT+LedEnable")
+ * cmd:  命令名称(如 "AT+DATA", "AT+CER", "AT+SetLed")
  * value: 命令参数值(如 "0", "1", 无参数时为NULL) */
 typedef void (*LoRaCmdCallback)(const char *cmd, const char *value);
 

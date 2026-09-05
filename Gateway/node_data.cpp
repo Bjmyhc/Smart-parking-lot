@@ -166,7 +166,6 @@ void updateNodeFromRaw(uint8_t nodeId, const LoraNodeData_t *raw)
     nd.ultrasonic   = ultrasonic;
     nd.occupiedTime = occupiedTime;
     nd.led          = (raw->LED != 0);
-    nd.ledEnable    = (raw->LedEnable != 0);
     nd.zombieThresholdSec = raw->ZombieThreshold;   /* ⭐ 节点当前生效阈值, 供 pack/post 上报观看 */
     nd.sensorDistanceCm   = raw->SensorDistanceCm;   /* ⭐ 节点当前生效超声波距离阈值 */
     nd.lastUpdate   = millis();
@@ -231,8 +230,13 @@ void checkNodeTimeout(void)
     /* 动态超时: 基准 + 已发现节点数 * 每节点附加耗时
      * 节点越多轮询一圈越久, 超时自动放宽避免误判离线;
      * 节点越少超时越短, 离线更快感知 */
-    uint32_t timeoutMs = NODE_DATA_TIMEOUT_BASE +
-                         (uint32_t)nodeCount * NODE_PER_NODE_TIMEOUT;
+    /* ⭐⭐⭐ 离线宽限 ×2: LoRa 单帧丢包/单轮 DATA 无响应属正常现象(首帧易丢),
+     * 若按原始窗口(单节点6s≈2轮机会)判定, 一次丢帧 + 3s响应等待就可能正好凑满
+     * 窗口 → 把活着的节点误判离线, 触发平台"子设备代下线→再上线"整网抖动.
+     * ×2 后单节点约12s(连续错过约2轮轮询仍无数据)才真正离线:
+     * 既容忍偶发丢帧, 又不影响真离线感知(离线后的 PING 探测节奏不依赖此窗口) */
+    uint32_t timeoutMs = 2u * (NODE_DATA_TIMEOUT_BASE +
+                               (uint32_t)nodeCount * NODE_PER_NODE_TIMEOUT);
     for (uint8_t i = 0; i < nodeCount; i++)
     {
         if (nodes[i].online && (now - nodes[i].lastUpdate > timeoutMs))

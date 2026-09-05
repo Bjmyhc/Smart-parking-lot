@@ -67,6 +67,31 @@ static void WDG_Feed(void)
     IWDG_ReloadCounter();
 }
 
+/****************************************************************************
+ * Print reset reason at boot: POR/PDR = power-drop restart,
+ * IWDG = watchdog-stuck restart, NRST = button/flasher reset,
+ * SW = software/OTA reset. Flags are read then cleared so the next
+ * reset reason stays distinguishable (no accumulation).
+ ****************************************************************************/
+static void PrintResetReason(void)
+{
+    uint8_t any = 0;
+    Usart_Printf(USART_DEBUG, "[BOOT] reset cause:");
+    if (RCC_GetFlagStatus(RCC_FLAG_PORRST) != RESET)
+    { Usart_Printf(USART_DEBUG, " POR/PDR(power drop)"); any = 1; }
+    if (RCC_GetFlagStatus(RCC_FLAG_PINRST) != RESET)
+    { Usart_Printf(USART_DEBUG, " NRST(button/flasher)"); any = 1; }
+    if (RCC_GetFlagStatus(RCC_FLAG_IWDGRST) != RESET)
+    { Usart_Printf(USART_DEBUG, " IWDG(watchdog stuck)"); any = 1; }
+    if (RCC_GetFlagStatus(RCC_FLAG_WWDGRST) != RESET)
+    { Usart_Printf(USART_DEBUG, " WWDG(window wdt)"); any = 1; }
+    if (RCC_GetFlagStatus(RCC_FLAG_SFTRST) != RESET)
+    { Usart_Printf(USART_DEBUG, " SW(software/OTA)"); any = 1; }
+    if (!any) Usart_Printf(USART_DEBUG, " none/unknown");
+    Usart_Printf(USART_DEBUG, "\r\n");
+    RCC_ClearFlag();   /* clear flags so next reset cause is independent */
+}
+
 int main(void)
 {
     /* 设置向量表偏移: OTA 后 APP 从 0x08004000 启动 */
@@ -92,6 +117,9 @@ int main(void)
     /* 上电横幅: 区分当前烧录的是节点端/网关端固件 */
     Usart_Printf(USART_DEBUG,
         "\r\n[SYS] ========== 智能停车场节点 %s ==========\r\n", NODE_FW_VERSION);
+
+    /* ⭐ 本次复位原因 (供电跌落/看门狗卡死/按键/OTA) */
+    PrintResetReason();
 
     /* 主循环 - 时间戳非阻塞架构 */
     static uint32_t s_lastWdgLogTick = 0;  /* 喂狗日志最后打印时间 */

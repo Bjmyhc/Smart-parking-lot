@@ -19,7 +19,7 @@ extern "C" {
 #include <stddef.h>   /* offsetof (CRC 计算用) */
 
 /* ============ 协议版本 ============ */
-#define LORA_PROTO_VERSION    2   /* v2: 加 seq + crc16 字段 */
+#define LORA_PROTO_VERSION    3   /* v3: 移除 LedEnable 字段(LedEnable 属性已迁移为 SetLed 服务) */
 
 /* ============ CRC16/MODBUS (工业标准, 多项式 0xA001) ============
  * 覆盖范围: 整个结构体除 crc16 字段外的所有字节
@@ -51,7 +51,7 @@ static inline uint16_t lora_crc16(const uint8_t *data, size_t len)
 /* ============ 帧头字节 (子设备→网关) ============ */
 #define LORA_FRAME_CERT         0xA1    /* 证书数据(响应 AT+CERx) */
 #define LORA_FRAME_DATA         0xB1    /* 传感器数据(响应 AT+DATAx) */
-#define LORA_FRAME_ACK          0xC1    /* 命令执行确认(响应 AT+LedEnable 等) */
+#define LORA_FRAME_ACK          0xC1    /* 命令执行确认(响应 AT+SetLed 等) */
 #define LORA_FRAME_OTA_OK       0xD1    /* OTA接收128B成功, 准备下一包 */
 #define LORA_FRAME_OTA_RETRY    0xE1    /* OTA要求重发上一包 */
 
@@ -67,8 +67,9 @@ static inline uint16_t lora_crc16(const uint8_t *data, size_t len)
 #define LORA_PACKED
 #endif
 
-/* 节点传感器数据帧(v2: 19 字节, 加 seq + crc16)
+/* 节点传感器数据帧(v3: 18 字节, 加 seq + crc16)
  * LORA_FRAME_DATA + 下面结构体
+ * ⭐ v3 协议: 移除 LedEnable 字段(平台原 LedEnable 属性已迁移为 SetLed 服务), 19B → 18B
  * ⭐ v2 协议: 末尾追加 seq(1B) + crc16(2B), 16B → 19B
  *   - seq: 节点每次发送 ++, 0..255 循环 (网关端可记录检测重复/丢包)
  *   - crc16: CRC16/MODBUS, 覆盖 [结构体首, offsetof(crc16)) 字节
@@ -78,8 +79,7 @@ typedef struct LORA_PACKED {
     uint8_t  GeoMagnetic;     /* 0/1 地磁检测值 */
     uint16_t Ultrasonic;      /* cm, 小端 */
     uint32_t OccupiedTime;    /* 秒, 小端 */
-    uint8_t  LED;             /* 当前LED状态 0/1 */
-    uint8_t  LedEnable;       /* LED使能开关 0/1 */
+    uint8_t  LED;             /* LED(报警灯)当前状态 0/1 */
     uint32_t ZombieThreshold; /* ⭐ 僵尸车判定阈值(秒), 节点当前生效值, 网关据此上报只读属性观看 */
     uint16_t SensorDistanceCm; /* ⭐ 超声波判定距离阈值(cm), 节点当前生效值 */
     /* === v2 协议新增字段 (放末尾, 兼容前向布局) === */
@@ -104,7 +104,7 @@ typedef struct LORA_PACKED {
  *   AT+CER\r\n            查询节点证书
  *   AT+DATA\r\n           查询节点数据
  *   AT+PING\r\n           探测节点是否在线
- *   AT+LedEnable=<v>\r\n  设置节点LedEnable, v=0/1
+ *   AT+SetLed=<v>\r\n  设置节点报警灯使能(僵尸车报警灯), v=0/1
  *   AT+OTA=start,V<m>.<n>\r\n  触发节点OTA升级
  *
  * 注意: 命令名不携带节点号, 节点身份由定点传输帧头[AddrH][AddrL]区分

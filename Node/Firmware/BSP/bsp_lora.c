@@ -318,9 +318,9 @@ void LoRa_Node_SendData(const NodeData_t *data)
 
     s_online = 1;   /* 标记为已上线 */
 
-    Usart_Printf(USART_DEBUG, "[LoRa] 发送-> 数据: 位置=%d 距离=%dcm 地磁=%d 时长=%lus LED=%d 使能=%d seq=%d crc=%04X\r\n",
+    Usart_Printf(USART_DEBUG, "[LoRa] 发送-> 数据: 位置=%d 距离=%dcm 地磁=%d 时长=%lus LED=%d seq=%d crc=%04X\r\n",
                  data->ParkStatus, data->Ultrasonic, data->GeoMagnetic,
-                 (unsigned long)data->OccupiedTime, data->LED, data->LedEnable,
+                 (unsigned long)data->OccupiedTime, data->LED,
                  tmp.seq, tmp.crc16);
 }
 
