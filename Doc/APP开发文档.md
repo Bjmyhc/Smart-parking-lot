@@ -1,9 +1,9 @@
 
-# 路边僵尸车检测系统 · APP 开发文档（合并版 v3.0）
+# 路边僵尸车检测系统 · APP 开发文档（合并版 v3.1）
 
-> **版本**：v3.0（合并版，整合设计/开发/架构三份旧文档）
-> **更新日期**：2026-08-25
-> **状态**：基础功能已完成，待办见「六、开发进度」
+> **版本**：v3.1（合并版，整合设计/开发/架构三份旧文档）
+> **更新日期**：2026-09-05
+> **状态**：基础功能 + 策略配置 + 自动拍照/拍照识别已完成，待办见「六、开发进度」
 > **旧文档归档**：`User/archive/`（APP设计文档_旧版 / APP开发文档_旧版 / APP架构文档_旧版）
 
 ---
@@ -41,15 +41,18 @@ lib/
 │   │   ├── app_colors.dart            # 颜色常量
 │   │   └── app_dims.dart              # 尺寸常量
 │   ├── models/
-│   │   ├── spot_model.dart            # 车位/节点设备模型
+│   │   ├── spot_model.dart            # 车位/节点设备模型（含车牌展示字段）
 │   │   ├── alert_model.dart           # 告警/工单模型
-│   │   └── stats_model.dart           # 统计模型
+│   │   ├── stats_model.dart           # 统计模型
+│   │   ├── policy_config.dart         # ⭐ 策略配置模型（本地持久化）
+│   │   ├── gateway_model.dart         # 网关模型（设备中心）
+│   │   └── operation_log_model.dart   # 操作日志模型
 │   ├── providers/
-│   │   └── parking_provider.dart      # 全局唯一数据层（轮询/模式/告警/OTA）
+│   │   └── parking_provider.dart      # 全局唯一数据层（轮询/模式/告警/策略/OTA/自动拍照）
 │   └── services/
-│       └── api_service.dart           # OneNET API 服务
+│       └── api_service.dart           # OneNET API 服务（含 CameraPlateInfo/callService）
 ├── shared/
-│   └── widgets/                       # 公共组件（10 个）
+│   └── widgets/                       # 公共组件（13 个）
 │       ├── custom_app_bar.dart        # 蓝色渐变导航栏
 │       ├── card_container.dart        # 卡片容器（基石组件）
 │       ├── list_tile_base.dart        # 列表项基类
@@ -59,13 +62,20 @@ lib/
 │       ├── status_badge.dart          # 状态徽章（factory 构造）
 │       ├── circle_progress.dart       # 圆环进度
 │       ├── empty_state.dart           # 空状态
-│       └── loading_indicator.dart     # 加载动画
+│       ├── loading_indicator.dart     # 加载动画
+│       ├── plate_badge.dart           # ⭐ 真实车牌配色组件（按车牌颜色上底色）
+│       ├── page_header.dart / page_title.dart  # 页面标题
+│       └── ...                        # （更多以实际目录为准）
 ├── features/
 │   ├── overview/                      # 总览页（Tab0）
-│   ├── spots/                         # 车位页（Tab1）+ 车位详情页
-│   ├── alerts/                        # 告警中心（Tab2）
+│   ├── spots/                         # 车位页（Tab1）+ 车位详情页（含拍照识别展示）
+│   ├── alerts/                        # 告警中心（Tab2）+ 告警详情页
 │   ├── stats/                         # 数据页（Tab3）
-│   └── profile/                       # 我的页（Tab4）+ 固件升级页 + OTA 弹窗
+│   ├── profile/                       # 我的页（Tab4）
+│   │   ├── pages/                     # 固件升级 / 策略配置 / 诊断 / 操作日志
+│   │   └── widgets/ota_upgrade_dialog.dart
+│   ├── devices/                       # 设备中心 + 网关详情
+│   └── ...
 └── main.dart                          # 入口 + MainShell（5 Tab + OTA 全局弹窗）
 ```
 
@@ -285,11 +295,13 @@ flutter pub outdated         # 检查依赖更新
 ```
 MaterialApp（ChangeNotifierProvider<ParkingProvider>，routes: {'/alerts': AlertsPage}）
 └── MainShell（Scaffold + 自定义底部导航）
-    ├── [0] 首页 OverviewPage
-    ├── [1] 车位 SpotsPage ──push──> SpotDetailPage（车位详情）
-    ├── [2] 告警 AlertsPage（告警中心）
+    ├── [0] 首页 OverviewPage ──> DeviceCenterPage（设备中心）──> GatewayDetailPage（网关详情）
+    ├── [1] 车位 SpotsPage ──push──> SpotDetailPage（车位详情：车牌展示/远程拍照）
+    ├── [2] 告警 AlertsPage（告警中心）──> AlertDetailPage（告警详情）
     ├── [3] 数据 StatsPage（数据复盘）
-    └── [4] 我的 ProfilePage ──> FirmwareUpgradePage（固件升级）
+    └── [4] 我的 ProfilePage ──> 策略配置 PolicyConfigPage
+                               ──> 固件升级 FirmwareUpgradePage
+                               ──> 故障诊断 DiagnosisPage / 操作日志 OperationLogPage
     全局：OTA 升级弹窗（OtaUpgradeDialog，MainShell 统一触发）
 ```
 
@@ -297,30 +309,40 @@ MaterialApp（ChangeNotifierProvider<ParkingProvider>，routes: {'/alerts': Aler
 
 `lib/core/providers/parking_provider.dart` — **唯一的全局数据层**，所有页面从它读取，禁止直接调 ApiService。
 
-- 唯一持有车位数据 `spots` + **唯一 3s 轮询定时器**
+- 唯一持有车位数据 `spots` + **唯一轮询定时器**（间隔取自策略配置 `refreshSec`，默认 3s）
 - **真实/本地模式**（`realOnly`，SharedPreferences 持久化）：本地模式 = 真实设备 + mock 补齐 9 台；真实模式 = 仅真实设备。车位页点「车位」标题切换
 - **告警派生**：从车位数据派生（占用 ≥24h 告警、≥72h 僵尸车），维护处理/忽略状态
 - **处理记录管理**：僵尸车离开车位自动标记「已处理」（快照车牌+处理时间）；新车进入空位清除旧处理记录；已处理/已忽略不参与首页推送但保留历史
 - **批量选中集合**（跨页同步）
-- **OTA 检测**：短窗口策略（启动/前台 1 次 + 5s×9 共 10 次后自动停止），检测到待升级任务（未忽略）时置 `otaPromptVisible`
+- **策略配置（PolicyConfig）**：集中管理告警阈值/僵尸阈值/报警灯/派单等待/传感器距离/刷新间隔/OTA/自动拍照，本地持久化；其中**节点策略**（僵尸阈值、超声波距离阈值、报警灯使能）需网关在线，经 OneNET 下发到节点
+- **自动拍照 / 拍照识别**（绑定相机 Cam001 的真实车位 Park001）：
+  - `autoCaptureEnabled` 总开关 + `autoCaptureMode` 时机（0=有车就拍 / 1=僵尸车才拍）
+  - 「僵尸车才拍」= 僵尸车先拍照拿车牌 → **识别到真实车牌才通知车主**（通知前补牌，最多 3 次，仍失败按"未知车牌"保底通知）
+  - 拍照结果事件级缓存 `_capturedPlateCache`：3s 轮询重建数据时把平台侧无车牌信息写回车牌冲成 null 的回归 bug 已修复，车辆真正离开才清除
+  - 拍照三态回执：未触发（忙/离线）/ 已拍照未识别（UI 显示"已拍照, 未识别到车牌"）/ 识别成功
+- **OTA 检测**：短窗口策略（启动/前台 1 次 + 按策略间隔×N 次后自动停止），检测到待升级任务（未忽略）时置 `otaPromptVisible`
 - 一周趋势为演示用静态数据（图表占位，非平台真实统计）
 
 ### 4.3 页面要点
 
 | 页面                    | 要点                                                                                                                                |
 | ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
-| 总览 OverviewPage       | 问候卡、车位概览四格、饼图（空闲/占用/僵尸）、最新僵尸车告警卡、下拉刷新                                                            |
+| 总览 OverviewPage       | 问候卡、车位概览四格、饼图（空闲/占用/僵尸）、最新僵尸车告警卡、下拉刷新；→ 设备中心入口 |
 | 车位 SpotsPage          | A/B 区筛选（不显示 C 区）、隐藏模式开关（点「车位」标题）、离线设备灰显+云图标+隐藏3点菜单、3点菜单仅僵尸车（查看详情）、点击进详情 |
-| 车位详情 SpotDetailPage | 垂直分区：车位信息 → 车辆信息 → 设备信息 → 告警详情 → 处理操作区；处理操作区仅僵尸车显示，含[通知车主][派单→处理人选择 Dialog] |
-| 告警 AlertsPage         | 状态筛选（全部/待处理/处理中/已处理/已忽略）、告警卡片、删除+处理按钮、空状态/加载/下拉刷新                                         |
-| 数据 StatsPage          | 顶部概览双卡、车位占用饼图、一周趋势折线图（mock）、告警总数卡                                                                      |
-| 我的 ProfilePage        | 用户卡、快捷操作、功能分组（系统/运维/账户）；固件升级入口 → FirmwareUpgradePage                                                   |
+| 车位详情 SpotDetailPage | 垂直分区：车位信息 → 车辆信息（车牌区）→ 设备信息 → 告警详情 → 处理操作区。车牌区：有牌 → `PlateBadge` 按真实底色（蓝/黄/绿/白/黑…）+ 置信度着色（≥90% 绿 / ≥70% 橙 / <70% 红）+ 识别时间；拍过没识别出 → ✕ + "已拍照, 未识别到车牌"；从未拍照 → "暂无车牌信息"。Park001（真实/在线/未停用）显示「远程拍照」按钮 |
+| 告警 AlertsPage         | 状态筛选（全部/待处理/处理中/已处理/已忽略）、告警卡片、删除+处理按钮、空状态/加载/下拉刷新；点击告警 → AlertDetailPage |
+| 数据 StatsPage          | 顶部概览双卡、车位占用饼图、一周趋势折线图（mock）、告警总数卡 |
+| 我的 ProfilePage        | 用户卡、快捷操作、功能分组（系统/运维/账户）：策略配置 / 固件升级 / 故障诊断 / 操作日志 |
+| 策略配置 PolicyConfigPage | 极简卡片分组：节点策略（僵尸阈值/距离阈值/报警灯使能，需网关在线下发）+ 平台策略（派单等待/刷新/OTA）+ **自动拍照策略**（总开关 + 拍照时机：有车就拍 / 僵尸车才拍，纯本地生效） |
+| 设备中心 / 网关详情      | DeviceCenterPage（设备列表）→ GatewayDetailPage（网关状态/操作） |
 
 ### 4.4 数据模型
 
 **SpotModel**（车位/节点设备）
 
-- 字段：`id / zone(A/B/C) / status(free|occupied|zombie|offline) / occupiedHours / batteryLevel / signalStrength / plateNumber / lastUpdated / isOnline` + 本地模拟字段（notifyStatus/handlerName/handledAt）
+- 字段：`id / zone(A/B/C) / status(free|occupied|zombie|offline) / occupiedHours / batteryLevel / signalStrength / lastUpdated / isOnline` + 本地模拟字段（notifyStatus/handlerName/handledAt）
+- 🆕 车牌展示字段（仅本次拍照成功写入，平台节点数据本身不含车牌）：
+  `plateNumber` / `plateColor`(中文: 蓝/黄/绿/白/黑/红/灰) / `plateConfidence`(0~1) / `capturedAt`(识别时间) / `captureFailed`(本占用事件拍过但未识别出)
 - 分区映射：设备编号 ≤3=A区，≤6=B区，其余=C区
 - 状态判定：离线 → `offline`；`ParkStatus=1` → occupied；`ParkStatus=2` → zombie；否则 free
 - ⚠️ `batteryLevel / signalStrength` 仍为硬编码（在线 85.0/-65，离线 0），见待办
@@ -335,6 +357,12 @@ MaterialApp（ChangeNotifierProvider<ParkingProvider>，routes: {'/alerts': Aler
 - 字段：`totalSpots / occupiedSpots / zombieSpots / occupancyRate / weeklyTrend(List<DailyTrend>)`
 - `weeklyTrend` 为演示静态数据（7 天 mock），非平台真实统计
 
+**CameraPlateInfo**（摄像头一次识别结果，`api_service.dart`）
+
+- 字段：`plate`(车牌) / `color`(颜色中文) / `confidence`(0~1) / `captureTime`(识别时间)；`hasPlate` 判空
+- 来源：OneNET 摄像头物模型属性 `PlateNumber / PlateColor / PlateConfidence / CaptureTime`
+- ⚠️ 摄像头属性是"最近一次识别"的残留值，不代表当前占位车辆 → **车牌只在拍照 OCR 成功（invoke_reply Result=true）后由 Provider 主动拉取写入**，平台属性轮询不直接贴牌
+
 ### 4.5 API 服务（OneNET 对接层）
 
 `lib/core/services/api_service.dart`
@@ -343,15 +371,48 @@ MaterialApp（ChangeNotifierProvider<ParkingProvider>，routes: {'/alerts': Aler
 | ------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `getSpots({realOnly})`                   | `/device/list`（节点产品 `04kjwU9TC7`，网关产品不纳入车位）→ `/thingmodel/query-device-property` 逐个查属性 → 排序/去重 → 按模式补 mock 或仅真实 |
 | `_generateAuthorization()`               | ✅ 已正确实现：`StringToSign = et\nmethod\nres\nversion`，`res=userid/528332`（末尾无斜杠、无尾换行），HMAC-MD5 + base64，完整拼进 Authorization 头   |
-| `getDeviceDetail()`                      | 设备详情查询，失败走 mock                                                                                                                                 |
-| `setProperty()`                          | `/thingmodel/set-device-property` 下发（如 OtaAllow/LED）                                                                                               |
+| `getDeviceDetail()`                      | 设备详情查询，失败走 mock（摄像头 `Cam001` 也走此方法拉识别属性）                                                                                       |
+| `setProperty()`                          | `/thingmodel/set-device-property` 下发：节点阈值属性（`ZombieThresholdSec`/`SensorDistanceCm`，写属性同步）+ 网关 `OtaAllow` 门控；保留原始类型（bool 发 true/false、int 发数字） |
+| `callService()`                          | 🆕 `/thingmodel/call-service` 同步服务调用：节点 `SetLed`/`SetZombieThreshold`/`SetSensorDistance`、摄像头 `TriggerCapture`；返回 output 解包（兼容 value 包装），默认 5s 超时、摄像头触发类放宽 15s |
+| `fetchCameraPlate()`                     | 🆕 拉取摄像头 Cam001 本次识别结果（车牌/颜色/置信度/时间）→ `CameraPlateInfo`；拍照 OCR 成功（Result=true）后由 Provider 短间隔轮询拉取（属性入库延迟约 1~2s） |
 | `getAlerts()`                            | 由 getSpots 本地合成（≥24h 告警）                                                                                                                        |
 | `dispatchAlert/notifyOwner/resolveAlert` | 本地动作（内存态），无后端持久化                                                                                                                          |
 | `getStats()`                             | 半合成：统计来自 getSpots，weeklyTrend 为 mock                                                                                                            |
 | `getOtaTaskStatus()`                     | `/fuse-ota/{pro_id}/{dev_name}/{tid}/check` 轮询升级状态                                                                                                |
 
 网关：产品 `9YIs0S7V11`，设备 `PGW001`（承载 OtaAllow 全网升级确认门控）。
+摄像头：独立设备 `Cam001`（产品 `4enONCu0Y7`），物模型含 `PlateNumber/PlateColor/PlateConfidence/CaptureTime` + `TriggerCapture` 拍照服务；只与真实车位 Park001 关联。
 设备名使用 OneNET `name` 字段真实名称；mock 用 `Park001~009` 命名。
+
+> ⭐ 平台侧摄像头/节点**属性是"最近一次"的残留值**（空闲/有车阶段不应显示旧车牌）。
+> 车牌只由"本次拍照 OCR 成功"驱动：拍照后由 Provider 拉取摄像头属性写入缓存，
+> 占位期间每轮贴回显示，车辆真正离开才清除（见 4.6 拍照流程）。
+
+### 4.6 远程拍照 / 自动拍照（拍照识别链路）
+
+**调用链**：APP → OneNET `/thingmodel/call-service` → 摄像头固件 `TriggerCapture` → 拍照 + OCR → `invoke_reply`（同步回执）
+- 回执语义（摄像头固件已填真值，物模型不改）：`ActualValue` = 拍照动作是否真正执行（0=忙/未触发）；`Result` = **本次 OCR 是否识别出车牌**（真值，不再恒 1）
+- 拍照成功（Result=true）→ Provider 短间隔轮询 `fetchCameraPlate()`（约 800ms×数次，覆盖属性入库 1~2s 延迟）→ 结果写 SpotModel + 事件缓存
+
+**触发方式**
+1. 手动：Park001 车位详情「远程拍照」按钮（真实/在线/未停用才显示）
+2. 自动（策略 `autoCaptureEnabled`，只作用于绑定相机的真实车位 Park001）：
+   - 模式 0「有车就拍」：防抖确认"有车进入"上升沿后拍一次；忙/失败本次停车事件不重试
+   - 模式 1「僵尸车才拍」：僵尸告警出现 → **通知前补牌**：先拍照等车牌 → 识别到真实车牌才 `notifyOwner`；每事件最多 3 次仍无牌 → 按"未知车牌"保底通知 + 标红日志提醒人工核对
+
+**显示状态三态**（SpotDetailPage 车牌区）
+- 识别成功 → `PlateBadge`（按 `plateColor` 上真实底色）+ 置信度着色（≥90% 绿 / ≥70% 橙 / <70% 红）+ 识别时间
+- 拍了但未识别出 → ✕ 图标 + "已拍照, 未识别到车牌"（`captureFailed`，本占用事件内保持，区别于"从未拍照"）
+- 从未拍照 / 空车位 → "暂无车牌信息"
+
+**缓存防回归**：3s 轮询 `refresh()` 会用平台节点数据重建 spot，而节点物模型不含车牌 → 拍照写回的车牌会被冲掉。修复：拍照结果存**事件级缓存** `_capturedPlateCache(spotId → CameraPlateInfo)`，occupied/zombie 期间每轮贴回；车辆真正离开（free）才清除。
+
+### 4.7 策略配置与下发（PolicyConfig）
+
+- 纯本地（SharedPreferences）持久化，修改即时生效；「恢复默认」一键回 `PolicyConfig.defaults`
+- **平台策略**（纯 APP 本地，无设备参与）：告警阈值 `alertSec`、派单等待 `dispatchWaitSec`、刷新间隔 `refreshSec`、OTA 自动检测、自动拍照开关 `autoCaptureEnabled` + 时机 `autoCaptureMode`
+- **节点策略**（需网关在线 → OneNET 下发 → 网关转 LoRa → 节点）：僵尸判定阈值 `zombieThresholdSec`、超声波距离阈值 `sensorDistanceCm`、报警灯使能 `ledAlarmEnabled`（经 `SetLed` 服务下发）；按需差分下发（值变化才下发），支持策略配置页"一键同步"回读节点真实生效值
+- 下发结果状态：失败原因 `policyError` / 部分成功 `policyPartial`（UI 琥珀色提示），网关离线时节点策略禁用并提示
 
 ---
 
@@ -362,8 +423,9 @@ MaterialApp（ChangeNotifierProvider<ParkingProvider>，routes: {'/alerts': Aler
 | 分类       | URL                                           | 用途                                                                     |
 | ---------- | --------------------------------------------- | ------------------------------------------------------------------------ |
 | 设备管理   | `/device/list`                              | 读取全部车位设备（含离线）                                               |
-| 物模型使用 | `/thingmodel/query-device-property`         | 读取 ParkStatus/Ultrasonic/OccupiedTime 等属性（支持离线设备读存储数据） |
-| 物模型使用 | `/thingmodel/set-device-property`           | 下发属性（LED/LedEnable/OtaAllow 等）                                    |
+| 物模型使用 | `/thingmodel/query-device-property`         | 读取 ParkStatus/Ultrasonic/OccupiedTime 等属性（支持离线设备读存储数据）；摄像头 Cam001 读 PlateNumber/PlateColor/PlateConfidence/CaptureTime |
+| 物模型使用 | `/thingmodel/set-device-property`           | 下发写属性：节点阈值（ZombieThresholdSec/SensorDistanceCm）+ 网关 OtaAllow 门控 |
+| 物模型使用 | `/thingmodel/call-service`                  | 🆕 同步服务调用：节点 SetLed/SetZombieThreshold/SetSensorDistance；摄像头 TriggerCapture（触发拍照+OCR，回执 Result/ActualValue） |
 | OTA 南向   | `/fuse-ota/{pro_id}/{dev_name}/{tid}/check` | 查询升级任务状态                                                         |
 | OTA 南向   | `/fuse-ota/{pro_id}/{dev_name}/version`     | 上报/查看节点固件版本                                                    |
 
@@ -421,10 +483,20 @@ MaterialApp（ChangeNotifierProvider<ParkingProvider>，routes: {'/alerts': Aler
 
 **OTA 升级**
 
-- [X] 短窗口检测：启动/前台 1 次 + 5s×9 共 10 次后自动停止
+- [X] 短窗口检测：启动/前台 1 次 + 按策略配置的间隔/次数（默认 5s×9 共 10 次）后自动停止；开关/间隔/次数可改
 - [X] 全局弹窗（MainShell 触发）：动态标题（检测到新固件/固件升级中/固件升级完成）、完成按钮、忽略列表防重复
 - [X] 升级状态轮询至 status≥4 复位；任意操作即取消检测轮询
 - [X] 固件升级页（FirmwareUpgradePage）
+
+**策略配置 / 自动拍照（2026-09 新增）**
+
+- [X] 策略配置页（PolicyConfigPage）：告警/僵尸阈值/报警灯/派单等待/传感器距离/刷新/OTA 分组建卡，即时生效 + SharedPreferences 持久化 + 恢复默认
+- [X] 节点策略下发：僵尸阈值/距离阈值经属性或服务下发，报警灯经 `SetLed` 服务；差分下发 + 网关在线校验 + 失败/部分成功提示
+- [X] 远程拍照（车位详情按钮）：摄像头 Cam001 `TriggerCapture`，回执真值语义（ActualValue=是否触发、Result=本次OCR是否识别出车牌）
+- [X] 自动拍照策略：总开关 + 时机（有车就拍 / 僵尸车才拍）；"僵尸车才拍" = 通知前补牌（最多 3 次，仍失败按未知车牌保底通知）
+- [X] 车牌展示：`PlateBadge` 真实车牌底色 + 置信度着色（≥90% 绿 / ≥70% 橙 / <70% 红）+ 识别时间；"已拍照, 未识别到车牌"与"暂无车牌信息"状态区分
+- [X] 修复"拍照后几秒显示暂无车牌"回归 bug：事件级 `_capturedPlateCache`，occupied/zombie 期间每轮贴回，车辆离开才清除
+- [X] 策略配置页"一键同步"回读节点真实生效值
 
 ### 6.2 未完成 / 待办清单
 
@@ -506,7 +578,13 @@ components:
 | 告警中心    | `lib/features/alerts/presentation/pages/alerts_page.dart`                       |
 | 数据页      | `lib/features/stats/presentation/pages/stats_page.dart`                         |
 | 我的页      | `lib/features/profile/presentation/pages/profile_page.dart`                     |
+| 策略配置页  | `lib/features/profile/presentation/pages/policy_config_page.dart`             |
+| 策略配置模型 | `lib/core/models/policy_config.dart`                                          |
 | 固件升级页  | `lib/features/profile/presentation/pages/firmware_upgrade_page.dart`            |
+| 诊断 / 操作日志 | `lib/features/profile/presentation/pages/diagnosis_page.dart` / `operation_log_page.dart` |
 | OTA 弹窗    | `lib/features/profile/presentation/widgets/ota_upgrade_dialog.dart`             |
+| 设备中心 / 网关详情 | `lib/features/devices/presentation/pages/device_center_page.dart` / `gateway_detail_page.dart` |
+| 告警详情页  | `lib/features/alerts/presentation/pages/alert_detail_page.dart`               |
+| 车牌徽章组件 | `lib/shared/widgets/plate_badge.dart`                                          |
 | 公共组件    | `lib/shared/widgets/*`                                                          |
 | 依赖配置    | `pubspec.yaml`                                                                  |
