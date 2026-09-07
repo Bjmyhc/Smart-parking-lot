@@ -1,4 +1,4 @@
-﻿/****************************************************************************
+/****************************************************************************
  * BootLoader 主程序 - main.c
  *
  * 功能描述:
@@ -19,6 +19,7 @@
  ****************************************************************************/
 
 #include <string.h>
+#include <stddef.h>   /* offsetof */
 #include "boot.h"
 #include "stm32f10x.h"
 #include "stm32f10x_gpio.h"
@@ -296,6 +297,66 @@ uint32_t CRC32_Soft(const uint8_t *data, uint32_t len)
     return crc ^ 0xFFFFFFFF;
 }
 
+/* ==================== 节点身份配置区 ====================
+ * 首次启动时把本节点身份(NODE_PRODUCT_KEY/NODE_DEVICE_NAME)
+ * 固化到 Flash 配置区(0x08003000). OTA 只擦写 APP 区, 配置区不受影响,
+ * 因此各节点可共用同一份纯净的 OTA 固件包, 身份各自保留.
+ * 空中寻址用 LoRa 模块硬件地址(人工配置), 配置区不再存节点地址. */
+
+static void NodeConfig_Init(void)
+{
+    const NodeConfig_t *src = (const NodeConfig_t *)NODE_CONFIG_ADDR;
+    uint32_t i, addr;
+    uint16_t halfWord;
+
+    /* 配置区有效(magic+CRC32)则跳过, 后续重启/OTA 不再写 */
+    if (src->magic == NODE_CONFIG_MAGIC &&
+        CRC32_Soft((const uint8_t *)src, offsetof(NodeConfig_t, crc32)) == src->crc32)
+    {
+        USART1_PutString("[CFG] 节点配置有效: 产品=");
+        USART1_PutString(src->productKey);
+        USART1_PutString(" 设备=");
+        USART1_PutString(src->deviceName);
+        USART1_PutString("\r\n");
+        return;
+    }
+
+    /* 首次启动/配置无效: 用编译期宏落盘固化本节点身份 */
+    {
+        NodeConfig_t cfg;
+        const uint8_t *p;
+
+        memset(&cfg, 0, sizeof(cfg));
+        cfg.magic = NODE_CONFIG_MAGIC;
+        strncpy(cfg.deviceName, NODE_DEVICE_NAME, sizeof(cfg.deviceName) - 1);
+        strncpy(cfg.productKey, NODE_PRODUCT_KEY, sizeof(cfg.productKey) - 1);
+        p = (const uint8_t *)&cfg;
+        cfg.crc32 = CRC32_Soft(p, offsetof(NodeConfig_t, crc32));
+
+        FLASH_Unlock();
+        FLASH_ErasePage(NODE_CONFIG_ADDR);
+        for (i = 0, addr = NODE_CONFIG_ADDR; i < sizeof(NodeConfig_t); i += 2)
+        {
+            halfWord = p[i];
+            if (i + 1 < sizeof(NodeConfig_t))
+                halfWord |= (uint16_t)p[i + 1] << 8;
+            if (FLASH_ProgramHalfWord(addr + i, halfWord) != FLASH_COMPLETE)
+            {
+                FLASH_Lock();
+                USART1_PutString("[CFG][ERR] 节点身份写入Flash失败\r\n");
+                return;
+            }
+        }
+        FLASH_Lock();
+
+        USART1_PutString("[CFG] 首次启动, 节点身份已写入Flash: 产品=");
+        USART1_PutString(cfg.productKey);
+        USART1_PutString(" 设备=");
+        USART1_PutString(cfg.deviceName);
+        USART1_PutString("\r\n");
+    }
+}
+
 /* ==================== 跳转到 APP ==================== */
 
 void Load_APP(uint32_t appxaddr)
@@ -397,6 +458,30 @@ static uint8_t OTA_ReceivePacket(uint8_t *data, uint16_t *seq, uint16_t *crc)
     return 0;                               /* 超时 */
 }
 
+/* ==================== OTA 失败统一恢复 (P0-B/P0-C) ====================
+ * 所有升级失败路径统一入口:
+ *   1. 清除升级标志(写 OTA_FLAG_DONE), 防止下次复位重复擦 APP 死循环
+ *      (原缺陷: 失败不清标志 → 看门狗/上电复位反复"擦APP→空等" = 节点死亡)
+ *   2. 回复 NAK 通知网关
+ *   3. 两阶段提交下: 若 APP 区未被擦除(appErased==0), 旧 APP 完好,
+ *      直接 Load_APP 瞬时恢复(升级前工作状态);
+ *      若已擦除(appErased==1), Load_APP 栈顶校验失败返回, 节点保持
+ *      Boot 空闲等待重新升级(安全等待态, 非死亡) */
+static void OTA_AbortRecovery(uint8_t appErased)
+{
+    OTA_WriteFlag(OTA_FLAG_DONE);
+    OTA_SendResp(NAK);
+
+    if (!appErased)
+    {
+        USART1_PutString("[BOOT] APP区未损坏, 回退启动旧APP\r\n");
+        Load_APP(APP_ADDR);
+        return;                             /* Load_APP 成功跳转不返回, 仅防御 */
+    }
+
+    USART1_PutString("[BOOT] APP区已擦除, 保持Boot等待重新升级\r\n");
+}
+
 /* ==================== OTA 主流程 ==================== */
 
 static void OTA_Process(void)
@@ -411,19 +496,21 @@ static void OTA_Process(void)
     uint8_t  headerDone = 0;
     uint8_t  otaFailed = 0;
     uint16_t pktCount = 0;
+    uint8_t  appErased = 0;     /* ⭐ 两阶段提交: APP 区是否已擦除 */
 
-    USART1_PutString("[BOOT] 开始OTA升级, 准备接收APP固件...\r\n");
+    USART1_PutString("[BOOT] 开始OTA升级, 等待固件...\r\n");
 
-    /* 擦除 APP 分区 */
-    OTA_EraseAppArea();
-
-    USART1_PutString("[BOOT] APP分区已擦除, 开始接收数据...\r\n");
+    /* ⭐ 两阶段提交(P0-C): 不再进入即擦除 APP 区.
+     * 先等首包并验证固件头(magic/length), 验证通过后才擦除,
+     * 保证"网关放弃/首包超时"时旧 APP 完好, 可瞬时回退 */
 
     /* 接收固件数据 */
     while (1)
     {
-        /* 超时检查 */
-        if ((Boot_GetTick() - startTick) >= OTA_TOTAL_TIMEOUT_MS)
+        /* ⭐ 超时检查: 首包阶段(未擦除)按 OTA_FIRST_PKT_TIMEOUT_MS 计时,
+         * 超时即可安全回退旧APP; 擦除后按总超时 OTA_TOTAL_TIMEOUT_MS */
+        if ((Boot_GetTick() - startTick) >=
+            (appErased ? OTA_TOTAL_TIMEOUT_MS : OTA_FIRST_PKT_TIMEOUT_MS))
         {
             USART1_PutString("[BOOT] 超时, 已接收 ");
             USART1_PutUInt(pktCount);
@@ -452,10 +539,13 @@ static void OTA_Process(void)
                     memcpy(fwHeader, pktBuf, sizeof(FwHeader_t));
                     FwHeader_t *hdr = (FwHeader_t *)fwHeader;
 
-                    if (hdr->magic != FW_MAGIC)
+                    if (hdr->magic != FW_MAGIC || hdr->length == 0 ||
+                        hdr->length > APP_MAX_SIZE)
                     {
-                        USART1_PutString("[BOOT] 固件头错误 magic=0x");
+                        USART1_PutString("[BOOT] 固件头无效 magic=0x");
                         USART1_PutHex(hdr->magic);
+                        USART1_PutString(" len=");
+                        USART1_PutUInt(hdr->length);
                         USART1_PutString(", 拒绝升级\r\n");
                         OTA_SendResp(CAN);
                         otaFailed = 1;
@@ -470,6 +560,16 @@ static void OTA_Process(void)
                     USART1_PutString(" crc32=0x");
                     USART1_PutHex(hdr->crc32);
                     USART1_PutString("\r\n");
+
+                    /* ⭐ 两阶段提交执行点: 固件头验证通过, 此刻才擦除 APP 区.
+                     * 此前旧 APP 完好, 任何失败(网关放弃/超时/CAN)均可瞬时回退 */
+                    if (!appErased)
+                    {
+                        OTA_EraseAppArea();
+                        appErased = 1;
+                        startTick = Boot_GetTick(); /* 擦除后重新计时总超时 */
+                        USART1_PutString("[BOOT] 固件头有效, APP区已擦除, 开始写入...\r\n");
+                    }
 
                     /* 写入固件头后的数据(跳过头) */
                     if (OTA_FlashWrite(APP_ADDR, pktBuf + sizeof(FwHeader_t),
@@ -555,7 +655,7 @@ static void OTA_Process(void)
     if (otaFailed)
     {
         USART1_PutString("[BOOT] 升级失败\r\n");
-        OTA_SendResp(NAK);
+        OTA_AbortRecovery(appErased);       /* ⭐ P0-B: 统一清标志+尽力回退 */
     }
     else
     {
@@ -580,7 +680,8 @@ static void OTA_Process(void)
             USART1_PutString(" expect=0x");
             USART1_PutHex(hdr->crc32);
             USART1_PutString("\r\n");
-            OTA_SendResp(NAK);
+            /* ⭐ P0-B: 校验失败同样清标志防死循环 + 尽力回退 */
+            OTA_AbortRecovery(appErased);
         }
     }
 }
@@ -677,6 +778,9 @@ int main(void)
 {
     Boot_Init();
 
+    /* 首次启动将节点身份固化到配置区(之后永不重写, OTA 不影响) */
+    NodeConfig_Init();
+
     /* 检查升级标志 */
     uint32_t flag = OTA_ReadFlag();
 
@@ -684,7 +788,37 @@ int main(void)
     {
         /* 强制升级: 直接进入 Boot 模式 */
         USART1_PutString("[BOOT] OTA升级标志, 进入升级模式\r\n");
-        OTA_Process();
+        OTA_Process();   /* 成功→跳APP不返回; 失败→内部清标志并尽力回退旧APP */
+
+        /* ⭐ P0-D: 升级未完成且旧 APP 无法启动(已被覆盖)时,
+         * 保持 Boot 可救状态: 持续监听按键/'O' 字符, 随时可重新升级,
+         * 不再是无响应死循环. 注意: OTA_AbortRecovery 内部已清 GO 标志,
+         * 此处需重新立标志再复位, 才能再次进入升级模式 */
+        USART1_PutString("[BOOT] 等待重新升级 (按KEY 或 LoRa 'O')\r\n");
+        while (1)
+        {
+            Boot_FeedWatchdog();
+
+            if (Key_IsPressed())
+            {
+                Boot_Delay(50);             /* 去抖 */
+                if (!Key_IsPressed())
+                    continue;
+                USART1_PutString("[BOOT] 按键触发, 重新升级\r\n");
+                OTA_WriteFlag(OTA_FLAG_GO);
+                Boot_Delay(100);            /* 等串口发完再复位 */
+                NVIC_SystemReset();
+            }
+
+            uint8_t b;
+            if (USART2_ReadByte(&b) && b == 'O')
+            {
+                USART1_PutString("[BOOT] 收到OTA命令, 重新升级\r\n");
+                OTA_WriteFlag(OTA_FLAG_GO);
+                Boot_Delay(100);
+                NVIC_SystemReset();
+            }
+        }
     }
     else
     {

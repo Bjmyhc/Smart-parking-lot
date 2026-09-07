@@ -42,6 +42,12 @@ static void QMC_IIC_GPIO_Init(void)
 {
     GPIO_InitTypeDef gpio;
 
+    /* ⭐ PB3(PB4) 是 JTAG 调试引脚 (JTDO/NJTRST), 复位后被 JTAG 复用功能占用,
+     * 不释放则 GPIO 配置不生效, 必须改为普通 I/O 才能作 SDA/DRDY 使用
+     * 只关闭 JTAG, 保留 SWD, 不影响 ST-Link 烧录/调试 */
+    RCC_APB2PeriphClockCmd(RCC_APB2Periph_AFIO, ENABLE);
+    GPIO_PinRemapConfig(GPIO_Remap_SWJ_JTAGDisable, ENABLE);
+
     /* 使能 GPIOB 时钟 */
     RCC_APB2PeriphClockCmd(QMC_SCL_RCC | QMC_SDA_RCC | QMC_DRDY_RCC, ENABLE);
 
@@ -353,8 +359,17 @@ void QMC5883P_Init(QMC5883P_Device_t *dev, QMC5883P_Mode_t mode,
     /* 初始化软件 I2C 引脚 */
     QMC_IIC_GPIO_Init();
 
-    /* 硬件初始化 (Begin) */
-    ret = QMC5883P_Begin(dev);
+    /* 硬件初始化 (Begin), 失败自动重试:
+     * QMC5883P 上电早期 POR/供电未稳可能读 ChipID 读到 0x00 (偶发),
+     * 短间隔重试几次可恢复; 真坏/型号不符会持续失败 (见 Begin 内 ID 诊断打印) */
+    ret = QMC5883P_ERROR;
+    for (uint8_t tryCnt = 1; tryCnt <= 3 && ret != QMC5883P_OK; tryCnt++)
+    {
+        if (tryCnt > 1)
+            Usart_Printf(USART_DEBUG, "[QMC] 初始化失败, 第 %d/3 次重试\n", tryCnt);
+        QMC5883P_Delay(50);   /* 每次尝试前多等一会, 给模块稳定时间 */
+        ret = QMC5883P_Begin(dev);
+    }
     if (ret == QMC5883P_OK)
         Usart_Printf(USART_DEBUG, "QMC5883P Init OK!\n");
     else
@@ -386,7 +401,15 @@ uint8_t QMC5883P_Begin(QMC5883P_Device_t *dev)
         return QMC5883P_ERROR;
 
     if (data != QMC5883P_CHIP_ID)
+    {
+        /* ⭐ 诊断: 打印实际读到的 ID, 区分三类根因:
+         *   0x00    → 上电时序/供电未稳 (POR 未完成), 重试可恢复
+         *   0xFF/其他定值 → 芯片型号不同 (QMC5883L/HMC5883L 等, ID 定义不一致)
+         *   随机乱值 → 总线不稳/虚焊/模块损坏 */
+        Usart_Printf(USART_DEBUG, "[QMC] ChipID 校验失败: 读到 0x%02X, 期望 0x%02X\n",
+                     data, (uint8_t)QMC5883P_CHIP_ID);
         return QMC5883P_ERROR_ID;
+    }
 
     /* ---- 第 3 步: 设置量程 (Control 2) ---- */
     data = dev->range;

@@ -19,6 +19,7 @@
 #include "bsp_ultrasonic.h"
 #include "bsp_qmc5883p.h"
 #include "bsp_lora.h"
+#include "node_config.h"   /* 节点身份运行时变量 g_nodeProductKey/g_nodeDeviceName */
 #include "app_global.h"
 #include "stm32f10x_flash.h"
 
@@ -365,8 +366,8 @@ static void LoRa_CmdCallback(const char *cmd, const char *value)
         NodeCert_t cert;
         memset(&cert, 0, sizeof(cert));
         cert.valid = 1;
-        strncpy(cert.ProductKey, LORA_SUB_PRODUCT_KEY, sizeof(cert.ProductKey) - 1);
-        strncpy(cert.DeviceName, LORA_SUB_DEVICE_NAME, sizeof(cert.DeviceName) - 1);
+        strncpy(cert.ProductKey, g_nodeProductKey, sizeof(cert.ProductKey) - 1);
+        strncpy(cert.DeviceName, g_nodeDeviceName, sizeof(cert.DeviceName) - 1);
         strncpy(cert.FwVersion, NODE_FW_VERSION, sizeof(cert.FwVersion) - 1);
         LoRa_Node_SendCert(&cert);
     }

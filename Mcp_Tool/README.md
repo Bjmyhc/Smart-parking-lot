@@ -14,8 +14,8 @@ STM32节点 → LoRa → ESP8266网关 → OneNET云平台 → 本MCP工具 → 
 
 | 文件 | 说明 |
 |------|------|
-| `parking_mcp_server.py` | MCP 服务主程序（5 个工具） |
-| `onenet_client.py` | OneNET HTTP API 封装（查询/设置属性） |
+| `parking_mcp_server.py` | MCP 服务主程序（7 个工具） |
+| `onenet_client.py` | OneNET HTTP API 封装（属性查询/设备状态/服务同步调用） |
 | `config.example.json` | 配置示例（复制为 `config.json` 后填写） |
 | `config.json` | **实际配置**（含设备 token，已加入 .gitignore 不入库） |
 | `requirements.txt` | Python 依赖 |
@@ -76,8 +76,12 @@ python parking_mcp_server.py --transport sse --port 8000
 | `list_nodes` | 列出所有已配置节点 | "有哪些车位？" |
 | `query_node_status` | 查询单个节点实时状态 | "Park001 现在什么情况？" |
 | `query_all_nodes` | 查询所有节点实时状态 | "所有车位都查一遍" |
-| `get_parking_summary` | 停车场概览（空闲/有车/僵尸车统计） | "停车场现在空几个位？" |
-| `set_led_enable` | 远程控制某节点 LED 使能 | "把 Park001 的灯关掉" |
+| `get_parking_summary` | 停车场概览（空闲/有车/僵尸车/离线统计） | "停车场现在空几个位？" |
+| `set_led_enable` | 同步服务调用：控制某节点 LED 使能 | "把 Park001 的灯关掉" |
+| `set_zombie_threshold` | 同步服务调用：设置僵尸车判定阈值（秒） | "把 1 号位的僵尸车判定改成 1 小时" |
+| `set_sensor_distance` | 同步服务调用：设置超声波判定距离阈值（cm） | "把 2 号位的超声波阈值改成 30cm" |
+
+> 控制类工具走 OneNET `thingmodel/call-service` 物模型**同步服务调用**（`SetLed`/`SetZombieThreshold`/`SetSensorDistance`），平台等设备返回处理结果（约 1~10s），返回里带设备确认的 `Result`/`ActualValue`；设备离线时明确报"设备未确认"。
 
 ## 接入小智 AI（xiaozhi-esp32）
 

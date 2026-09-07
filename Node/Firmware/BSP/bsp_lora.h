@@ -23,12 +23,13 @@
 #include <stddef.h>   /* offsetof (CRC 计算用) */
 #include "stm32f10x.h"
 
-/* ==================== 节点地址配置 ==================== */
-/* 每个节点编译时固定地址, 网关地址固定为 0x0000 */
-#ifndef LORA_NODE_ADDR
-#define LORA_NODE_ADDR      0x0001      /* 节点1地址, 其他节点修改此宏 */
-#endif
-
+/* ==================== LoRa 通信参数 ====================
+ * 节点身份(产品ID/设备名)由 **Boot 首次启动**固化到 Flash 配置区,
+ * App 端统一从 node_config.h 的运行时变量引用:
+ *   - g_nodeProductKey / g_nodeDeviceName
+ * 身份默认宏位于 BootLoader/User/boot_cfg.h (NODE_PRODUCT_KEY/NODE_DEVICE_NAME)
+ * 空中寻址使用 LoRa 模块硬件地址(ADDH/ADDL, 烧录时人工配置), 与代码无关.
+ * 本头文件只保留 LoRa 通信相关参数 */
 #define LORA_GATEWAY_ADDR   0x0000      /* 网关地址 */
 #define LORA_CHANNEL        0x00        /* 信道(0), DX-LR22模块: 00=433.15MHz */
 #define LORA_BAUD           9600        /* LoRa 串口波特率，与网关端 SoftwareSerial 一致 */
@@ -45,18 +46,10 @@
 #define LORA_AUX_PIN        GPIO_Pin_11   /* PA11 */
 #define LORA_AUX_WAIT_MS    50UL          /* 等 AUX 变化的超时(ms) */
 
-/* ==================== OneNET 子设备证书配置 ====================
+/* ==================== OneNET 子设备证书 ====================
  * 节点通过 LoRa 上报证书给网关, 网关代为上线 OneNET (网关+子设备模式)
- * 注意:
- *   1. 产品ID 是"子设备所在产品"的ID, 与网关产品可能不同 (见下方配置)
- *   2. 设备名称必须是 OneNET 平台已创建、且已绑定到网关拓扑的子设备名
- *   3. 不同节点烧录时改 LORA_SUB_DEVICE_NAME (节点1=Park001, 节点2=Park002...) */
-#ifndef LORA_SUB_PRODUCT_KEY
-#define LORA_SUB_PRODUCT_KEY   "04kjwU9TC7"   /* 子设备产品ID */
-#endif
-#ifndef LORA_SUB_DEVICE_NAME
-#define LORA_SUB_DEVICE_NAME   "Park001"      /* 子设备设备名 */
-#endif
+ * 子设备证书(产品ID/设备名)默认值宏已迁移至 node_config.h
+ * (NODE_PRODUCT_KEY / NODE_DEVICE_NAME) */
 
 /* ==================== 帧头定义 ==================== */
 /* 数据帧头字节(子设备→网关), 借鉴参考项目帧头方案 */

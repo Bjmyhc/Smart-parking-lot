@@ -17,6 +17,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include "bsp_lora.h"
+#include "node_config.h"   /* 节点身份运行时变量(产品ID/设备名) */
 #include "bsp_usart.h"
 #include "bsp_delay.h"
 
@@ -276,8 +277,8 @@ void LoRa_Node_Init(void)
     s_online = 0;
     s_rxLen = 0;
 
-    Usart_Printf(USART_DEBUG, "[LoRa] 初始化: 地址=0x%04X 信道=%d 波特率=%d (AUX=PA11)\r\n",
-                 LORA_NODE_ADDR, LORA_CHANNEL, LORA_BAUD);
+    Usart_Printf(USART_DEBUG, "[LoRa] 初始化: 信道=%d 波特率=%d (AUX=PA11)\r\n",
+                 LORA_CHANNEL, LORA_BAUD);
 }
 
 void LoRa_Node_SendCert(const NodeCert_t *cert)

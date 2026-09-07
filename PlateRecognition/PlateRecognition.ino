@@ -20,7 +20,7 @@
 
 // WiFi 信息
 const char* ssid = "Aira";
-const char* passwd = "20231111";
+const char* passwd = "Zdgdzl934395.";
 
 // 百度云 API 凭证
 const char* apiKey = "7dTZbfdpp2iLH1YwP9i14YXy";

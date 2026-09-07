@@ -325,6 +325,26 @@ static bool handleCompleteFrame(uint8_t header)
             if (slot >= 0)
                 onenet_notifyServiceResult(slot, true, nodes[slot].ledSwitch ? 1 : 0);
         }
+        /* ⭐ 超声波距离阈值下发成功(SetSensorDistance 服务): 收到 ACK 后清除标志,
+         * 重置重试计数, 并向平台补回"同步服务调用"回复(成功 Result=1) */
+        if (strcmp((char *)rxBuf, "AT+SensorDistance") == 0)
+        {
+            int slot = findNode(nodeId);
+            if (slot >= 0)
+            {
+                nodes[slot].sensorDistanceNeedsUpdate = false;
+                nodes[slot].sensorDistanceRetryCount = 0;
+                DBG_PRINTF("[LoRa] 节点%d 超声波距离阈值下发成功\n", nodeId);
+                onenet_notifyServiceResult(slot, true, nodes[slot].sensorDistanceValue);
+            }
+        }
+        /* ⭐ OTA 触发命令确认: 节点回复 AT+OTA:ack / AT+OTA:version_ok
+         * 通知 OTA 处理器命令已送达 (ota_notifyTriggerAck 置位 s_triggerAcked,
+         * 网关从 OTA_TRIGGER_NODE 进入复位等待).
+         * 之前该分支缺失 → s_triggerAcked 永远为 false → 触发阶段必然超时
+         * 重发 3 次后放弃, 而节点已擦除 APP 区在裸等 = "节点死亡"直接根因. */
+        if (strncmp((char *)rxBuf, "AT+OTA", 6) == 0)
+            ota_notifyTriggerAck();
         /* PING 通(PONG)即视为节点存活: 刷新在线状态与活性时间,
          * 并处理"掉线恢复"需要重新代上线(与收到数据的恢复逻辑一致) */
         if (strcmp((char *)rxBuf, "PONG") == 0)
@@ -339,7 +359,8 @@ static bool handleCompleteFrame(uint8_t header)
                 if (wasOffline && nd.certSent && !nd.subLogin)
                     nd.loginPending = true;
                 /* ⭐ 方案三: PONG 确认在线后, 触发阈值下发 (限次重试)
-                 * 最多重试 3 次, 超过后放弃 (防止旧固件节点阻塞) */
+                 * 最多重试 3 次, 超过后放弃 (防止旧固件节点阻塞);
+                 * ZombieThreshold 优先, SensorDistance 次之 */
                 if (nd.thresholdNeedsUpdate && nd.certSent && nd.thresholdRetryCount < 3)
                 {
                     nd.thresholdRetryCount++;  /* 重试次数+1 */
@@ -356,6 +377,25 @@ static bool handleCompleteFrame(uint8_t header)
                     {
                         DBG_PRINTF("[LoRa] 节点%d 在线, 下发僵尸车阈值=%d秒 (重试%d/3, 待ACK)\n",
                                    nodeId, nd.thresholdValue, nd.thresholdRetryCount);
+                    }
+                }
+                else if (nd.sensorDistanceNeedsUpdate && nd.certSent &&
+                         nd.sensorDistanceRetryCount < 3)
+                {
+                    nd.sensorDistanceRetryCount++;  /* 重试次数+1 */
+                    lora_sendControl(nodeId, "SensorDistance", nd.sensorDistanceValue);
+                    if (nd.sensorDistanceRetryCount >= 3)
+                    {
+                        /* 超过3次, 清除标志, 等待用户重新下发 */
+                        nd.sensorDistanceNeedsUpdate = false;
+                        onenet_notifyServiceResult(slot, false, 0);   /* ⭐ 回平台失败 */
+                        DBG_PRINTF("[LoRa] 节点%d 超声波距离阈值重试%d次失败, 放弃 (等平台重新下发)\n",
+                                   nodeId, nd.sensorDistanceRetryCount);
+                    }
+                    else
+                    {
+                        DBG_PRINTF("[LoRa] 节点%d 在线, 下发超声波距离阈值=%dcm (重试%d/3, 待ACK)\n",
+                                   nodeId, nd.sensorDistanceValue, nd.sensorDistanceRetryCount);
                     }
                 }
             }
@@ -676,6 +716,26 @@ bool lora_tick(void)
                 {
                     DBG_PRINTF("[LoRa] 节点%d 在线, 快速路径下发僵尸车阈值=%d秒 (重试%d/3, 待ACK)\n",
                                currentNode, nodes[slot].thresholdValue, nodes[slot].thresholdRetryCount);
+                }
+            }
+            else if (slot >= 0 && nodes[slot].sensorDistanceNeedsUpdate &&
+                     nodes[slot].sensorDistanceRetryCount < 3)
+            {
+                nodes[slot].sensorDistanceRetryCount++;  /* 重试次数+1 */
+                lora_sendControl(currentNode, "SensorDistance", nodes[slot].sensorDistanceValue);
+                if (nodes[slot].sensorDistanceRetryCount >= 3)
+                {
+                    /* 超过3次, 清除标志, 防止阻塞 */
+                    nodes[slot].sensorDistanceNeedsUpdate = false;
+                    onenet_notifyServiceResult(slot, false, 0);   /* ⭐ 回平台失败 */
+                    DBG_PRINTF("[LoRa] 节点%d 超声波距离阈值重试%d次失败, 放弃 (等平台重新下发)\n",
+                               currentNode, nodes[slot].sensorDistanceRetryCount);
+                }
+                else
+                {
+                    DBG_PRINTF("[LoRa] 节点%d 在线, 快速路径下发超声波距离阈值=%dcm (重试%d/3, 待ACK)\n",
+                               currentNode, nodes[slot].sensorDistanceValue,
+                               nodes[slot].sensorDistanceRetryCount);
                 }
             }
             else
