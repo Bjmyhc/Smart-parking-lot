@@ -49,7 +49,7 @@ extern uint8_t LEDAlarmEnable;
 
 /* ==================== LoRa通信 ==================== */
 
-extern NodeData_t NodeDataCache;        /* 节点数据缓存(打包发送给网关) */
+extern LoraNodeData_t NodeDataCache;    /* 节点数据缓存(打包发送给网关) */
 
 /* 车位状态变化事件标志: 1=有状态变化待上报, 0=无
  * 由 ParkingStatus_Check 在状态切换时置位, 由 LoRa_Task 回复网关后清零

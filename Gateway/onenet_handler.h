@@ -21,6 +21,11 @@ void onenet_loop(void);
 
 bool onenet_connected(void);
 
+/* ⭐ S31: 是否存在"待代下线"且 MQTT 在线.
+ * lora_tick 据此在全部代下线完成前暂停发送轮询命令,
+ * 保证 MQTT (重)连后"先代下线、后 PING 探测"的顺序 */
+bool onenet_logoutPending(void);
+
 /* 周期调用: 代子设备上线/下线 + 批量上报 (网关+子设备模式) */
 void onenet_uploadAll(void);
 

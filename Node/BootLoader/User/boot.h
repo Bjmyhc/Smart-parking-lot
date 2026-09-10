@@ -1,4 +1,4 @@
-﻿/****************************************************************************
+/****************************************************************************
  * BootLoader 接口头文件 - boot.h
  *
  * 功能: 函数声明、外部变量
@@ -18,9 +18,8 @@ extern volatile uint32_t g_bootTick;    /* 系统滴答(ms) */
 /* 跳转到 APP */
 void Load_APP(uint32_t appxaddr);
 
-/* 读/写升级标志页 */
-uint32_t OTA_ReadFlag(void);
-void OTA_WriteFlag(uint32_t flag);
+/* ⭐ OTA 升级标志页读写已统一到共享头 boot_flash.h (S8 单一事实源):
+ * Flash_ReadOtaFlag / Flash_ReadAppPartial / Flash_SaveOtaFlag */
 
 /* 擦除 APP 区 */
 uint8_t OTA_EraseAppArea(void);

@@ -1,0 +1,14 @@
+*** Using Compiler 'V5.06 update 5 (build 528)', folder: 'C:\Keil_v5\ARM\ARMCC\Bin'
+Build target 'Firmware'
+linking...
+Program Size: Code=23036 RO-data=812 RW-data=128 ZI-data=1488  
+FromELF: creating hex file...
+After Build - User command #1: fromelf --bin --output ..\Output\app.bin ..\Output\firmware.axf
+After Build - User command #2: python ..\..\..\Tool\fw_pack.py
+[OK] g:\All_Project\Trae_Project\Smart-Paring-Iot\Node\Firmware\Output\app.bin -> g:\All_Project\Trae_Project\Smart-Paring-Iot\Node\Firmware\Output\node_v2.590.bin
+     version  : 0x024E (2.590)
+     code len : 23976 bytes
+     crc32    : 0xCFDD9120
+     total    : 23988 bytes
+"..\Output\firmware.axf" - 0 Error(s), 0 Warning(s).
+Build Time Elapsed:  00:00:03

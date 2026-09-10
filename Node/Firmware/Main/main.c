@@ -139,7 +139,7 @@ int main(void)
                          (unsigned long)(Get_Tick() / 1000));
             /* ⭐ USART2 ISR 诊断: oreCount 持续涨=串口过载; rxCount 不涨=RX中断没触发,
              * 用于定位"LoRa 模块有输出但 STM32 收不到命令"类故障 */
-            Usart_Printf(USART_DEBUG, "[USART2] ore=%u rxBytes=%lu\r\n",
+            Usart_Printf(USART_DEBUG, "[USART2] ORE(溢出)=%u 收字节=%lu\r\n",
                          (unsigned)usart2_oreCount, (unsigned long)usart2_rxCount);
         }
 		

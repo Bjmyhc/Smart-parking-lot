@@ -52,7 +52,7 @@
 #define LORA_POLL_ROUND_MS       2000
 
 /* ==================== OLED 显示行为 ==================== */
-#define OLED_REFRESH_MS     2000    /* 刷新周期(ms) */
+#define OLED_REFRESH_MS     1000    /* 刷新周期(ms): 与轮询节奏匹配, 屏上状态更跟手 */
 #define OLED_ANIM_MS        450     /* 重连动画刷新间隔(ms): WiFi信号条/MQTT圆圈 */
 
 /* OLED 启动扫描节点画面 (第三屏 SEARCHING NODES):
@@ -66,13 +66,11 @@
 #define OLED_SCAN_MIN_MS        3000    /* 扫描画面最短显示时间(ms): 让用户看清搜索过程与FOUND数字 */
 #define OLED_SCAN_MAX_MS        10000   /* 扫描画面最长显示时间(ms, 保险) */
 
-/* ==================== 上报与超时 ==================== */
+/* ==================== 上报 ==================== */
 #define UPLOAD_INTERVAL     5000    /* 定时上报周期(ms): 比赛演示要快, 5s 一推 */
 #define UPLOAD_MIN_INTERVAL_MS  1000  /* 上行最小间隔(ms): 配合平台"≤1次/s"限速, 锁死不超 */
-/* ⭐ 节点离线判定超时(ms): 实际离线门槛在 node_data.cpp checkNodeTimeout 中按
- * 本动态值 ×2 执行(≈12s/单节点), 用于容忍 LoRa 偶发单帧丢包, 避免误判活节点离线 */
-#define NODE_DATA_TIMEOUT_BASE  3000   /* 节点超时基准(ms) */
-#define NODE_PER_NODE_TIMEOUT   3000    /* 每发现1个节点附加超时(ms), 适配轮询一圈耗时 */
+/* ⭐ S13: 节点离线判定已改为"轮询轮次"计 (node_data.cpp nodeRoundCompleted,
+ * 连续 NODE_MISSED_ROUNDS_MAX 轮无响应判离线), 不再使用墙钟动态超时宏 */
 #define MQTT_RETRY_DELAY    5000    /* MQTT重连间隔(ms) */
 #define WIFI_RETRY_DELAY    2000    /* WiFi重连节流(ms) */
 #define WIFI_CONNECT_TIMEOUT_MS  10000  /* 一次 begin() 连接等待超时(ms), 超时未连上重新发起 */
@@ -100,6 +98,16 @@ extern uint32_t sysEventFlag;
   #define DBG_PRINT(x)
   #define DBG_PRINTLN(x)
   #define DBG_PRINTF(f, ...)
+#endif
+
+/* ⭐ 日志分级: WARN/ERR 带显式前缀, 便于串口/日志文件按级别过滤;
+ * 普通流程(INFO)保持原样不加前缀, 避免日志冗长 */
+#if DEBUG_PRINT
+  #define LOG_W(f, ...)     DEBUG_SERIAL.printf("[WARN] " f, ##__VA_ARGS__)
+  #define LOG_E(f, ...)     DEBUG_SERIAL.printf("[ERR ] " f, ##__VA_ARGS__)
+#else
+  #define LOG_W(f, ...)
+  #define LOG_E(f, ...)
 #endif
 
 #endif /* APP_CFG_H */

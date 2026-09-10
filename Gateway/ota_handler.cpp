@@ -13,6 +13,7 @@
 #include "hw_cfg.h"
 #include "app_cfg.h"
 #include "node_data.h"    /* ⭐ findNode/nodes: OTA成功后重新标记阈值下发 */
+#include "onenet_handler.h" /* ⭐ S27: 下载期间让出 MQTT 保活/收下行 */
 
 #include <ESP8266HTTPClient.h>
 #include <WiFiClient.h>
@@ -47,6 +48,36 @@ static volatile bool s_hasResp;         /* 是否已收到 OTA 响应 */
 static volatile bool s_triggerAcked;    /* 节点已回复 AT+OTA:ack */
 static uint8_t  s_triggerSendCount;     /* AT+OTA 已发送次数(含首次) */
 static uint32_t s_triggerSentAt;        /* 上次发送 AT+OTA 的时间戳 */
+
+/* ⭐ 整链自动重试 (设计文档 3.3.2): OTA_FAILED 后整链重来次数(不含首次) */
+static uint8_t  s_chainRetry;
+
+/* ⭐ S21: 节点拒绝升级标志 (收到 AT+OTA:version_ok 置位).
+ * 置位时 OTA_FAILED 不再整链重试(节点 App 已明确拒绝, 重试只会再次
+ * version_ok 空转), 直接回 OTA_IDLE 让平台侧上报失败 */
+static bool     s_refused;
+
+/* ⭐ S27 自愈预算: 同一节点"连续自动重发自愈"失败次数累计.
+ * 根因治理: 历史无脑循环 = 失败耗尽回 OTA_IDLE 后判定器(ota_autoDispatch)
+ * 见固件文件即自动重发 → 无限循环. 达 OTA_SELF_HEAL_MAX_RETRY 次后停止自动,
+ * 只置 bootPending 等平台/人工显式触发(ota_start / ota_startFromFile 显式入口
+ * 清零, ota_autoDispatch 置 s_selfHealRun 标记来源区分) */
+static uint8_t  s_selfHealNode   = 0xFF;  /* 正在累计预算的节点 */
+static uint8_t  s_selfHealFails  = 0;     /* 该节点连续自愈失败次数 */
+static bool     s_selfHealRun    = false; /* 本次 OTA 是否由自动自愈发起 */
+
+/* ⭐ S27: 自动自愈发起的 OTA 流程终结(失败/被拒) → 累计自愈预算.
+ * 整链重试中途不累计, 只有最终回 OTA_IDLE 才算一次失败 */
+static void selfHealFail(void)
+{
+    if (!s_selfHealRun) return;
+    s_selfHealRun = false;
+    s_selfHealNode = (uint8_t)s_progress.nodeId;
+    s_selfHealFails++;
+    DBG_PRINTF("[OTA] 自愈失败累计: 节点%d 第%u/%u次 (达上限后判定器停止自动重发)\n",
+               s_progress.nodeId, (unsigned)s_selfHealFails,
+               (unsigned)OTA_SELF_HEAL_MAX_RETRY);
+}
 
 /* CRC16 表 (XMODEM poly 0x1021, 与节点端一致) */
 static const uint16_t s_crc16Table[256] = {
@@ -185,8 +216,9 @@ static bool downloadFirmware(const char *url)
             }
         }
 
-        /* 喂狗 (ESP8266 无硬件看门狗, 但 yield 允许 WiFi 后台处理) */
-        yield();
+        /* ⭐ S27: 下载期间周期让出 MQTT 保活/收下行, 不再裸 yield()
+         * (历史: 同步下载阻塞主循环期间 MQTT 停顿, 平台命令接收迟钝) */
+        onenet_loop();
     }
 
     s_fwFile.close();
@@ -288,6 +320,17 @@ bool ota_start(uint8_t nodeId, const char *url, const char *version)
     strncpy(s_progress.version, version ? version : "V0.0", sizeof(s_progress.version) - 1);
     s_progress.version[sizeof(s_progress.version) - 1] = '\0';
 
+    /* ⭐ S14: OTA 显式启动 → 清除该节点"等平台"标志 (8.2: 平台下发时立即执行);
+     * ⭐ S21: 同时清除"拒绝升级"标志 (人工重触发/平台再下发 = 新一次升级意图) */
+    {
+        int slot = findNode(nodeId);
+        if (slot >= 0)
+        {
+            nodes[slot].bootPending = false;
+            nodes[slot].otaRefused  = false;
+        }
+    }
+
     /* 保存 URL */
     strncpy(s_otaUrl, url ? url : "", sizeof(s_otaUrl) - 1);
     s_otaUrl[sizeof(s_otaUrl) - 1] = '\0';
@@ -298,6 +341,7 @@ bool ota_start(uint8_t nodeId, const char *url, const char *version)
     s_triggerAcked = false;
     s_triggerSendCount = 0;
     s_triggerSentAt = 0;
+    s_chainRetry = 0;
 
     DBG_PRINTF("[OTA] 启动: 节点%d, 版本=%s, URL=%s\n", nodeId, s_progress.version, s_otaUrl);
 
@@ -330,6 +374,24 @@ bool ota_startFromFile(uint8_t nodeId, const char *version)
             sizeof(s_progress.version) - 1);
     s_progress.version[sizeof(s_progress.version) - 1] = '\0';
 
+    /* ⭐ S14: OTA 显式启动 → 清除该节点"等平台"标志 (平台下发路径同 ota_start);
+     * ⭐ S21: 同时清除"拒绝升级"标志 */
+    {
+        int slot = findNode(nodeId);
+        if (slot >= 0)
+        {
+            nodes[slot].bootPending = false;
+            nodes[slot].otaRefused  = false;
+        }
+        /* ⭐ S27: 显式触发(平台固件分发/人工)清零自愈预算, 恢复自动自愈;
+         * 自动自愈(autoDispatch 置 s_selfHealRun)重发则保留预算供下一轮判定 */
+        if (!s_selfHealRun)
+        {
+            if (s_selfHealNode == nodeId) s_selfHealFails = 0;
+        }
+        s_selfHealRun = false;
+    }
+
     s_otaUrl[0] = '\0';
     s_otaStart = millis();
     s_hasResp = false;
@@ -337,12 +399,72 @@ bool ota_startFromFile(uint8_t nodeId, const char *version)
     s_triggerAcked = false;
     s_triggerSendCount = 0;
     s_triggerSentAt = 0;
+    s_chainRetry = 0;
     s_fileReady = true;
 
     DBG_PRINTF("[OTA] 启动(平台固件): 节点%d, 版本=%s\n",
                nodeId, s_progress.version);
     setState(OTA_TRIGGER_NODE);
     return true;
+}
+
+/* ⭐ S14/8.1 统一判定器: 节点 mode=BOOT(收到 PONG,BOOT)时调用.
+ * 单一决策入口, 自动(节点自曝)/人工/平台触发全部汇入 ota_start 单轨:
+ *   - OTA 忙 → 不动作 (升级/整链重试/下载中, 现有机制接管)
+ *   - 有固件文件 → ota_startFromFile 自动重发 (自愈: 升级成功滞留 Boot 也成立)
+ *   - 无固件文件 → 置节点 bootPending=true, 等平台下发 (8.2) */
+bool ota_autoDispatch(uint8_t nodeId)
+{
+    if (s_progress.state != OTA_IDLE)
+    {
+        DBG_PRINTF("[OTA] 判定器: 节点%d 在Boot但OTA忙(state=%d), 不动作\n",
+                   nodeId, s_progress.state);
+        return false;
+    }
+
+    int slot = findNode(nodeId);
+    bool wasPending = (slot >= 0) ? nodes[slot].bootPending : false;  /* ⭐ P1-4: 记录置位前状态 */
+    if (slot >= 0) nodes[slot].bootPending = false;   /* 有决策动作, 先清等待标志 */
+
+    if (LittleFS.begin() && LittleFS.exists(OTA_FW_FILE))
+    {
+        DBG_PRINTF("[OTA] 判定器: 节点%d 在Boot且有固件文件, 自动重发(自愈)\n", nodeId);
+        return ota_startFromFile(nodeId, NULL);
+    }
+
+    if (slot >= 0)
+    {
+        nodes[slot].bootPending = true;   /* 无固件: 标记等平台下发 */
+        /* ⭐ P1-4 降噪: 每轮 PING(~2s) 重复置位会无限刷屏,
+         * 仅首次由非等待 → 等待(等平台下发)时打印一次 */
+        if (!wasPending)
+            DBG_PRINTF("[OTA] 判定器: 节点%d 在Boot且无固件, bootPending=true 等平台下发\n",
+                       nodeId);
+    }
+    else
+        DBG_PRINTF("[OTA] 判定器: 节点%d 未注册, 忽略\n", nodeId);
+    return false;
+}
+
+/* ⭐ S14 人工触发统一入口 (串口 OTA 命令走此, 不再直接调 ota_start):
+ * 与自动路径同轨防双轨并发:
+ *   - OTA 忙 → 拒绝
+ *   - 节点已在 Boot 且网关有固件 → 判定器文件自愈重发 (ota_autoDispatch)
+ *   - 其余 (APP/UNKNOWN 节点, 或 Boot 但无文件) → ota_start 下载 URL 固件触发 */
+bool ota_manualTrigger(uint8_t nodeId, const char *url, const char *version)
+{
+    if (s_progress.state != OTA_IDLE)
+    {
+        DBG_PRINTF("[OTA] 手动触发被拒: 当前状态=%d (忙, 等 OTA 结束后再试)\n",
+                   s_progress.state);
+        return false;
+    }
+
+    int slot = findNode(nodeId);
+    if (slot >= 0 && nodes[slot].mode == NODE_MODE_BOOT && ota_autoDispatch(nodeId))
+        return true;   /* Boot 节点已有固件: 走自愈重发, 不重新下载 */
+
+    return ota_start(nodeId, url, version);
 }
 
 /* OTA 状态机主循环 */
@@ -554,12 +676,26 @@ void ota_tick(void)
         break;
     }
 
-    /* ---------- 阶段7: 发送 EOT ---------- */
+    /* ---------- 阶段7: 发送 EOT (⭐ S26 双EOT确认) ----------
+     * 节点端 OTA_ReceivePacket 对齐 CAN 分支, 需连续收到两个 0x04 才判
+     * 传输结束 (防空口杂波/回环单字节 0x04 误判 EOT → 提前结束 → CRC32
+     * 必败, 历史现象). 此处拆两个状态各发一个, 中间隔一个主循环 tick,
+     * 避免背靠背粘连, 日志可区分 1/2. */
     case OTA_SEND_EOT:
     {
         uint8_t eot = OTA_EOT;
         sendRawFrame((uint16_t)s_progress.nodeId, LORA_CHANNEL, &eot, 1);
-        DBG_PRINTLN("[OTA] EOT 已发送, 等待最终确认");
+        DBG_PRINTLN("[OTA] EOT 已发送(1/2), 等待最终确认");
+        s_hasResp = false;
+        setState(OTA_SEND_EOT2);
+        break;
+    }
+
+    case OTA_SEND_EOT2:
+    {
+        uint8_t eot = OTA_EOT;
+        sendRawFrame((uint16_t)s_progress.nodeId, LORA_CHANNEL, &eot, 1);
+        DBG_PRINTLN("[OTA] EOT 已发送(2/2), 等待最终确认");
         s_hasResp = false;
         setState(OTA_WAIT_FINAL_ACK);
         break;
@@ -591,42 +727,82 @@ void ota_tick(void)
 
     /* ---------- 完成 / 失败 ---------- */
     case OTA_COMPLETE:
-        /* 清理 */
+        /* 关闭文件句柄 */
         if (s_fwFile) s_fwFile.close();
-        LittleFS.remove(OTA_FW_FILE);
-        DBG_PRINTF("[OTA] 完成, 耗时 %lu 秒\n",
+        /* ⭐ S15: 固件文件保留, 不立即删除!
+         * 升级成功后节点可能滞留 Boot, 判定器(ota_autoDispatch)需要该文件
+         * 自动重发才能完成自愈闭环. 文件在以下时机才清理:
+         *   1. 节点确认离开 Boot (收到 PONG,APP → ota_notifyNodeApp)
+         *   2. 被新固件覆盖 (平台/人工重新下载时 LittleFS.remove + 重写) */
+        DBG_PRINTF("[OTA] 完成, 耗时 %lu 秒 (固件文件保留, 待节点确认离开Boot后清理)\n",
                    (unsigned long)(s_progress.elapsedMs / 1000));
-        /* ⭐ 升级成功后, 重新标记节点需要下发阈值:
-         * 新固件可能丢失了之前的阈值配置(Flash布局变化/默认值不同),
-         * 节点重新上线(PONG)时自动重新下发之前保存的阈值 */
+        /* ⭐ S30: 删除"OTA 成功后重新标记下发"——升级后节点重启进 APP 必然回
+         * PONG,APP, 已由 PONG 兜底重发(lora_handler PONG,APP 分支)统一覆盖,
+         * 此处不再重复置位 (原置位逻辑与 LFS 加载置位一同收敛到 PONG 一处) */
+        /* ⭐ S27: 自动自愈成功 → 清零该节点预算(连续失败归零) */
+        if (s_selfHealRun)
         {
-            int slot = findNode((uint8_t)s_progress.nodeId);
-            if (slot >= 0 && nodes[slot].thresholdValue > 0)
-            {
-                nodes[slot].thresholdNeedsUpdate = true;
-                nodes[slot].thresholdRetryCount = 0;
-                DBG_PRINTF("[OTA] 节点%d 升级成功, 标记重新下发僵尸车阈值=%lu秒\n",
-                           s_progress.nodeId, (unsigned long)nodes[slot].thresholdValue);
-            }
-            /* ⭐ 超声波距离阈值同理重新标记下发 */
-            if (slot >= 0 && nodes[slot].sensorDistanceValue > 0)
-            {
-                nodes[slot].sensorDistanceNeedsUpdate = true;
-                nodes[slot].sensorDistanceRetryCount = 0;
-                DBG_PRINTF("[OTA] 节点%d 升级成功, 标记重新下发超声波距离阈值=%ucm\n",
-                           s_progress.nodeId, nodes[slot].sensorDistanceValue);
-            }
+            s_selfHealRun = false;
+            if (s_selfHealNode == (uint8_t)s_progress.nodeId)
+                s_selfHealFails = 0;
+            DBG_PRINTLN("[OTA] 自愈成功, 预算清零");
         }
         s_progress.state = OTA_IDLE;
         break;
 
     case OTA_FAILED:
-        /* 清理 */
+        /* ⭐ S21: 节点拒绝升级(version_ok) → 不整链重试, 保留固件文件
+         * (人工重触发自愈路径仍可用), 直接回 OTA_IDLE;
+         * 平台侧 OTA_PLAT_FINISH 检测到 OTA_IDLE 即上报失败(202) */
+        if (s_refused)
+        {
+            s_refused = false;
+            DBG_PRINTF("[OTA] 节点%d 拒绝升级, 终止 OTA (固件文件保留, 待人工/平台介入)\n",
+                       s_progress.nodeId);
+            s_progress.state = OTA_IDLE;
+            break;
+        }
+        /* ⭐ 整链自动重试 (设计文档 3.3.2): 失败不立即放弃,
+         * 保留固件文件(LittleFS), 停 OTA_CHAIN_RETRY_INTERVAL_MS 后
+         * 从 OTA_TRIGGER_NODE 整链重来(重新触发 → 节点复位 → 重新下发).
+         * 重试次数耗尽也不删文件, 保留给判定器自动重发自愈 */
         if (s_fwFile) s_fwFile.close();
-        LittleFS.remove(OTA_FW_FILE);
-        DBG_PRINTF("[OTA] 失败, 耗时 %lu 秒\n",
-                   (unsigned long)(s_progress.elapsedMs / 1000));
+        if (s_chainRetry < OTA_CHAIN_MAX_RETRY)
+        {
+            s_chainRetry++;
+            DBG_PRINTF("[OTA] 失败, 第%u/%u次整链重试 (保留固件文件, %lu秒后重发触发)\n",
+                       (unsigned)s_chainRetry, (unsigned)OTA_CHAIN_MAX_RETRY,
+                       (unsigned long)(OTA_CHAIN_RETRY_INTERVAL_MS / 1000));
+            setState(OTA_RETRY_WAIT);
+            break;
+        }
+        /* ⭐ P0-3 失败重试耗尽不再删文件: 保留固件文件, 平台上报失败(202)后,
+         * 判定器(ota_autoDispatch)在节点 PONG,BOOT 时仍可自动重发(自愈),
+         * 避免"节点可救却因文件被删而永久僵持"(历史死锁根因之一).
+         * 文件仍在下述时机清理:
+         *   1. 节点确认离开 Boot (PONG,APP → ota_notifyNodeApp)
+         *   2. 被新固件覆盖 (平台/人工重新下载时 LittleFS.remove + 重写) */
+        DBG_PRINTF("[OTA] 失败, 耗时 %lu 秒 (重试%u次已耗尽, 固件文件保留待自愈重发)\n",
+                   (unsigned long)(s_progress.elapsedMs / 1000),
+                   (unsigned)OTA_CHAIN_MAX_RETRY);
+        selfHealFail();     /* ⭐ S27: 自动自愈失败耗尽 → 累计预算 */
         s_progress.state = OTA_IDLE;
+        break;
+
+    /* ---------- 整链重试等待: 间隔后整链重来 ---------- */
+    case OTA_RETRY_WAIT:
+        if (now - s_stateStart < OTA_CHAIN_RETRY_INTERVAL_MS)
+            break;
+        /* 重置整链状态, 从触发节点开始重新发起 */
+        s_triggerAcked = false;
+        s_triggerSendCount = 0;
+        s_triggerSentAt = 0;
+        s_seq = 1;
+        s_hasResp = false;
+        s_progress.sentBytes = 0;
+        s_progress.retryCount = 0;
+        DBG_PRINTF("[OTA] 整链重试: 重新触发节点%d\n", s_progress.nodeId);
+        setState(OTA_TRIGGER_NODE);
         break;
     }
 }
@@ -662,15 +838,65 @@ void ota_cancel(void)
         if (s_fwFile) s_fwFile.close();
         LittleFS.remove(OTA_FW_FILE);
         DBG_PRINTLN("[OTA] 已取消");
+        /* ⭐ S27: 人工取消视为介入, 清零自愈预算 */
+        s_selfHealRun = false;
+        s_selfHealFails = 0;
         s_progress.state = OTA_IDLE;
     }
 }
 
 /* ⭐ 通知 OTA 处理器: 节点已回复 AT+OTA:ack
  * 由 lora_handler 在收到节点 ACK 帧时调用,
- * 让 OTA_TRIGGER_NODE 状态确认命令已送达, 进入复位等待 */
-void ota_notifyTriggerAck(void)
+ * 让 OTA_TRIGGER_NODE 状态确认命令已送达, 进入复位等待.
+ * ⭐ P1-5: 校验确认必须来自最近触发命令的目标节点,
+ * 防止多节点并存时他节点 ACK 被误当本节点触发确认 */
+void ota_notifyTriggerAck(uint8_t nodeId)
 {
+    if (s_progress.nodeId != nodeId)
+    {
+        DBG_PRINTF("[OTA] 收到节点%d 触发ACK, 但最近触发目标为%d, 忽略\n",
+                   nodeId, s_progress.nodeId);
+        return;
+    }
     if (s_progress.state == OTA_TRIGGER_NODE)
         s_triggerAcked = true;
+}
+
+/* ⭐ S21: 节点 App 回复 AT+OTA:version_ok (版本已最新, 拒绝升级)
+ * 由 lora_handler 在收到该 ACK 帧时调用.
+ * 语义 (方案 8.1#2): 标记节点 otaRefused=true (待人工/平台介入) →
+ * 终止对 App 的 Xmodem 流 → 平台侧经 OTA_PLAT_FINISH 上报失败(202).
+ * 不做整链重试: 节点 App 已明确拒绝, 重试只会再次 version_ok 空转. */
+void ota_notifyVersionOk(uint8_t nodeId)
+{
+    if (s_progress.nodeId != nodeId)
+    {
+        DBG_PRINTF("[OTA] 收到节点%d version_ok, 但最近 OTA 目标为%d, 忽略\n",
+                   nodeId, s_progress.nodeId);
+        return;
+    }
+    int slot = findNode(nodeId);
+    if (slot >= 0)
+    {
+        nodes[slot].otaRefused = true;
+        DBG_PRINTF("[OTA] 节点%d 拒绝升级(version_ok), otaRefused=true 待人工/平台介入\n",
+                   nodeId);
+    }
+    if (s_progress.state != OTA_IDLE)
+    {
+        s_refused = true;
+        setState(OTA_FAILED);
+    }
+}
+
+/* ⭐ S15: 节点确认离开 Boot (收到 PONG,APP) → 清理固件文件.
+ * 仅当该节点是最近一次 OTA 目标节点时删除, 避免误删其他节点固件;
+ * 文件保留期内的自愈重发(判定器)由此画上句号 */
+void ota_notifyNodeApp(uint8_t nodeId)
+{
+    if (s_progress.nodeId != nodeId) return;
+    if (!LittleFS.begin() || !LittleFS.exists(OTA_FW_FILE)) return;
+    LittleFS.remove(OTA_FW_FILE);
+    DBG_PRINTF("[OTA] 节点%d 确认进入 APP 模式, 清理固件文件 (自愈闭环结束)\n",
+               nodeId);
 }

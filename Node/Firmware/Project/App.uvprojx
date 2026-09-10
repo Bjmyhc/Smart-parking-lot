@@ -336,7 +336,7 @@
               <MiscControls>--diag_suppress=870</MiscControls>
               <Define>STM32F10X_MD, USE_STDPERIPH_DRIVER</Define>
               <Undefine></Undefine>
-              <IncludePath>..\..\Common\CMSIS;..\Main;..\..\Common\FWlib\inc;..\App;..\BSP;..\Config</IncludePath>
+              <IncludePath>..\..\..\shared;..\..\Common;..\..\Common\CMSIS;..\Main;..\..\Common\FWlib\inc;..\App;..\BSP;..\Config</IncludePath>
             </VariousControls>
           </Cads>
           <Aads>

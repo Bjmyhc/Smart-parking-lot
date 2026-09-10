@@ -34,4 +34,19 @@ bool lora_discoveryActive(void);
 /* 获取 LoRa 串口引用(调试) */
 Stream &lora_getSerial(void);
 
+/* ⭐ S34: 日志阶段分隔(跨模块共享). 各模块打印前调用 logPhase() 声明日志类别,
+ * 阶段切换时插入一个空行, 同阶段连续行不插; 把日志按模块/类别切成块,
+ * 避免 命令下发/链路保活/数据上报/OTA/MQTT云事件 混排造成视觉疲劳 */
+typedef enum {
+    LOGPH_NONE = 0, LOGPH_CMD,      /* 命令下发 */
+    LOGPH_LINK,                     /* 链路保活 */
+    LOGPH_DATA,                     /* 数据上报 */
+    LOGPH_OTA,                      /* OTA */
+    LOGPH_STAT,                     /* 周期统计 */
+    LOGPH_MQTT                      /* MQTT 云事件 */
+} log_phase_t;
+
+/* 实现见 lora_handler.cpp; onenet_handler.cpp 等模块调用以分组日志 */
+void logPhase(uint8_t ph);
+
 #endif /* LORA_HANDLER_H */

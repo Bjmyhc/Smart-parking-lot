@@ -9,7 +9,7 @@
  * (如 v2.321), 不再做数字编码, 避免次版本>255 时溢出错乱(如 2.321 变 3.65).
  * ========================================================= */
 
-#define FW_VERSION_STR       "v2.532"
+#define FW_VERSION_STR       "v2.591"
 
 /* 显示字符串版本: 原样使用 */
 #define NODE_FW_VERSION      FW_VERSION_STR

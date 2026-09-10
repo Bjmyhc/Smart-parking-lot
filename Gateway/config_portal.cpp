@@ -1,4 +1,4 @@
-﻿/* config_portal.cpp - AP+Web 配网模块实现
+/* config_portal.cpp - AP+Web 配网模块实现
  *
  * 功能说明 (参考项目 SmartConfig 的替代):
  *   1. 首次启动: Flash 无 /wifi.cfg 时 自动进入配网模式
@@ -165,8 +165,8 @@ static String buildStatusJson(void)
     {
         if (i > 0) nodeInfo += ", ";
         nodeInfo += "node" + String(nodes[i].nodeId);
-        nodeInfo += nodes[i].online ? "&#x5728;&#x7EBF;" : "&#x79BB;&#x7EBF;";
-        if (nodes[i].online) onlineCnt++;
+        nodeInfo += nodes[i].serviceOnline ? "&#x5728;&#x7EBF;" : "&#x79BB;&#x7EBF;";
+        if (nodes[i].serviceOnline) onlineCnt++;
     }
     if (nodeInfo.length() == 0) nodeInfo = "&#x65E0;";
 

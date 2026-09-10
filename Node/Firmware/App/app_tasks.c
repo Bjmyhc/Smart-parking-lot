@@ -21,6 +21,7 @@
 #include "bsp_lora.h"
 #include "node_config.h"   /* 节点身份运行时变量 g_nodeProductKey/g_nodeDeviceName */
 #include "app_global.h"
+#include "boot_flash.h"   /* ⭐ 统一 Flash 标志页接口 (S8/S10): Flash_SaveOtaFlagKeepPartial 等 */
 #include "stm32f10x_flash.h"
 
 /* ==================== 宏定义 ==================== */
@@ -49,9 +50,10 @@
 
 /* -------- OTA 升级 -------- */
 #include "app_version.h"    /* 版本单一源头: NODE_FW_VERSION */
-#define OTA_FLAG_ADDR           0x0800FC00  /* 升级标志页地址 */
-#define OTA_FLAG_GO             0xA5A5A5A5  /* 需要升级 */
-#define OTA_FLAG_DONE           0x00000000  /* 升级完成 */
+/* ⭐ OTA 升级标志页常量与读写接口统一走共享头 boot_flash.h (S8/S10):
+ * OTA_FLAG_ADDR / OTA_FLAG_GO / OTA_FLAG_DONE 与
+ * Flash_SaveOtaFlagKeepPartial / Flash_ReadAppPartial 等,
+ * App/Boot 共用单一事实源, 此处不再重复定义 */
 
 /* ==================== 全局变量定义 ==================== */
 
@@ -62,7 +64,7 @@ uint32_t LastStatusChangeTick = 0;
 uint8_t LEDAlarmEnable = 1;  /* 报警灯使能(僵尸车报警灯), 默认开启 */
 QMC5883P_Device_t qmc5883p;
 uint8_t MagCarPresent = 0;
-NodeData_t NodeDataCache;
+LoraNodeData_t NodeDataCache;   /* ⭐ S11 命名收敛: 类型为共享头 lora_protocol.h 的 LoraNodeData_t */
 volatile uint8_t StatusChanged = 1;     /* 车位状态变化标志
                                          * 置位1: 有人/无人状态切换时
                                          * 触发立即上传, 不用等定时
@@ -363,7 +365,7 @@ static void LoRa_CmdCallback(const char *cmd, const char *value)
     /* 网关查询证书: AT+CER -> 发送节点证书(含 OneNET 子设备身份) */
     else if (strncmp(cmd, "AT+CER", 6) == 0)
     {
-        NodeCert_t cert;
+        LoraNodeCert_t cert;
         memset(&cert, 0, sizeof(cert));
         cert.valid = 1;
         strncpy(cert.ProductKey, g_nodeProductKey, sizeof(cert.ProductKey) - 1);
@@ -392,7 +394,7 @@ static void LoRa_CmdCallback(const char *cmd, const char *value)
             if (v >= 5 && v <= 2592000)  /* 允许范围: 5秒 ~ 30天 */
             {
                 g_zombieThreshold = (uint32_t)v;
-                Usart_Printf(USART_DEBUG, "[CTRL] 僵尸车阈值 -> %lu秒\n", (unsigned long)g_zombieThreshold);
+                Usart_Printf(USART_DEBUG, "[CTRL] 僵尸车阈值 -> %lu秒\r\n", (unsigned long)g_zombieThreshold);
             }
         }
         LoRa_Node_SendAck("AT+ZombieThreshold");
@@ -412,10 +414,10 @@ static void LoRa_CmdCallback(const char *cmd, const char *value)
         }
         LoRa_Node_SendAck("AT+SensorDistance");
     }
-    /* 网关心跳查询: AT+PING -> 回复 PONG */
+    /* 网关心跳查询: AT+PING -> 回复 PONG,APP (上报处于 App 业务模式, 方案 5.1) */
     else if (strcmp(cmd, "AT+PING") == 0)
     {
-        LoRa_Node_SendAck("PONG");
+        LoRa_Node_SendAck("PONG,APP");
     }
     /* 网关触发 OTA 升级: AT+OTA=start,<版本串>
      * 触发后: 回复ACK → 写升级标志 → 复位 → BootLoader 接收固件
@@ -443,11 +445,8 @@ static void LoRa_CmdCallback(const char *cmd, const char *value)
             LoRa_Node_SendAck("AT+OTA:ack");
             Usart_Printf(USART_DEBUG, "[OTA] 已回复ACK, 写升级标志...\r\n");
 
-            FLASH_Unlock();
-            FLASH_ErasePage(OTA_FLAG_ADDR);
-            FLASH_ProgramHalfWord(OTA_FLAG_ADDR, (uint16_t)(OTA_FLAG_GO & 0xFFFF));
-            FLASH_ProgramHalfWord(OTA_FLAG_ADDR + 2, (uint16_t)((OTA_FLAG_GO >> 16) & 0xFFFF));
-            FLASH_Lock();
+            /* ⭐ S8: 统一走共享头接口, 同步维护 APP 完整性槽位 (断电可恢复) */
+            Flash_SaveOtaFlagKeepPartial(OTA_FLAG_GO);
 
             Usart_Printf(USART_DEBUG, "[OTA] 升级标志已写入, 即将复位...\r\n");
             /* 200ms: 确保 LoRa 模块完成 ACK 无线发送 + Flash 写入稳定 */

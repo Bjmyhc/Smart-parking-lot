@@ -22,8 +22,9 @@
 #include "bsp_delay.h"
 
 /* ==================== 内部变量 ==================== */
+/* ⭐ S22: 节点侧不维护独立在线位(s_online 已移除),
+ * 在线状态以网关轮询交互为准(网关侧三态模型 S9/S12/S13) */
 
-static uint8_t  s_online = 0;           /* 在线状态 */
 static char     s_rxBuf[128];           /* 接收缓冲区 */
 static uint16_t s_rxLen = 0;            /* 接收数据长度 */
 static uint8_t  loraSeq  = 0;           /* v2 协议帧序列号, 每次发送 ++, 0..255 循环 */
@@ -274,50 +275,47 @@ void LoRa_Node_Init(void)
      * 当前 LoRa 模块通过串口透传方式使用, 默认为定点传输模式
      * 无需额外 AT 指令配置 */
 
-    s_online = 0;
     s_rxLen = 0;
 
     Usart_Printf(USART_DEBUG, "[LoRa] 初始化: 信道=%d 波特率=%d (AUX=PA11)\r\n",
                  LORA_CHANNEL, LORA_BAUD);
 }
 
-void LoRa_Node_SendCert(const NodeCert_t *cert)
+void LoRa_Node_SendCert(const LoraNodeCert_t *cert)
 {
-    uint8_t buf[1 + sizeof(NodeCert_t)];
-    NodeCert_t tmp;
+    uint8_t buf[1 + sizeof(LoraNodeCert_t)];
+    LoraNodeCert_t tmp;
 
     /* v2 协议: 发送前填 seq + 算 CRC, 防止链路错位/噪声被网关当合法帧解析 */
     memcpy(&tmp, cert, sizeof(tmp));
     tmp.seq = ++loraSeq;
-    tmp.crc16 = lora_crc16((const uint8_t*)&tmp, offsetof(NodeCert_t, crc16));
+    tmp.crc16 = lora_crc16((const uint8_t*)&tmp, offsetof(LoraNodeCert_t, crc16));
 
     /* 帧格式: 帧头 + [帧头字节][证书结构体]
      * 注意: 通过一次 LoRa_SendFrame 发送, 帧头/数据由底层处理,
      *       模块自动添加目标地址帧, 无需手动填充 */
     buf[0] = LORA_FRAME_CERT;
-    memcpy(buf + 1, &tmp, sizeof(NodeCert_t));
+    memcpy(buf + 1, &tmp, sizeof(LoraNodeCert_t));
     LoRa_SendFrame(LORA_GATEWAY_ADDR, LORA_CHANNEL, buf, sizeof(buf));
 
     Usart_Printf(USART_DEBUG, "[LoRa] 发送-> 证书: 产品=%s 设备=%s valid=%d seq=%d crc=%04X\r\n",
                  cert->ProductKey, cert->DeviceName, cert->valid, tmp.seq, tmp.crc16);
 }
 
-void LoRa_Node_SendData(const NodeData_t *data)
+void LoRa_Node_SendData(const LoraNodeData_t *data)
 {
-    uint8_t buf[1 + sizeof(NodeData_t)];
-    NodeData_t tmp;
+    uint8_t buf[1 + sizeof(LoraNodeData_t)];
+    LoraNodeData_t tmp;
 
     /* v2 协议: 发送前填 seq + 算 CRC, 网关端 CRC 不通过的帧直接丢弃 */
     memcpy(&tmp, data, sizeof(tmp));
     tmp.seq = ++loraSeq;
-    tmp.crc16 = lora_crc16((const uint8_t*)&tmp, offsetof(NodeData_t, crc16));
+    tmp.crc16 = lora_crc16((const uint8_t*)&tmp, offsetof(LoraNodeData_t, crc16));
 
     /* 帧格式: 帧头 + [帧头字节][数据结构体], 一次性发送(与 SendCert 相同) */
     buf[0] = LORA_FRAME_DATA;
-    memcpy(buf + 1, &tmp, sizeof(NodeData_t));
+    memcpy(buf + 1, &tmp, sizeof(LoraNodeData_t));
     LoRa_SendFrame(LORA_GATEWAY_ADDR, LORA_CHANNEL, buf, sizeof(buf));
-
-    s_online = 1;   /* 标记为已上线 */
 
     Usart_Printf(USART_DEBUG, "[LoRa] 发送-> 数据: 位置=%d 距离=%dcm 地磁=%d 时长=%lus LED=%d seq=%d crc=%04X\r\n",
                  data->ParkStatus, data->Ultrasonic, data->GeoMagnetic,
@@ -364,9 +362,4 @@ uint8_t LoRa_Node_Poll(LoRaCmdCallback cb)
     LoRa_FlushStaleIfFull();
 
     return processed;
-}
-
-uint8_t LoRa_Node_IsOnline(void)
-{
-    return s_online;
 }

@@ -309,7 +309,7 @@ static const char *stateStr(uint8_t s)
  * rssi=0 表示离线/未测到信号, 显示 0 格. (此前用距上次刷新时长模拟, 已废弃) */
 static uint8_t sigLevel(const NodeData &nd)
 {
-    if (!nd.online || nd.rssi == 0) return 0;   /* 离线 或 未测到RSSI */
+    if (!nd.linkAlive || nd.rssi == 0) return 0;   /* 链路无响应 或 未测到RSSI */
     if (nd.rssi > -55) return 4;                /* 信号很好 */
     if (nd.rssi > -67) return 3;                /* 好 */
     if (nd.rssi > -78) return 2;                /* 一般 */
@@ -324,7 +324,7 @@ static uint8_t scanFound(void)
 {
     uint8_t n = 0;
     for (uint8_t i = 0; i < nodeCount; i++)
-        if (nodes[i].online) n++;
+        if (nodes[i].linkAlive) n++;   /* S9: 链路存活即确认找到 */
     return n;
 }
 
@@ -712,7 +712,8 @@ static void drawRuntime(void)
         }
 
         NodeData &nd = nodes[slot];
-        bool err = !nd.online;
+        /* 异常 = 链路失联 或 节点滞留 Boot (未提供服务, 文档 6 节语义) */
+        bool err = !nd.linkAlive || (nd.mode == NODE_MODE_BOOT);
         uint16_t col = err ? SSD1306_BLACK : SSD1306_WHITE;
 
         /* 异常反显: 整行白底 + 黑字 */

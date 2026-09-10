@@ -183,13 +183,16 @@ static void activeEvent(void)
      * 上行闸门: 两次 uploadAll 至少隔 UPLOAD_MIN_INTERVAL_MS(1s),
      * 配合平台"上行≤1次/s"限速, 多节点同时变状态也不超;
      * dataChanged 被闸门挡住时保持置位, 下一拍(≤1s后)自动补发.
+     * ⭐ S31: 存在待代下线时也按 1s 快排, 让"先统一下架"尽快完成,
+     * 缩短 lora_tick 为此暂停轮询的窗口.
      * OTA 期间暂停: LoRa 链路被 OTA 占用, 节点缓存是升级前旧值,
      * 且节点正在升级/重启, 不应把旧状态/旧版本推给平台 */
     if (sysEventFlag & SYS_EVENT_MQTT_CONNECTED)
     {
         if (ota_getState() == OTA_IDLE &&
             (now - lastUpload >= UPLOAD_MIN_INTERVAL_MS) &&
-            (dataChanged || (now - lastUpload >= UPLOAD_INTERVAL)))
+            (dataChanged || onenet_logoutPending() ||
+             (now - lastUpload >= UPLOAD_INTERVAL)))
         {
             onenet_uploadAll();
             lastUpload  = now;
@@ -205,12 +208,9 @@ static void passiveEvent(void)
      * OTA 期间: lora_tick 内部已暂停发轮询/控制命令, 只收字节喂 OTA 响应 */
     lora_tick();
 
-    /* 2. 节点超时离线检测 (OTA 期间跳过: 节点在升级中不算掉线,
-     *    避免升级中途被标记离线触发 OneNET 下线上报) */
-    if (ota_getState() == OTA_IDLE)
-    {
-        checkNodeTimeout();
-    }
+    /* 2. 节点超时离线检测 (S13 已并入 lora_tick 轮次边界:
+     *    advanceNextNode 每扫完一轮调 nodeRoundCompleted 统计,
+     *    OTA 暂停期无轮次边界, 天然不误判升级中的节点) */
 
     /* 3. MQTT 保活 + 接收下行命令 */
     if (sysEventFlag & SYS_EVENT_MQTT_CONNECTED)
@@ -240,6 +240,9 @@ void setup(void)
     DBG_PRINTLN("\n=============================");
     DBG_PRINTLN(" 智能停车场网关 v2.0    ");
     DBG_PRINTLN(" LoRa 定点 + 二进制 + 轮询 ");
+    /* 版本横幅: 现场核对烧录固件与平台下发版本是否一致, 排查陈旧固件 */
+    DBG_PRINTF(" 固件 %s  编译于 %s %s\n",
+               GW_FW_VERSION, __DATE__, __TIME__);
     DBG_PRINTLN("=============================");
     /* M0 / M1 已硬件直连 GND: 强制 M0=M1=0 高时效模式,
      * 不再需要 MCU 先设引脚, 此处直接进入外设初始化.
@@ -318,6 +321,12 @@ void setup(void)
 /* ==================== loop ==================== */
 void loop(void)
 {
+    /* ⭐ S19: 证书/阈值变更脏标记 → 主循环异步落盘.
+     * 上一拍(lora_tick/MQTT回调)收到证书或阈值变更只置脏标记,
+     * 本拍开头在 LoRa 下一轮发送前落盘, 不阻塞 lora_tick 内
+     * AUX 等待/状态机/OTA 分包等时序; 无脏标记时零开销 */
+    persistCertsIfDirty();
+
     /* 长按5秒: 进入 AP+Web 重新配网 (阻塞, 保存后重启) */
     checkConfigKeyLongPress();
 
@@ -356,7 +365,10 @@ void loop(void)
                         ver.trim();
                         DBG_PRINTF("[SYS] 触发OTA: 节点%d, URL=%s, 版本=%s\n",
                                    nodeId, url.c_str(), ver.c_str());
-                        ota_start(nodeId, url.c_str(), ver.c_str());
+                        /* ⭐ S14: 统一走 OTA 判定器入口 (与自动路径同轨,
+                         * Boot节点且有固件→文件自愈重发; 否则下载URL固件触发) */
+                        if (!ota_manualTrigger(nodeId, url.c_str(), ver.c_str()))
+                            DBG_PRINTLN("[SYS] OTA 忙或节点无效, 触发失败");
                     }
                     else
                         DBG_PRINTLN("[SYS] OTA格式: OTA <nodeId> <url> <version>");

@@ -18,6 +18,19 @@ typedef struct {
 
 static const uint8_t CERTS_MAGIC = 0xA6;  /* 文件有效性标识 (含sensorDistanceCm) */
 
+/* ⭐ S19: 证书/阈值持久化脏标记. 变更只置位, 由主循环 persistCertsIfDirty()
+ * 统一异步落盘, 消除 Flash 擦写在 LoRa 轮询/MQTT 回调链中的同步阻塞 */
+static bool s_certsDirty = false;
+
+void certsMarkDirty(void)   { s_certsDirty = true; }
+
+void persistCertsIfDirty(void)
+{
+    if (!s_certsDirty) return;   /* 无变更: 零开销 */
+    s_certsDirty = false;
+    saveCertsToLittleFS();       /* 有变更才写 Flash (节流: 仅变更后写) */
+}
+
 void saveCertsToLittleFS(void)
 {
     if (!LittleFS.begin()) return;
@@ -76,7 +89,8 @@ void loadCertsFromLittleFS(void)
         if (slot < 0) continue;
 
         nodes[slot].certSent = true;
-        nodes[slot].online   = false;    /* 存证不代在线, 等收到 LoRa 应答才改 true */
+        /* 存证不代在线: linkAlive=false/mode=UNKNOWN (registerNode 已清零),
+         * 等收到 LoRa 应答 (PONG/DATA/CERT) 才由 updateNodeState 激活 */
         memcpy(nodes[slot].productKey, pc.productKey, sizeof(nodes[slot].productKey));
         memcpy(nodes[slot].deviceName, pc.deviceName, sizeof(nodes[slot].deviceName));
         nodes[slot].loginPending = true;  /* 重启后需重新代上线 */
@@ -84,22 +98,20 @@ void loadCertsFromLittleFS(void)
         DBG_PRINTF("[LFS] 加载证书: 节点%d (%s/%s)\n",
                    pc.nodeId, pc.productKey, pc.deviceName);
 
-        /* ⭐ 加载僵尸车阈值: 如有保存则设置待下发标志, 重置重试计数 */
+        /* ⭐ S30: 只加载阈值目标值, 不再置位下发标志. 重发统一由"节点 PONG
+         * 重新上线时兜底"(lora_handler PONG,APP 分支)触发——网关断电重启、
+         * 节点断电重连/重启、OTA 成功后节点重启都会先 PING 再 PONG, 一处覆盖 */
         if (pc.zombieThresholdSec > 0)
         {
             nodes[slot].thresholdValue = pc.zombieThresholdSec;
-            nodes[slot].thresholdNeedsUpdate = true;  /* PONG 确认在线后自动下发 */
-            nodes[slot].thresholdRetryCount = 0;       /* 重启后重置重试计数 */
-            DBG_PRINTF("[LFS] 节点%d 僵尸车阈值=%lu秒 (待PONG下发)\n",
+            DBG_PRINTF("[LFS] 节点%d 僵尸车阈值=%lu秒 (待PONG兜底重发)\n",
                        pc.nodeId, (unsigned long)pc.zombieThresholdSec);
         }
-        /* ⭐ 加载超声波距离阈值: 如有保存则设置待下发标志 */
+        /* ⭐ 超声波距离阈值同理: 只加载目标值, 待 PONG 兜底重发 */
         if (pc.sensorDistanceCm > 0)
         {
             nodes[slot].sensorDistanceValue = pc.sensorDistanceCm;
-            nodes[slot].sensorDistanceNeedsUpdate = true;
-            nodes[slot].sensorDistanceRetryCount = 0;
-            DBG_PRINTF("[LFS] 节点%d 超声波距离阈值=%ucm (待PONG下发)\n",
+            DBG_PRINTF("[LFS] 节点%d 超声波距离阈值=%ucm (待PONG兜底重发)\n",
                        pc.nodeId, pc.sensorDistanceCm);
         }
     }
@@ -129,7 +141,8 @@ int registerNode(uint8_t nodeId)
     memset(&nodes[slot], 0, sizeof(NodeData));
     nodes[slot].nodeId     = nodeId;
     nodes[slot].lastUpdate = millis();
-    nodes[slot].online     = true;
+    /* 三态状态保持 memset 初值: linkAlive=false/mode=UNKNOWN/serviceOnline=false,
+     * 由调用方随后 updateNodeState(收到帧) 或等待首次 LoRa 应答激活 */
     nodes[slot].certSent   = false;
     nodeCount++;
     DBG_PRINTF("[节点] 注册 节点%d (槽位 %d, 共 %d)\n",
@@ -156,11 +169,19 @@ void updateNodeFromRaw(uint8_t nodeId, const LoraNodeData_t *raw)
     if (ultrasonic > 1000) { ultrasonic    = 1000; }   /* 距离上限 1000cm */
     if (occupiedTime > 86400) { occupiedTime = 86400; } /* 时长上限 1 天 */
 
-    /* ⭐ 仅车位状态变化才触发立即上报; 距离/地磁/LED/阈值等走 15s 定时兜底,
-     * 避免距离微小抖动导致每次轮询都上报刷屏平台 */
-    bool changed = (nd.parkStatus != parkStatus);
+    /* ⭐ S23: 全字段 dirty 对比 — 任何业务字段变化都触发立即上报,
+     * 不再只看 parkStatus (OccupiedTime 等字段截断变化此前不触发上报, 数据陈旧);
+     * 上行已有 UPLOAD_MIN_INTERVAL_MS(1s) 闸门限频 + UPLOAD_INTERVAL(5s) 定时兜底,
+     * 距离微小抖动不会刷屏平台. rssi 每帧都变且非业务字段, 不参与对比 */
+    bool changed =
+        (nd.parkStatus         != parkStatus) ||
+        (nd.ultrasonic         != ultrasonic) ||
+        (nd.occupiedTime       != occupiedTime) ||
+        (nd.geoMagnetic        != (raw->GeoMagnetic != 0)) ||
+        (nd.led                != (raw->LED != 0)) ||
+        (nd.zombieThresholdSec != raw->ZombieThreshold) ||
+        (nd.sensorDistanceCm   != raw->SensorDistanceCm);
 
-    bool wasOffline = !nd.online;
     nd.parkStatus   = parkStatus;
     nd.geoMagnetic   = (raw->GeoMagnetic != 0);   /* 任意非零值转 0/1 */
     nd.ultrasonic   = ultrasonic;
@@ -168,13 +189,11 @@ void updateNodeFromRaw(uint8_t nodeId, const LoraNodeData_t *raw)
     nd.led          = (raw->LED != 0);
     nd.zombieThresholdSec = raw->ZombieThreshold;   /* ⭐ 节点当前生效阈值, 供 pack/post 上报观看 */
     nd.sensorDistanceCm   = raw->SensorDistanceCm;   /* ⭐ 节点当前生效超声波距离阈值 */
-    nd.lastUpdate   = millis();
-    nd.online       = true;
+    /* ⭐ S29: 收到首帧业务数据 → 允许代子设备上报属性.
+     * (上报门控 hasDataFrame: 节点上线但数据帧未到时拦截, 避免全 0 垃圾快照) */
+    nd.hasDataFrame = true;
+    updateNodeState((uint8_t)slot, NODE_EVT_DATA);   /* 统一更新 linkAlive/mode/serviceOnline/lastUpdate (S9) */
     sysEventFlag |= (1 << (nd.nodeId - 1));   /* 同步事件标志位 */
-
-    /* 离线恢复: 若之前已代上线过, 需要重新代上线 */
-    if (wasOffline && nd.certSent && !nd.subLogin)
-        nd.loginPending = true;
 
     if (changed) dataChanged = true;
 }
@@ -195,10 +214,12 @@ void updateNodeCert(uint8_t nodeId, const LoraNodeCert_t *cert)
     bool certChanged = nd.certSent &&
                        ((memcmp(oldPk, cert->ProductKey, sizeof(oldPk)) != 0) ||
                         (memcmp(oldDn, cert->DeviceName, sizeof(oldDn)) != 0));
+    bool wasCertSent = nd.certSent;   /* ⭐ S19: 首次收到判断用旧值 */
 
     nd.certSent   = true;
-    nd.online     = true;
-    nd.lastUpdate = millis();     /* 收到证书也算一次 LoRa 活性确认, 防止被超时误判离线 */
+    /* 收到证书 = 链路活性确认 (S9): 证书只有 App 上报 → 链路活 + 模式=APP;
+     * subLogin/loginPending 由下方证书内容校验逻辑管理 */
+    updateNodeState((uint8_t)slot, NODE_EVT_CERT);
     nd.subLogin   = false;        /* 证书更新后需要重新代上线 */
     strncpy(nd.productKey, cert->ProductKey, sizeof(nd.productKey) - 1);
     nd.productKey[sizeof(nd.productKey) - 1] = '\0';
@@ -214,8 +235,12 @@ void updateNodeCert(uint8_t nodeId, const LoraNodeCert_t *cert)
     nd.logoutPending = false;
     dataChanged = true;
 
-    /* 证书已更新 -> 持久化到 Flash, 重启后免 LoRa 重新上报 */
-    saveCertsToLittleFS();
+    /* ⭐ S19: 证书已更新 -> 置脏标记, 主循环 persistCertsIfDirty 异步落盘.
+     * 不再同步写 Flash (擦写耗时阻塞 LoRa 轮询/MQTT 回调时序);
+     * 仅首次收到或内容变化才置脏 (周期 CER 校验重复上报相同证书不落盘 = 节流,
+     * 减少 Flash 磨损; 阈值变更由 onenet_handler 侧 certsMarkDirty 覆盖) */
+    if (!wasCertSent || certChanged)
+        certsMarkDirty();
 
     /* 同地址换新节点: 打印变更日志 */
     if (certChanged)
@@ -224,36 +249,133 @@ void updateNodeCert(uint8_t nodeId, const LoraNodeCert_t *cert)
                    cert->ProductKey, cert->DeviceName);
 }
 
-void checkNodeTimeout(void)
+/* ⭐ 三态状态统一赋值入口 (S9): linkAlive/mode/serviceOnline 只经此修改.
+ * 事件驱动: 收到帧(PONG/DATA/CERT)/快速路径超时(DATA_MISS)/超时窗口(TIMEOUT).
+ * 置 true 与置 false 的路径在此成对出现, 消除散落赋值点.
+ * 返回 true = 节点由"链路死"转"链路活"(离线恢复跃迁) */
+bool updateNodeState(uint8_t slot, uint8_t event)
+{
+    if (slot >= nodeCount) return false;
+    NodeData &nd = nodes[slot];
+    bool wasAlive = nd.linkAlive;
+
+    switch (event)
+    {
+    case NODE_EVT_PONG_APP:   /* PONG / PONG,APP: 链路活 + 模式=APP + 业务在线 */
+        nd.linkAlive     = true;
+        nd.mode          = NODE_MODE_APP;
+        nd.serviceOnline = true;
+        nd.dataMissCount = 0;
+        nd.lastUpdate    = millis();
+        break;
+
+    case NODE_EVT_PONG_BOOT:  /* PONG,BOOT: 链路活 + 模式=BOOT + 业务摘除(不索数据) */
+        nd.linkAlive     = true;
+        nd.mode          = NODE_MODE_BOOT;
+        nd.serviceOnline = false;
+        nd.dataMissCount = 0;
+        nd.lastUpdate    = millis();
+        break;
+
+    case NODE_EVT_DATA:       /* 业务数据帧: 只有 App 上报 → 链路活 + 模式=APP + 业务在线
+                               * (之前误判 BOOT? 收到数据帧即说明已升级/运行到 App) */
+        nd.linkAlive     = true;
+        nd.mode          = NODE_MODE_APP;
+        nd.serviceOnline = true;
+        nd.dataMissCount = 0;
+        nd.lastUpdate    = millis();
+        break;
+
+    case NODE_EVT_CERT:       /* 证书帧: 只有 App 上报 → 链路活 + 模式=APP.
+                               * serviceOnline 不强制改: 证书后还需 PONG/DATA 确认业务就绪 */
+        nd.linkAlive     = true;
+        nd.mode          = NODE_MODE_APP;
+        nd.dataMissCount = 0;
+        nd.lastUpdate    = millis();
+        break;
+
+    case NODE_EVT_TIMEOUT:    /* 超时窗口到期: 链路死 + 业务摘除 (mode 保留, 恢复后沿用) */
+        nd.linkAlive     = false;
+        nd.serviceOnline = false;
+        nd.dataMissCount = 0;
+        break;
+
+    case NODE_EVT_DATA_MISS:  /* 快速路径 DATA/CER 超时: 计数+1, 达上限业务摘除转 PING */
+        if (nd.linkAlive)
+        {
+            nd.dataMissCount++;
+            if (nd.dataMissCount >= DATA_MISS_OFFLINE_MAX)
+                nd.serviceOnline = false;
+        }
+        break;
+
+    default:
+        break;
+    }
+
+    /* ⭐ S14: 节点确认运行 App(收到 PONG/DATA/CERT) → 已离开 Boot, 不再等待 OTA */
+    if (nd.mode == NODE_MODE_APP)
+        nd.bootPending = false;
+
+    /* 离线恢复跃迁: 链路死 → 活, 已拿证书且未代上线 → 重新标记待代上线 */
+    bool revived = !wasAlive && nd.linkAlive;
+    if (revived && nd.certSent && !nd.subLogin)
+        nd.loginPending = true;
+
+    return revived;
+}
+
+/* ⭐ S13: 节点离线判定改用"轮询轮次"计 (替代原墙钟动态超时).
+ * 每轮轮询结束(advanceNextNode 回绕)由 lora_handler 调用一次:
+ *   - 本轮(lastUpdate >= 上轮边界)有响应的节点 → missedRounds 清零
+ *   - 本轮无响应的节点 → missedRounds+1, 连续 NODE_MISSED_ROUNDS_MAX 轮判离线
+ * 相比旧墙钟超时(timeout = 2*(base + 节点数*每节点耗时))的优势:
+ *   - 不受轮询一圈耗时/节点数量影响, 多节点下不会因轮询慢而误判
+ *   - OTA 暂停期 lora_tick 提前返回, 无轮次边界触发, 天然不误判升级中的节点
+ *   - 单帧丢失后下一轮 PING 复核成功即清零, 容忍偶发丢帧 */
+static uint32_t s_roundBoundaryMs = 0;   /* 上一轮轮询结束时刻(本轮起点) */
+
+void nodeRoundCompleted(void)
 {
     uint32_t now = millis();
-    /* 动态超时: 基准 + 已发现节点数 * 每节点附加耗时
-     * 节点越多轮询一圈越久, 超时自动放宽避免误判离线;
-     * 节点越少超时越短, 离线更快感知 */
-    /* ⭐⭐⭐ 离线宽限 ×2: LoRa 单帧丢包/单轮 DATA 无响应属正常现象(首帧易丢),
-     * 若按原始窗口(单节点6s≈2轮机会)判定, 一次丢帧 + 3s响应等待就可能正好凑满
-     * 窗口 → 把活着的节点误判离线, 触发平台"子设备代下线→再上线"整网抖动.
-     * ×2 后单节点约12s(连续错过约2轮轮询仍无数据)才真正离线:
-     * 既容忍偶发丢帧, 又不影响真离线感知(离线后的 PING 探测节奏不依赖此窗口) */
-    uint32_t timeoutMs = 2u * (NODE_DATA_TIMEOUT_BASE +
-                               (uint32_t)nodeCount * NODE_PER_NODE_TIMEOUT);
+    if (s_roundBoundaryMs == 0)   /* 首轮: 无上轮边界可对比, 仅记下边界 */
+    {
+        s_roundBoundaryMs = now;
+        return;
+    }
+
     for (uint8_t i = 0; i < nodeCount; i++)
     {
-        if (nodes[i].online && (now - nodes[i].lastUpdate > timeoutMs))
+        if (!nodes[i].linkAlive) continue;   /* 已离线节点不再累计 */
+
+        if (nodes[i].lastUpdate >= s_roundBoundaryMs)
         {
-            nodes[i].online = false;
-            sysEventFlag &= ~(1 << (nodes[i].nodeId - 1));  /* 清除事件标志位 */
-            /* 已代上线过, 需要通知平台子设备离线 */
-            if (nodes[i].subLogin)
+            /* 本轮收到过任何有效响应 (PONG/DATA/CERT) → 清零 */
+            nodes[i].missedRounds = 0;
+        }
+        else
+        {
+            nodes[i].missedRounds++;
+            if (nodes[i].missedRounds >= NODE_MISSED_ROUNDS_MAX)
             {
-                nodes[i].logoutPending = true;
-                nodes[i].subLogin = false;
+                /* 连续 N 轮轮询无响应: 判离线 (逻辑同旧 checkNodeTimeout) */
+                updateNodeState(i, NODE_EVT_TIMEOUT);
+                sysEventFlag &= ~(1 << (nodes[i].nodeId - 1));  /* 清除事件标志位 */
+                /* 已代上线过, 需要通知平台子设备离线 */
+                if (nodes[i].subLogin)
+                {
+                    nodes[i].logoutPending = true;
+                    nodes[i].subLogin = false;
+                }
+                nodes[i].loginPending = false;
+                nodes[i].missedRounds = 0;
+                dataChanged = true;
+                DBG_PRINTF("[节点] 节点%d 离线 (连续%u轮轮询无响应)\n",
+                           nodes[i].nodeId, (unsigned)NODE_MISSED_ROUNDS_MAX);
             }
-            nodes[i].loginPending = false;
-            dataChanged = true;
-            DBG_PRINTF("[节点] 节点%d 离线 (超时)\n", nodes[i].nodeId);
         }
     }
+    s_roundBoundaryMs = now;   /* 本轮结束, 边界前移 */
 }
 
 void resetAllNodes(void)

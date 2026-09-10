@@ -23,15 +23,18 @@
 #include <stddef.h>   /* offsetof (CRC 计算用) */
 #include "stm32f10x.h"
 
+/* ⭐ S11 协议单一事实源: 帧头常量/定点地址/协议版本/CRC16/数据结构
+ * 统一由共享头 lora_protocol.h 提供 (shared/ 目录, 与网关强制一致) */
+#include "lora_protocol.h"
+
 /* ==================== LoRa 通信参数 ====================
  * 节点身份(产品ID/设备名)由 **Boot 首次启动**固化到 Flash 配置区,
  * App 端统一从 node_config.h 的运行时变量引用:
  *   - g_nodeProductKey / g_nodeDeviceName
  * 身份默认宏位于 BootLoader/User/boot_cfg.h (NODE_PRODUCT_KEY/NODE_DEVICE_NAME)
  * 空中寻址使用 LoRa 模块硬件地址(ADDH/ADDL, 烧录时人工配置), 与代码无关.
- * 本头文件只保留 LoRa 通信相关参数 */
-#define LORA_GATEWAY_ADDR   0x0000      /* 网关地址 */
-#define LORA_CHANNEL        0x00        /* 信道(0), DX-LR22模块: 00=433.15MHz */
+ * 本头文件只保留 LoRa 通信相关参数
+ * (LORA_GATEWAY_ADDR / LORA_CHANNEL 已由共享头提供) */
 #define LORA_BAUD           9600        /* LoRa 串口波特率，与网关端 SoftwareSerial 一致 */
 
 /* ==================== LoRa 模块 AUX 引脚 ====================
@@ -51,75 +54,6 @@
  * 子设备证书(产品ID/设备名)默认值宏已迁移至 node_config.h
  * (NODE_PRODUCT_KEY / NODE_DEVICE_NAME) */
 
-/* ==================== 帧头定义 ==================== */
-/* 数据帧头字节(子设备→网关), 借鉴参考项目帧头方案 */
-#define LORA_FRAME_CERT     0xA1        /* 证书数据帧 */
-#define LORA_FRAME_DATA     0xB1        /* 传感器数据帧 */
-#define LORA_FRAME_ACK      0xC1        /* 命令执行确认帧 */
-#define LORA_FRAME_OTA_OK   0xD1        /* OTA 接收成功 */
-#define LORA_FRAME_OTA_RETRY 0xE1       /* OTA 要求重发 */
-
-/* ==================== 协议版本 ==================== */
-#define LORA_PROTO_VERSION    3   /* v3: 移除 LedEnable 字段(LedEnable 属性已迁移为 SetLed 服务) */
-
-/* ==================== CRC16/MODBUS (工业标准, 多项式 0xA001) ====================
- * 覆盖范围: 整个结构体除 crc16 字段外的所有字节
- * 漏检概率 ~ 1/65536, 对 19-32 字节短帧完全够用 (LoRaWAN 也用 CRC16)
- * 两端共用此函数, static 关键字避免多文件 link 冲突 */
-static inline uint16_t lora_crc16(const uint8_t *data, size_t len)
-{
-    uint16_t crc = 0xFFFF;
-    size_t i;
-    int b;
-    for (i = 0; i < len; i++)
-    {
-        crc ^= (uint16_t)data[i];
-        for (b = 0; b < 8; b++)
-        {
-            if (crc & 1) crc = (uint16_t)((crc >> 1) ^ 0xA001);
-            else         crc = (uint16_t)(crc >> 1);
-        }
-    }
-    return crc;
-}
-
-/* ==================== 数据结构 ==================== */
-
-/* 节点传感器数据(v3: 18 字节, 加 seq + crc16)
- * ⭐ v3 协议: 移除 LedEnable 字段(平台原 LedEnable 属性已迁移为 SetLed 服务), 19B → 18B
- * ⭐ v2 协议: 末尾追加 seq(1B) + crc16(2B), 16B → 19B
- *   - seq: 节点每次发送 ++, 0..255 循环 (网关端可记录检测重复/丢包)
- *   - crc16: CRC16/MODBUS, 覆盖 [结构体首, offsetof(crc16)) 字节
- * 节点端发送前填, 网关端接收校验, 不通过直接丢弃 */
-#pragma pack(push, 1)
-typedef struct {
-    uint8_t  ParkStatus;      /* 0=空闲, 1=有车, 2=僵尸车 */
-    uint8_t  GeoMagnetic;     /* 0/1 */
-    uint16_t Ultrasonic;      /* 距离(cm) */
-    uint32_t OccupiedTime;    /* 占用时长(秒) */
-    uint8_t  LED;             /* LED(报警灯)当前状态 0/1 */
-    uint32_t ZombieThreshold; /* ⭐ 僵尸车判定阈值(秒), 当前生效值, 上报给平台观看 */
-    uint16_t SensorDistanceCm; /* ⭐ 超声波判定距离阈值(cm), 当前生效值 */
-    /* === v2 协议新增字段 (放末尾, 兼容前向布局) === */
-    uint8_t  seq;             /* 帧序列号, 节点每次发送 ++, 0..255 循环 */
-    uint16_t crc16;           /* CRC16/MODBUS 校验, 覆盖前面所有字节 (不含本字段) */
-} NodeData_t;
-#pragma pack(pop)
-
-/* 节点证书(v2: 32 字节, 加 seq + crc16)
- * 首次上线时发送给网关, 网关代为上线 OneNET */
-#pragma pack(push, 1)
-typedef struct {
-    uint8_t  valid;           /* 0=未配置, 1=有效 */
-    char     ProductKey[12];  /* OneNET 产品ID */
-    char     DeviceName[8];  /* OneNET 设备名称(如 Park001, 7字符+null) */
-    char     FwVersion[8];  /* 节点固件版本(如 "v2.521", 6字符+null), 供网关 OTA 检测 */
-    /* === v2 协议新增字段 === */
-    uint8_t  seq;             /* 帧序列号 */
-    uint16_t crc16;           /* CRC16/MODBUS 校验, 覆盖前面所有字节 */
-} NodeCert_t;
-#pragma pack(pop)
-
 /* ==================== 命令回调 ==================== */
 /* 网关下行命令回调函数类型
  * cmd:  命令名称(如 "AT+DATA", "AT+CER", "AT+SetLed")
@@ -138,15 +72,15 @@ void LoRa_Node_Init(void);
 
 /****************************************************************************
  * 发送证书给网关(首次上线/网关查询时调用)
- * cert: 节点证书结构体指针
+ * cert: 节点证书结构体指针 (LoraNodeCert_t 见共享头 lora_protocol.h)
  ****************************************************************************/
-void LoRa_Node_SendCert(const NodeCert_t *cert);
+void LoRa_Node_SendCert(const LoraNodeCert_t *cert);
 
 /****************************************************************************
  * 发送传感器数据给网关(网关查询数据时调用)
- * data: 节点数据结构体指针
+ * data: 节点数据结构体指针 (LoraNodeData_t 见共享头 lora_protocol.h)
  ****************************************************************************/
-void LoRa_Node_SendData(const NodeData_t *data);
+void LoRa_Node_SendData(const LoraNodeData_t *data);
 
 /****************************************************************************
  * 发送命令执行确认给网关
@@ -162,11 +96,5 @@ void LoRa_Node_SendAck(const char *cmd);
  *       节点解析后回调, 回调中可调用 SendData/SendCert 发送响应
  ****************************************************************************/
 uint8_t LoRa_Node_Poll(LoRaCmdCallback cb);
-
-/****************************************************************************
- * 是否已被网关轮询到(在线状态)
- * 返回值: 1=在线(曾被网关查询过), 0=离线
- ****************************************************************************/
-uint8_t LoRa_Node_IsOnline(void);
 
 #endif /* __LORA_NODE_H */

@@ -9,6 +9,11 @@
 #ifndef __BOOT_CFG_H
 #define __BOOT_CFG_H
 
+/* ⭐ S11 协议单一事实源: 控制字符(SOH/ACK/NAK/EOT/CAN)/OTA_FW_MAGIC/
+ * OTA_PACKET_DATA_SIZE/LORA_FRAME_ACK/LORA_GATEWAY_ADDR/LORA_CHANNEL
+ * 统一由共享头 lora_protocol.h 提供 (shared/ 目录, 与网关/App 强制一致) */
+#include "lora_protocol.h"
+
 /* ==================== 节点身份配置区 ====================
  * ⭐ 节点身份由 Boot 首次启动写入配置区(0x08003000), OTA 只擦写 APP 区,
  *    配置区不受影响 → 各节点可共用同一份纯净的 OTA 固件包.
@@ -30,7 +35,7 @@
 #define NODE_PRODUCT_KEY    "04kjwU9TC7"    /* 子设备产品ID */
 #endif
 #ifndef NODE_DEVICE_NAME
-#define NODE_DEVICE_NAME    "Park001"       /* 子设备设备名(每节点唯一) */
+#define NODE_DEVICE_NAME    "Park002"       /* 子设备设备名(每节点唯一) */
 #endif
 
 /* 节点身份配置结构体(与 App 端 node_config.h 完全一致, 按2字节对齐写Flash) */
@@ -61,16 +66,11 @@ typedef struct {
  * 切勿超过 48KB(0xC000), 否则 OTA 可能写穿 Flash 或覆盖标志页. */
 #define APP_MAX_SIZE            (47 * 1024)
 
-/* 升级标志页地址(0x0800FC00, 页63, 最后1KB) */
-#define OTA_FLAG_ADDR           0x0800FC00
-
-/* 标志值 */
-#define OTA_FLAG_GO             0xA5A5A5A5  /* 需要升级 */
-#define OTA_FLAG_DONE           0x00000000  /* 升级完成 */
+/* ⭐ OTA 升级标志页常量与读写接口已迁移到共享头 boot_flash.h (S8/S10 单一事实源)
+ *    Boot/App 统一引用 <boot_flash.h>, 此处不再重复定义 */
 
 /* ==================== 固件文件头(12字节) ==================== */
-/* 与 Tool/fw_pack.py 一致 */
-#define FW_MAGIC                0xA55A
+/* 与 Tool/fw_pack.py 一致; 魔数 OTA_FW_MAGIC 已由共享头 lora_protocol.h 提供 (S11) */
 
 #pragma pack(push, 1)
 typedef struct {
@@ -82,21 +82,22 @@ typedef struct {
 #pragma pack(pop)
 
 /* ==================== 升级协议 ==================== */
-/* Xmodem 风格, 链路用 LoRa 定点传输 */
-
-/* 控制字符 */
-#define SOH 0x02    /* 数据包开始 */
-#define ACK 0x03    /* 确认 */
-#define NAK 0x15    /* 否定 */
-#define EOT 0x04    /* 传输结束 */
-#define CAN 0x18    /* 取消 */
-
-/* 数据包大小 */
-#define OTA_PACKET_DATA_SIZE    128
+/* Xmodem 风格, 链路用 LoRa 定点传输
+ * 控制字符(SOH/ACK/NAK/EOT/CAN) 与 数据包大小 OTA_PACKET_DATA_SIZE
+ * 已由共享头 lora_protocol.h 提供 (S11), 此处不再重复定义 */
 
 /* 超时(毫秒) */
 #define OTA_PACKET_TIMEOUT_MS   1000    /* 每包等待 */
-#define OTA_TOTAL_TIMEOUT_MS    120000  /* 总超时(2分钟), 擦除APP后计时 */
+#define OTA_TOTAL_TIMEOUT_MS    180000  /* 总超时(3分钟), 擦除APP后计时, 与网关对齐 */
+
+/* ⭐ 擦除后催发间隔(毫秒): APP 区已擦除且长时间收不到数据包时,
+ * 每间隔该时间主动发一次 NAK 催促网关重发(整链重试闭环的一部分),
+ * 配合 180s 总超时, 等待网关重新触发/重发 */
+#define OTA_ERASED_NAK_INTERVAL_MS 10000
+
+/* ⭐ 擦除后NAK催发上限次数: 网关连续无响应时停止催发,
+ * 防止网关侧任务异常(如文件被注销)后节点无限刷屏"催促网关" */
+#define OTA_ERASED_NAK_MAX       5
 
 /* ⭐ 首包等待(毫秒): 两阶段提交下, 收到有效固件头之前 APP 区未被擦除,
  * 旧 APP 完好 → 首包超时即可清标志回退旧 APP, 保证 ACK 丢失等
@@ -109,9 +110,8 @@ typedef struct {
 /* ==================== LoRa 定点地址 ==================== */
 /* 定点传输发送格式: [AddrH][AddrL][CH] + 数据
  * Boot 回复 ACK/NAK 等必须带目标(网关)地址头, 否则 LoRa 模块
- * 会把首个字节当地址头解析, 响应发不出去 */
-#define LORA_GATEWAY_ADDR       0x0000  /* 网关地址 */
-#define LORA_CHANNEL            0x00    /* 信道(0), DX-LR22模块: 00=433.15MHz */
+ * 会把首个字节当地址头解析, 响应发不出去
+ * LORA_GATEWAY_ADDR / LORA_CHANNEL 已由共享头 lora_protocol.h 提供 (S11) */
 
 /* ==================== 硬件配置 ==================== */
 #define LORA_BAUD               9600

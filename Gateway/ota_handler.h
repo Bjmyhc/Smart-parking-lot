@@ -29,10 +29,13 @@ typedef enum {
     OTA_SENDING,            /* 通过 LoRa 分包发送 */
     OTA_WAIT_ACK,           /* 等待节点 ACK/NAK */
     OTA_RETRY_PACKET,       /* 重发当前包 */
-    OTA_SEND_EOT,           /* 发送传输结束标志 */
+    OTA_SEND_EOT,           /* 发送传输结束标志 (第1个EOT, ⭐ S26 双EOT确认) */
+    OTA_SEND_EOT2,          /* ⭐ S26: 发送第2个EOT (连续两个0x04节点才确认结束) */
     OTA_WAIT_FINAL_ACK,     /* 等待最终 CRC32 验证 ACK */
     OTA_COMPLETE,           /* OTA 完成 */
-    OTA_FAILED              /* OTA 失败 */
+    OTA_FAILED,             /* OTA 失败 */
+    OTA_RETRY_WAIT          /* ⭐ 整链重试等待: 失败后停 OTA_CHAIN_RETRY_INTERVAL_MS
+                              再整链重来(从 OTA_TRIGGER_NODE 重新发起) */
 } OtaState_t;
 
 /* OTA 进度信息 */
@@ -57,6 +60,18 @@ bool ota_start(uint8_t nodeId, const char *url, const char *version);
  * (供 OneNET 平台 OTA 客户端使用), version 为平台任务的目标版本 */
 bool ota_startFromFile(uint8_t nodeId, const char *version);
 
+/* ⭐ S14/8.1 统一判定器: 节点 mode=BOOT(收到 PONG,BOOT)时调用, 单一决策:
+ *   - ota_getState() != OTA_IDLE → 不动作 (升级进行中, 现有机制接管)
+ *   - OTA_IDLE && OTA_FW_FILE 存在 → ota_startFromFile 自动重发 (自愈)
+ *   - OTA_IDLE && 无固件           → 置节点 bootPending=true, 等平台下发
+ * 自动(节点自曝)/人工/平台 触发全部汇入本入口与 ota_start 单轨. */
+bool ota_autoDispatch(uint8_t nodeId);
+
+/* ⭐ S14 人工触发统一入口 (串口 OTA 命令不再直接调 ota_start):
+ * 与自动路径同轨 - 节点已在 Boot 且网关有固件 → 判定器文件自愈重发;
+ * 否则 → ota_start 下载 URL 固件并触发 (OTA 忙时拒绝, 防双轨并发) */
+bool ota_manualTrigger(uint8_t nodeId, const char *url, const char *version);
+
 /* 主循环周期调用, 驱动 OTA 状态机 */
 void ota_tick(void);
 
@@ -73,7 +88,18 @@ OtaState_t ota_getState(void);
 void ota_cancel(void);
 
 /* ⭐ 通知 OTA 处理器: 节点已回复 AT+OTA:ack 触发确认
- * 由 lora_handler 在收到节点 ACK 帧时调用, 触发命令可靠投递 */
-void ota_notifyTriggerAck(void);
+ * 由 lora_handler 在收到节点 ACK 帧时调用, 触发命令可靠投递.
+ * ⭐ P1-5: nodeId 用于校验确认必须来自最近触发命令的目标节点,
+ * 防止多节点并存时他节点 ACK 被误当本节点触发确认 (历史日志现象) */
+void ota_notifyTriggerAck(uint8_t nodeId);
+
+/* ⭐ S21: 通知 OTA 处理器: 节点 App 已回复 AT+OTA:version_ok (拒绝升级).
+ * 标记节点 otaRefused=true (待人工/平台介入), 终止对 App 的 Xmodem 流
+ * (不产生空口噪声), 上报平台; 仅当人工重触发时经 ota_start 清除标记 */
+void ota_notifyVersionOk(uint8_t nodeId);
+
+/* ⭐ S15: 通知 OTA 处理器: 节点确认离开 Boot (收到 PONG,APP).
+ * 仅当该节点是最近一次 OTA 目标时清理固件文件 (自愈闭环终点) */
+void ota_notifyNodeApp(uint8_t nodeId);
 
 #endif /* OTA_HANDLER_H */

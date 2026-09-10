@@ -130,9 +130,9 @@ static void subLogin(uint8_t slot)
     loginSlot    = slot;
     loginSentAt  = millis();
     awaitingLogin = true;
-    DBG_PRINTF("[MQTT] 子设备上线 节点%d (%s/%s): %s\n",
-               nodes[slot].nodeId, nodes[slot].productKey,
-               nodes[slot].deviceName, out.c_str());
+    logPhase(LOGPH_MQTT);   /* S34: 发送侧也声明 MQTT 阶段, 与 LoRa 块间插空行 */
+    DBG_PRINTF("[MQTT] 子设备上线 节点%d (%s)\n",
+               nodes[slot].nodeId, nodes[slot].deviceName);
     mqtt.publish(TOPIC_SUB_LOGIN, out.c_str());
     mqttTxCount++;   /* 上行计数 */
 }
@@ -150,40 +150,17 @@ static void subLogout(uint8_t slot)
     String out;
     serializeJson(doc, out);
     nodes[slot].logoutPending = false;
-    DBG_PRINTF("[MQTT] 子设备下线 节点%d: %s\n", nodes[slot].nodeId, out.c_str());
+    logPhase(LOGPH_MQTT);   /* S34: MQTT 阶段分隔 */
+    DBG_PRINTF("[MQTT] 子设备下线 节点%d\n", nodes[slot].nodeId);
     mqtt.publish(TOPIC_SUB_LOGOUT, out.c_str());
     mqttTxCount++;   /* 上行计数 */
 }
 
-/* 代子设备上报属性 (pack/post) */
-static void subPost(uint8_t slot)
-{
-    NodeData &nd = nodes[slot];
-
-    StaticJsonDocument<1024> doc;
-    doc["id"] = String(millis());
-    doc["version"] = "1.0";
-    JsonArray params = doc.createNestedArray("params");
-    JsonObject sub = params.createNestedObject();
-    JsonObject identity = sub.createNestedObject("identity");
-    identity["productID"]  = nd.productKey;
-    identity["deviceName"] = nd.deviceName;
-    JsonObject props = sub.createNestedObject("properties");
-    props[SUB_PROP_PARK_STATUS]["value"]     = nd.parkStatus;
-    props[SUB_PROP_ULTRASONIC]["value"]      = nd.ultrasonic;
-    props[SUB_PROP_GEO_MAGNETIC]["value"]    = nd.geoMagnetic;
-    props[SUB_PROP_OCCUPIED_TIME]["value"]   = (long)nd.occupiedTime;
-    props[SUB_PROP_LED]["value"]             = nd.led;
-    props[SUB_PROP_ZOMBIE_THRESHOLD]["value"] = (long)nd.zombieThresholdSec;   /* ⭐ 只读属性: 节点当前生效阈值 */
-    props[SUB_PROP_SENSOR_DISTANCE]["value"] = (long)nd.sensorDistanceCm;     /* ⭐ 只读属性: 节点当前生效超声波距离阈值 */
-    props[SUB_PROP_RSSI]["value"]            = nd.rssi;                      /* ⭐ 只读属性: 节点信号强度(dBm) */
-
-    String out;
-    serializeJson(doc, out);
-    DBG_PRINTF("[MQTT] 子设备上报 节点%d: %s\n", nd.nodeId, out.c_str());
-    mqtt.publish(TOPIC_PACK_POST, out.c_str());
-    mqttTxCount++;   /* 上行计数 */
-}
+/* ⭐ S29: 原"上线成功立即上报一次"的 subPost 单节点上报已删除.
+ * 原因: 节点上线(PONG)成功时业务数据帧未必到达, 缓存可能全 0,
+ * 立即上报 = 全 0 垃圾快照污染平台存储 (ZombieThresholdSec=0 被
+ * 平台 code=2213 拒绝). 属性上报统一走 subPostBatch, 且批量上报
+ * 以 hasDataFrame 门控, 只报"收到过真实业务数据帧"的节点 */
 
 /* 代子设备批量上报属性 (pack/post): 把本轮所有在线且已上线成功的子设备
  * 合并进同一条 params 数组, 整轮仅 1 次上行.
@@ -196,7 +173,9 @@ static void subPostBatch(void)
     uint8_t count = 0;
     for (uint8_t i = 0; i < nodeCount; i++)
     {
-        if (nodes[i].online && nodes[i].subLogin)
+        /* S9: 业务在线才批量上报; ⭐ S29: 且已收到首帧业务数据 (hasDataFrame).
+         * 未收到真实数据的节点不上报, 避免全 0 垃圾快照污染平台存储 */
+        if (nodes[i].serviceOnline && nodes[i].subLogin && nodes[i].hasDataFrame)
             slots[count++] = i;
     }
     if (count == 0) return;
@@ -225,7 +204,8 @@ static void subPostBatch(void)
 
     String out;
     serializeJson(doc, out);
-    DBG_PRINTF("[MQTT] 批量上报 %d 台子设备: %s\n", count, out.c_str());
+    logPhase(LOGPH_MQTT);   /* ⭐ S34: MQTT 阶段分隔 */
+    DBG_PRINTF("[MQTT] 批量上报 %d 台子设备\n", count);
     mqtt.publish(TOPIC_PACK_POST, out.c_str());
     mqttTxCount++;   /* 上行计数 */
 }
@@ -273,8 +253,8 @@ static void handleSubPropertySet(JsonDocument &doc)
                 nodes[slot].thresholdNeedsUpdate = true;
                 nodes[slot].thresholdValue = v;
                 nodes[slot].thresholdRetryCount = 0;  /* 重置重试计数, 新阈值从头开始 */
-                saveCertsToLittleFS();  /* ⭐ 立即保存到 Flash, 断电不丢 */
-                DBG_PRINTF("[MQTT] 节点%d 僵尸车阈值=%d秒 (已保存Flash, 待PONG下发)\n", nodes[slot].nodeId, v);
+                certsMarkDirty();  /* ⭐ S19: 阈值变更置脏标记, 主循环异步落盘 (原同步写 Flash 阻塞 MQTT 回调) */
+                DBG_PRINTF("[MQTT] 节点%d 僵尸车阈值=%d秒 (已标记落盘, 待PONG下发)\n", nodes[slot].nodeId, v);
             } else {
                 DBG_PRINTF("[MQTT] 僵尸车阈值超出范围(5-2592000): %d\n", v);
             }
@@ -286,8 +266,8 @@ static void handleSubPropertySet(JsonDocument &doc)
                 nodes[slot].sensorDistanceNeedsUpdate = true;
                 nodes[slot].sensorDistanceValue = (uint16_t)v;
                 nodes[slot].sensorDistanceRetryCount = 0;  /* 重置重试计数, 新阈值从头开始 */
-                saveCertsToLittleFS();  /* ⭐ 立即保存到 Flash, 断电不丢 */
-                DBG_PRINTF("[MQTT] 节点%d 超声波距离阈值=%dcm (已保存Flash, 待PONG下发)\n", nodes[slot].nodeId, v);
+                certsMarkDirty();  /* ⭐ S19: 阈值变更置脏标记, 主循环异步落盘 */
+                DBG_PRINTF("[MQTT] 节点%d 超声波距离阈值=%dcm (已标记落盘, 待PONG下发)\n", nodes[slot].nodeId, v);
             } else {
                 DBG_PRINTF("[MQTT] 超声波距离阈值超出范围(2-400): %d\n", v);
             }
@@ -320,7 +300,7 @@ static void replySubServiceInvoke(const char *msgId, const char *pk, const char 
     serializeJson(doc, out);
     mqtt.publish(TOPIC_SUB_SERVICE_INVOKE_REPLY, out.c_str());
     mqttTxCount++;   /* 上行计数 */
-    DBG_PRINTF("[MQTT] 回复服务调用: %s\n", out.c_str());
+    DBG_PRINTF("[MQTT] 回复服务调用: code=%d\n", code);
 }
 
 /* 处理平台下行: 子设备服务调用 (thing/sub/service/invoke).
@@ -421,8 +401,8 @@ static void handleSubServiceInvoke(JsonDocument &doc)
         return;
     }
 
-    /* 节点离线: 立即回失败, 不进入下发流程 */
-    if (!nodes[slot].online)
+    /* 节点业务离线: 立即回失败, 不进入下发流程 (S9: 用 serviceOnline, 与平台"在线"口径一致) */
+    if (!nodes[slot].serviceOnline)
     {
         DBG_PRINTF("[MQTT] 服务调用: 节点%d 离线, 立即回失败\n", nodes[slot].nodeId);
         replySubServiceInvoke(msgId, pk, dn, identifier, 200, "node offline", 0, 0);
@@ -435,14 +415,14 @@ static void handleSubServiceInvoke(JsonDocument &doc)
         nodes[slot].thresholdValue = (uint32_t)value;
         nodes[slot].thresholdRetryCount = 0;
         nodes[slot].thresholdNeedsUpdate = true;
-        saveCertsToLittleFS();   /* 阈值立即存 Flash, 断电不丢 */
+        certsMarkDirty();   /* ⭐ S19: 阈值变更置脏标记, 主循环异步落盘 */
     }
     else if (isSensorDist)
     {
         nodes[slot].sensorDistanceValue = (uint16_t)value;
         nodes[slot].sensorDistanceRetryCount = 0;
         nodes[slot].sensorDistanceNeedsUpdate = true;
-        saveCertsToLittleFS();   /* 阈值立即存 Flash, 断电不丢 */
+        certsMarkDirty();   /* ⭐ S19: 阈值变更置脏标记, 主循环异步落盘 */
     }
     else  /* isLed: 记录命令目标并直接 LoRa 下发(AT+SetLed), 等 ACK 后回 ActualValue */
     {
@@ -480,7 +460,9 @@ static void propPostGatewayState(void)
     progress["value"] = ota_progress_get();
     String out;
     serializeJson(doc, out);
-    DBG_PRINTF("[MQTT] 上报网关属性: %s\n", out.c_str());
+    logPhase(LOGPH_MQTT);   /* ⭐ S34: MQTT 阶段分隔 */
+    DBG_PRINTF("[MQTT] 上报网关属性: OtaAllow=%s, OtaProgress=%d\n",
+               ota_allow_get() ? "true" : "false", ota_progress_get());
     mqtt.publish(TOPIC_PROP_POST, out.c_str());
     mqttTxCount++;   /* 上行计数 */
 }
@@ -496,7 +478,7 @@ static void replyPropSet(const char *id, int code, const char *msg)
     String output;
     serializeJson(doc, output);
     mqtt.publish(TOPIC_PROP_SET_REPLY, output.c_str());
-    DBG_PRINTF("[MQTT] 回复网关属性设置: %s\n", output.c_str());
+    DBG_PRINTF("[MQTT] 回复网关属性设置: code=%d %s\n", code, msg);
 }
 
 /* 处理平台下行: 网关自身属性设置 (thing/property/set).
@@ -534,7 +516,8 @@ static void mqtt_callback(char *topic, byte *payload, unsigned int length)
     if (length >= sizeof(buf)) length = sizeof(buf) - 1;
     memcpy(buf, payload, length);
     buf[length] = '\0';
-    DBG_PRINTF("[MQTT] 收到 topic=%s\n%s\n", topic, buf);
+    logPhase(LOGPH_MQTT);   /* ⭐ S34: MQTT 云事件自成一段, 空行与 LoRa 块分隔;
+                             * 原始 topic/JSON 回显删除, 各分支已有语义摘要 */
 
     StaticJsonDocument<768> doc;
     if (deserializeJson(doc, buf))
@@ -555,8 +538,11 @@ static void mqtt_callback(char *topic, byte *payload, unsigned int length)
             {
                 nd.subLogin      = true;
                 nd.logoutPending = false;
-                DBG_PRINTF("[MQTT] 子设备%d 上线成功\n", nd.nodeId);
-                subPost(loginSlot);            /* 上线成功立即上报一次 */
+                /* ⭐ S29: 上线成功不再立即上报 (subPost 已删除).
+                 * 此时节点业务数据帧未必到达, 缓存可能全 0 → 立即上报是
+                 * 垃圾快照 (升级后 ZombieThresholdSec=0 被平台 code=2213 拒绝的根因).
+                 * 改由首帧业务数据到达后 (hasDataFrame=true) 批量上报带出真实属性 */
+                DBG_PRINTF("[MQTT] 子设备%d 上线成功 (属性待首帧数据到达后上报)\n", nd.nodeId);
             }
             else
             {
@@ -588,7 +574,7 @@ static void mqtt_callback(char *topic, byte *payload, unsigned int length)
     /* --- 3.5 子设备服务调用 (thing/sub/service/invoke) --- */
     if (strstr(topic, "thing/sub/service/invoke"))
     {
-        DBG_PRINTF("[MQTT] 收到子设备服务调用: %s\n", topic);
+        DBG_PRINTF("[MQTT] 收到子设备服务调用\n");
         handleSubServiceInvoke(doc);
         return;
     }
@@ -623,13 +609,14 @@ void onenet_init(void)
 }
 
 /* ⭐ 防假离线: mqtt.connect() 是同步阻塞的, 卡顿期间主循环整个冻结,
- * LoRa 轮询/节点超时判定全部停摆 → 恢复后 checkNodeTimeout 会把本来
- * 活着的节点误判离线, 引发整网"代下线→再上线"抖动(平台看到网关+节点
- * 同时掉线又恢复). 这里做两件事:
+ * LoRa 轮询/节点超时判定全部停摆 → 恢复后可能把本来活着的节点误判离线,
+ * 引发整网"代下线→再上线"抖动(平台看到网关+节点同时掉线又恢复).
+ * 这里做两件事:
  *  1) 域名只解析一次缓存成 IP: 之后重连不再每次做阻塞 DNS, 卡顿上界
  *     从"DNS秒级"降到"纯TCP建连";
- *  2) 连接阻塞超过阈值时把在线节点的超时时钟拨回当前, 抵消暂停期造成的
- *     假离线(宁可多给一个周期重新确认, 也不误判整网离线). */
+ *  2) 连接阻塞超过阈值时把在线节点的 lastUpdate 拨回当前, 抵消暂停期
+ *     造成的假离线(S13 轮次计判定同样依赖 lastUpdate, 拨回后下一轮
+ *     边界视作"有响应"清零, 宁可多给一个周期重新确认, 也不误判整网离线). */
 #define MQTT_CONNECT_STALL_COMP_MS  1000   /* 连接阻塞超过该值(ms)才补偿节点时钟 */
 
 bool onenet_connect(void)
@@ -662,7 +649,7 @@ bool onenet_connect(void)
         uint32_t nowTick = millis();
         for (uint8_t i = 0; i < nodeCount; i++)
         {
-            if (nodes[i].online)
+            if (nodes[i].linkAlive)   /* S9: 链路存活节点才补偿超时时钟 */
                 nodes[i].lastUpdate = nowTick;
         }
     }
@@ -773,6 +760,19 @@ void onenet_loop(void)
 
 bool onenet_connected(void) { return mqtt.connected(); }
 
+/* ⭐ S31: 是否存在"待代下线"且 MQTT 在线.
+ * 仅 MQTT 在线时才算数: 断网时无会话可下线, 不暂停 LoRa 轮询
+ * (避免 MQTT 掉线期间 LoRa 也被卡死); 重连后回调会重新置位 */
+bool onenet_logoutPending(void)
+{
+    if (!mqtt.connected()) return false;
+    for (uint8_t i = 0; i < nodeCount; i++)
+    {
+        if (nodes[i].logoutPending) return true;
+    }
+    return false;
+}
+
 /* 周期调用: 处理代下线/代上线/批量上报
  * 注意: 上线/下线一次只发一条, 避免回复无法对应身份 */
 void onenet_uploadAll(void)
@@ -804,11 +804,11 @@ void onenet_uploadAll(void)
         return;
     }
 
-    /* 3. 处理待代上线 (一次一条; 仅"确认存活"的节点才上线,
-     *    离线节点不上线, 平台在线列表始终与真实状态一致) */
+    /* 3. 处理待代上线 (一次一条; 仅"业务在线"的节点才上线,
+     *    离线/Boot 节点不上线, 平台在线列表始终与真实状态一致) */
     for (i = 0; i < nodeCount; i++)
     {
-        if (nodes[i].loginPending && nodes[i].online)
+        if (nodes[i].loginPending && nodes[i].serviceOnline)
         {
             subLogin(i);
             return;
@@ -831,7 +831,7 @@ void onenet_replySet(const char *id, int code, const char *msg)
     String output;
     serializeJson(doc, output);
     mqtt.publish(TOPIC_SUB_SET_REPLY, output.c_str());
-    DBG_PRINTF("[MQTT] 回复平台: %s\n", output.c_str());
+    DBG_PRINTF("[MQTT] 回复平台: code=%d %s\n", code, msg);
 }
 
 /* ⭐ 供 lora_handler 调用: LoRa 阈值下发结果确认后, 补回"同步服务调用"回复.
@@ -850,6 +850,7 @@ void onenet_notifyServiceResult(uint8_t slot, bool success, uint32_t value)
                           200, success ? "success" : "failed",
                           success ? 1 : 0,
                           success ? (int)value : 0);
+    logPhase(LOGPH_MQTT);   /* S34: MQTT 阶段分隔 */
     s_pendingServiceReply.active = false;
     DBG_PRINTF("[MQTT] 服务调用结果已回复平台 (节点%d, %s)\n",
                nodes[slot].nodeId, success ? "成功" : "失败");

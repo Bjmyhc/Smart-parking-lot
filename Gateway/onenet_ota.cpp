@@ -23,6 +23,7 @@
 #include "platform_cfg.h"
 #include "app_cfg.h"
 #include "ota_handler.h"
+#include "onenet_handler.h"     /* ⭐ S27: 平台下载期间让出 MQTT 保活/收下行 */
 #include "lora_protocol.h"      /* OTA_FW_FILE / OTA_FW_MAGIC */
 #include "node_data.h"
 
@@ -410,7 +411,7 @@ static const char *otaNodeCurVersion(void)
 {
     for (uint8_t i = 0; i < nodeCount; i++)
     {
-        if (nodes[i].online && nodes[i].fwVersion[0] != '\0')
+        if (nodes[i].linkAlive && nodes[i].fwVersion[0] != '\0')   /* S9: 链路存活才采用上报版本 */
             return nodes[i].fwVersion;
     }
     return NODE_FW_VERSION;
@@ -463,9 +464,11 @@ static bool otaCheckTask(const OtaIdentity_t *id, int type, const char *curVersi
         DBG_PRINTF("[OTA][平台] 检测任务响应解析失败: %s\n", resp.c_str());
         return false;
     }
+    /* 平台无该类型升级任务时业务码非0(正常情况), 不再打印完整响应 —
+     * "无升级任务"已由调用方(OTA_PLAT_CHECK_SOTA)统一打印, 避免每轮重复
+     * 刷屏; 真实网络/解析错误在上方两分支已打印 */
     if (doc["code"] | -1)
     {
-        DBG_PRINTF("[OTA][平台] 检测任务 code!=0: %s\n", resp.c_str());
         return false;
     }
     JsonObject data = doc["data"];
@@ -545,7 +548,8 @@ static long otaDownloadFile(const OtaIdentity_t *id, long tid, const char *fileP
                 }
             }
         }
-        yield();
+        /* ⭐ S27: 平台下载期间周期让出 MQTT 保活/收下行, 不再裸 yield() */
+        onenet_loop();
     }
     f.close();
     http.end();
@@ -668,12 +672,25 @@ static bool otaValidateNodeFirmware(void)
     return ok;
 }
 
-/* SOTA 目标节点: 第一个在线节点 */
+/* SOTA 目标节点: 优先升级"等待下发"的 Boot 节点 (bootPending=true,
+ * 平台下固件后立即下发, 无需节点先响应, 8.2); 否则取在线 App 节点.
+ * ⭐ S21: 跳过 otaRefused 节点 (App 已拒绝升级, 待人工介入,
+ * 平台自动重下发只会再次 version_ok 死循环) */
 static uint8_t otaTargetNode(void)
 {
     for (uint8_t i = 0; i < nodeCount; i++)
     {
-        if (nodes[i].online)
+        if (nodes[i].bootPending && !nodes[i].otaRefused)
+        {
+            DBG_PRINTF("[OTA][平台] 目标节点=%d (bootPending, 立即下发)\n",
+                       nodes[i].nodeId);
+            return nodes[i].nodeId;
+        }
+    }
+    for (uint8_t i = 0; i < nodeCount; i++)
+    {
+        if (nodes[i].linkAlive && nodes[i].mode == NODE_MODE_APP &&
+            !nodes[i].otaRefused)
         {
             DBG_PRINTF("[OTA][平台] 目标节点=%d (%s)\n",
                        nodes[i].nodeId, nodes[i].deviceName);
