@@ -4,9 +4,9 @@
  * 
  * 通过软件 I2C (GPIO 模拟) 读取传感器数据
  * 引脚映射:
- *   - SCL  = PB13
- *   - SDA  = PB14
- *   - DRDY = PB12 (数据就绪引脚)
+ *   - SCL  = PB3
+ *   - SDA  = PA15
+ *   - DRDY = PA12 (数据就绪引脚)
  * 
  * @author Adapted from WilliTourt's C++ version
  * @version 1.0

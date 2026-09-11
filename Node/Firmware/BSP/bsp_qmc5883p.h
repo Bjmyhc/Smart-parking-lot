@@ -6,9 +6,9 @@
  * 提供配置、数据读取和校准功能，支持多种量程范围
  * 
  * 引脚映射:
- *   - SCL:  PB13 (软件 I2C 时钟线)
- *   - SDA:  PB14 (软件 I2C 数据线)
- *   - DRDY: PB12 (数据就绪中断引脚)
+ *   - SCL:  PB3  (软件 I2C 时钟线)
+ *   - SDA:  PA15 (软件 I2C 数据线)
+ *   - DRDY: PA12 (数据就绪中断引脚)
  * 
  * @author Adapted from WilliTourt's C++ version
  * @version 1.0
@@ -25,17 +25,17 @@
  * 引脚映射定义（硬件连接配置）
  * ======================================================================== */
 
-/* I2C 时钟线 - PB14 */
+/* I2C 时钟线 - PB3 */
 #define QMC_SCL_PORT                    GPIOB
 #define QMC_SCL_PIN                     GPIO_Pin_3
 #define QMC_SCL_RCC                     RCC_APB2Periph_GPIOB
 
-/* I2C 数据线 - PB13 */
+/* I2C 数据线 - PA15 */
 #define QMC_SDA_PORT                    GPIOA
 #define QMC_SDA_PIN                     GPIO_Pin_15
 #define QMC_SDA_RCC                     RCC_APB2Periph_GPIOA
 
-/* 数据就绪引脚 - PB12 */
+/* 数据就绪引脚 - PA12 */
 #define QMC_DRDY_PORT                   GPIOA
 #define QMC_DRDY_PIN                    GPIO_Pin_12
 #define QMC_DRDY_RCC                    RCC_APB2Periph_GPIOA
@@ -215,7 +215,7 @@ typedef struct {
  * 
  * 包含完整的初始化流程:
  *   1. 初始化设备结构体参数
- *   2. 初始化软件 I2C 引脚 (PB12/PB13/PB14)
+ *   2. 初始化软件 I2C 引脚 (PB3/PA15/PA12)
  *   3. 硬复位芯片并验证芯片 ID
  *   4. 设置量程范围和运行参数
  * 
