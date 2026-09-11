@@ -27,18 +27,18 @@
 
 /* I2C 时钟线 - PB14 */
 #define QMC_SCL_PORT                    GPIOB
-#define QMC_SCL_PIN                     GPIO_Pin_5
+#define QMC_SCL_PIN                     GPIO_Pin_3
 #define QMC_SCL_RCC                     RCC_APB2Periph_GPIOB
 
 /* I2C 数据线 - PB13 */
-#define QMC_SDA_PORT                    GPIOB
-#define QMC_SDA_PIN                     GPIO_Pin_4
-#define QMC_SDA_RCC                     RCC_APB2Periph_GPIOB
+#define QMC_SDA_PORT                    GPIOA
+#define QMC_SDA_PIN                     GPIO_Pin_15
+#define QMC_SDA_RCC                     RCC_APB2Periph_GPIOA
 
 /* 数据就绪引脚 - PB12 */
-#define QMC_DRDY_PORT                   GPIOB
-#define QMC_DRDY_PIN                    GPIO_Pin_3
-#define QMC_DRDY_RCC                    RCC_APB2Periph_GPIOB
+#define QMC_DRDY_PORT                   GPIOA
+#define QMC_DRDY_PIN                    GPIO_Pin_12
+#define QMC_DRDY_RCC                    RCC_APB2Periph_GPIOA
 
 /* ========================================================================
  * I2C 设备地址与参数
