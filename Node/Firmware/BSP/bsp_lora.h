@@ -43,11 +43,13 @@
  *   低=发送完成/接收完成/切换完成(闲)
  * 节点端接 STM32F103 的 PA11 (该脚默认 USART1_CTS / USB_DM, 但本项目
  * 未用 USART1 硬件流控也未用 USB, 故空闲可用作普通 GPIO 输入).
- * 发送前后查 AUX 状态, 判定模块是否收到/发完, 异常时日志报 FAIL.
+ * 仅**发送前**查 AUX: 等模块空闲(低)后再发, 用于半双工防撞包;
+ * 等待超时仍为高则日志报 FAIL(模块卡在发送/接收/切换).
+ * 发送完成后不再等待 AUX 回落(发送确认属诊断信息, 网关侧超时+重试兜底).
  * 与网关端 hw_cfg.h 的 LORA_AUX_PIN/LORA_AUX_WAIT_MS 对称配置 */
 #define LORA_AUX_PORT       GPIOA
 #define LORA_AUX_PIN        GPIO_Pin_11   /* PA11 */
-#define LORA_AUX_WAIT_MS    50UL          /* 等 AUX 变化的超时(ms) */
+#define LORA_AUX_WAIT_MS    50UL          /* 发送前等 AUX 变低(空闲)的超时(ms) */
 
 /* ==================== OneNET 子设备证书 ====================
  * 节点通过 LoRa 上报证书给网关, 网关代为上线 OneNET (网关+子设备模式)

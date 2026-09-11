@@ -81,17 +81,28 @@ uint16_t g_sensorDistanceCm = DIST_THRESHOLD_CM;  /* ⭐ 超声波判定距离�
  *         alpha = 1/4, 平滑距离采样波动, 避免抖动
  *         超过/低于/读取失败均视为无效, 保留上次有效
  *         滤波结果到 Distance
+ * ⭐ 非阻塞: 每 US_UPDATE_INTERVAL 启动一次测量, 每轮轮询状态机取结果,
+ *         不再忙等回波(原最坏 200ms+200ms 阻塞主循环)
  ****************************************************************************/
 void US_Task(void)
 {
     static uint32_t lastUpdateTick = 0;
     static uint16_t smoothDist = 0;
     static uint8_t firstRun = 1;
+    uint16_t raw;
+    uint8_t  r;
 
+    /* 周期到 -> 启动一次新测量(若上一次未结束则由 US_StartMeasure 跳过) */
     if (Get_Tick() - lastUpdateTick >= US_UPDATE_INTERVAL)
     {
-        uint16_t raw = US_GetDistance();
+        if (US_StartMeasure())
+            lastUpdateTick = Get_Tick();
+    }
 
+    /* 每轮推进状态机; 测量完成时才拿到新原始值做滤波 */
+    r = US_Poll(&raw);
+    if (r == US_MEAS_DONE)
+    {
         /* 有效距离过滤: 无效(=0), 超限, 失败 -> 保留上次有效值 */
         if (raw < US_MIN_VALID || raw > US_MAX_VALID)
             raw = smoothDist;
@@ -116,9 +127,8 @@ void US_Task(void)
         if (ParkStatus != PARK_IDLE && raw > (uint16_t)Distance + 10)
             Usart_Printf(USART_DEBUG, "[US][毛刺] raw=%dcm smooth=%dcm\r\n",
                          raw, Distance);
-
-        lastUpdateTick = Get_Tick();
     }
+    /* US_MEAS_TIMEOUT / US_MEAS_NONE: 本次无新结果, 沿用上次有效值 */
 }
 
 /****************************************************************************

@@ -8,7 +8,7 @@
  * 
  * 硬件配置:
  *   - TIM1定时器: 72MHz系统时钟, 输入捕获模式
- *   - PA0(Trig): 触发信号输出(推挽输出)
+ *   - PB15(Trig): 触发信号输出(推挽输出)
  *   - PA8(Echo): 回波信号输入(浮空输入)
  *   - 通道1捕获上升沿,通道2捕获下降沿
  * 
@@ -26,6 +26,18 @@
 #include "bsp_ultrasonic.h"
 #include "bsp_delay.h"
 #include "bsp_usart.h"
+
+/* ==================== 非阻塞测量状态机 ==================== */
+typedef enum
+{
+    US_ST_IDLE = 0,     /* 空闲: 无测量进行 */
+    US_ST_WAIT_RISE,    /* 已发Trig, 等回波上升沿(TIM1_CC1) */
+    US_ST_WAIT_FALL     /* 已捕获上升沿, 等回波下降沿(TIM1_CC2) */
+} us_state_t;
+
+static us_state_t s_state     = US_ST_IDLE;
+static uint16_t   s_riseTicks = 0;   /* 上升沿时刻(TIM1捕获值, 单位µs) */
+static uint32_t   s_phaseTick = 0;   /* 当前阶段的起点(ms), 用于超时判定 */
 
 
 
@@ -81,62 +93,89 @@ void US_Init(void)
 }
 
 /****************************************************************************
- * 函数名: US_GetDistance
- * 功能:   获取超声波测量距离
+ * 函数名: US_StartMeasure
+ * 功能:   启动一次超声波测量(非阻塞)
  * 参数:   无
- * 返回值: 距离值(单位:cm)
- * 说明:   发送触发脉冲,测量回波脉宽,计算距离
- *         公式: distance = 0.5 * 340 * GoBackTime * 1e-4
+ * 返回值: 1=已启动; 0=上一次测量尚未结束, 本次跳过(不重入)
+ * 说明:   复位计数 -> 清捕获标志 -> 开TIM1 -> 发15µs触发脉冲,
+ *         随后立即返回, 由 US_Poll() 在后续主循环中推进
  ****************************************************************************/
-uint16_t US_GetDistance(void)
+uint8_t US_StartMeasure(void)
 {
-    TIM_SetCounter(TIM1, 0);
-    TIM_ClearFlag(TIM1, TIM_FLAG_CC1);
-    TIM_ClearFlag(TIM1, TIM_FLAG_CC2);
+    /* 上一次测量还没结束: 不重入, 等它自己完成或超时 */
+    if (s_state != US_ST_IDLE)
+        return 0;
 
+    TIM_SetCounter(TIM1, 0);
+    TIM_ClearFlag(TIM1, TIM_FLAG_CC1 | TIM_FLAG_CC2);
     TIM_Cmd(TIM1, ENABLE);
 
+    /* 15µs 触发脉冲 */
     GPIO_SetBits(US_TRIG_PORT, US_TRIG_PIN);
     DelayXus(15);
     GPIO_ResetBits(US_TRIG_PORT, US_TRIG_PIN);
 
-    uint32_t startTime = Get_Tick();
-    /* ⭐ 双重超时兜底: Get_Tick()(ms级) + 软件自增计数(us级), 防止SysTick停了死循环 */
-    uint32_t swTimeout = 0;  /* 软件超时计数(次), 每次循环≈1us, 200000次≈200ms */
-    #define US_SW_TIMEOUT_CNT 200000
-    while (TIM_GetFlagStatus(TIM1, TIM_FLAG_CC1) == RESET)
+    s_phaseTick = Get_Tick();
+    s_state     = US_ST_WAIT_RISE;
+    return 1;
+}
+
+/****************************************************************************
+ * 函数名: US_Poll
+ * 功能:   轮询推进测量状态机(非阻塞)
+ * 参数:   outDistCm - 测量完成时写入原始距离(cm)
+ * 返回值: US_MEAS_NONE / US_MEAS_DONE / US_MEAS_TIMEOUT
+ * 说明:   先判捕获标志(硬件已锁存, 晚读不丢), 后判超时;
+ *         两次捕获值因启动时复位计数, 正常测量不会跨 65.5ms 回绕
+ ****************************************************************************/
+uint8_t US_Poll(uint16_t *outDistCm)
+{
+    switch (s_state)
     {
-        swTimeout++;
-        if ((Get_Tick() - startTime >= 200) || (swTimeout >= US_SW_TIMEOUT_CNT))
+    case US_ST_WAIT_RISE:
+        if (TIM_GetFlagStatus(TIM1, TIM_FLAG_CC1) != RESET)
+        {
+            TIM_ClearFlag(TIM1, TIM_FLAG_CC1);
+            s_riseTicks = TIM_GetCapture1(TIM1);   /* 上升沿时刻 */
+            s_phaseTick = Get_Tick();              /* 下降沿阶段重新计时 */
+            s_state     = US_ST_WAIT_FALL;
+        }
+        else if ((Get_Tick() - s_phaseTick) >= US_ECHO_TIMEOUT_MS)
         {
             TIM_Cmd(TIM1, DISABLE);
+            s_state = US_ST_IDLE;
             Usart_Printf(USART_DEBUG, "US: CC1 timeout (no echo start)\r\n");
-            return 0;
+            return US_MEAS_TIMEOUT;
         }
-        DelayXus(1);  /* 循环延迟, 软件超时精度≈1us */
-    }
+        break;
 
-    startTime = Get_Tick();
-    swTimeout = 0;
-    while (TIM_GetFlagStatus(TIM1, TIM_FLAG_CC2) == RESET)
-    {
-        swTimeout++;
-        if ((Get_Tick() - startTime >= 200) || (swTimeout >= US_SW_TIMEOUT_CNT))
+    case US_ST_WAIT_FALL:
+        if (TIM_GetFlagStatus(TIM1, TIM_FLAG_CC2) != RESET)
+        {
+            uint16_t fallTicks = TIM_GetCapture2(TIM1);   /* 下降沿时刻 */
+            TIM_ClearFlag(TIM1, TIM_FLAG_CC2);
+            TIM_Cmd(TIM1, DISABLE);
+            s_state = US_ST_IDLE;
+
+            /* 回波脉宽(µs) -> 距离(cm):
+             * distance = 0.5 * 声速(340m/s) * t, t 单位µs, 1e-4 换算 */
+            if (outDistCm != 0)
+                *outDistCm = (uint16_t)(0.5f * 340.0f
+                                        * (float)(uint16_t)(fallTicks - s_riseTicks) * 1e-4f);
+            return US_MEAS_DONE;
+        }
+        else if ((Get_Tick() - s_phaseTick) >= US_ECHO_TIMEOUT_MS)
         {
             TIM_Cmd(TIM1, DISABLE);
+            s_state = US_ST_IDLE;
             Usart_Printf(USART_DEBUG, "US: CC2 timeout (no echo end)\r\n");
-            return 0;
+            return US_MEAS_TIMEOUT;
         }
-        DelayXus(1);
+        break;
+
+    default:
+        break;
     }
 
-    TIM_Cmd(TIM1, DISABLE);
-
-    uint16_t GoBackTime = TIM_GetCapture2(TIM1) - TIM_GetCapture1(TIM1);
-
-    float distance = 0.5f * 340.0f * GoBackTime * 1e-4f;
-	
-    //Usart_Printf(USART_DEBUG, "bsp_ultrasonic.c=>Distance:%.3fcm\n", distance);
-	
-    return (uint16_t)distance;
+    return US_MEAS_NONE;
 }

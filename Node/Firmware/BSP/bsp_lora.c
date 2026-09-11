@@ -37,23 +37,34 @@ static uint8_t AUX_Read(void)
     return (GPIO_ReadInputDataBit(LORA_AUX_PORT, LORA_AUX_PIN) == Bit_SET) ? 1 : 0;
 }
 
+/* 单帧最大载荷: 1(帧头) + 64(ACK 原命令上限) + 2(\r\n) = 67 */
+#define LORA_TX_PAYLOAD_MAX  67
+
 /****************************************************************************
  * 发送定点传输帧
  * 目标地址 + 信道 + 数据
  *
- * AUX 忙闲状态判定 (状态码轨迹 [auxBefore->sawHigh->auxAfter]):
- *   [0->1->0] 正常: 发前空闲 -> 发后捕到高(模块收到) -> 等回低(发送完成)
- *   [1->?->?] 发前 AUX 一直高, 模块卡在发送/接收/切换
- *   [0->0->0] 发后 AUX 没变高, 模块未收到数据 (串口/接线异常)
- *   [0->1->1] 发后 AUX 一直高, 模块卡死在发送中
- * 节点端不接 OLED, 仅打串口日志(OK/FAIL + 轨迹码 + 耗时)
+ * ⭐ TX 非阻塞(DMA): 整帧(定点头 + 载荷)先组装到本地缓冲, 再交给
+ *   Usart2_SendAsync() 由 DMA1_Channel7 后台搬运, 本函数立即返回;
+ *   不再逐字节等 TC 阻塞主循环(原一帧 19~70B 会堵 20~73ms @9600bps).
+ *   Usart2_SendAsync() 内部会先把数据拷入静态缓冲, 故此处本地缓冲
+ *   可安全出栈.
+ *
+ * ⭐ AUX 收敛(S23): 只保留"发前等 AUX 低"用于半双工防撞包,
+ *   去掉原先"发后等 AUX 高 / 等 AUX 低"的两段忙等(各 50ms 上限).
+ *   理由: 发送完成确认属诊断信息, 网关侧本就有超时+重试兜底;
+ *         而这两段等待每次都会把主循环(含超声波采样)最多再堵 100ms.
+ *   发送是否已完成由下一次发送前的"等 AUX 低"自然衔接(等效流控),
+ *   故去掉后不会出现半双工撞包.
+ *   发前等待若超时仍为高电平, 说明模块卡在发送/接收/切换, 保留 FAIL 日志.
+ * 节点端不接 OLED, 仅打串口日志(OK/FAIL + 耗时)
  ****************************************************************************/
 static void LoRa_SendFrame(uint16_t dstAddr, uint8_t ch,
                            const uint8_t *data, uint16_t len)
 {
-    uint8_t header[3];
-    uint8_t auxBefore, sawHigh, auxAfter;
-    uint32_t t0, t1, t2, durBefore = 0, durHigh = 0, durLow = 0;
+    uint8_t  frame[3 + LORA_TX_PAYLOAD_MAX];
+    uint8_t  auxBefore;
+    uint32_t t0, durBefore = 0;
 
     /* === 发前: 等 AUX 低(模块空闲), 超时强制发送 === */
     t0 = Get_Tick();
@@ -62,59 +73,31 @@ static void LoRa_SendFrame(uint16_t dstAddr, uint8_t ch,
     auxBefore = AUX_Read();   /* 期望 0=空闲 */
     durBefore = Get_Tick() - t0;
 
-    /* === 发数据 === */
-    header[0] = (uint8_t)(dstAddr >> 8);    /* 地址高字节 */
-    header[1] = (uint8_t)(dstAddr & 0xFF);  /* 地址低字节 */
-    header[2] = ch;                         /* 信道 */
+    /* === 组装完整帧: 定点头(AddrH/AddrL/CH) + 载荷 === */
+    frame[0] = (uint8_t)(dstAddr >> 8);    /* 地址高字节 */
+    frame[1] = (uint8_t)(dstAddr & 0xFF);  /* 地址低字节 */
+    frame[2] = ch;                         /* 信道 */
+    if (len > LORA_TX_PAYLOAD_MAX)
+        len = LORA_TX_PAYLOAD_MAX;         /* 防御性截断(协议帧不会到这) */
+    if (len > 0)
+        memcpy(frame + 3, data, len);
 
-    /* 发送帧头 */
-    Usart_SendString(USART2, header, 3);
-    /* 发送数据载荷 */
-    if (len > 0) Usart_SendString(USART2, (unsigned char *)data, len);
+    /* === 非阻塞发送: DMA 后台搬运, 立即返回 === */
+    Usart2_SendAsync(frame, (uint16_t)(3 + len));
 
-    /* === 发后: 等 AUX 高(模块收到开始处理) -> 等 AUX 低(发送完成) === */
-    t1 = Get_Tick();
-    while (AUX_Read() == 0 &&
-           (Get_Tick() - t1) <= LORA_AUX_WAIT_MS) { }   /* 等高 */
-    sawHigh = AUX_Read();   /* 期望 1=已变高 */
-    durHigh = Get_Tick() - t1;
-
-    t2 = Get_Tick();
-    while (AUX_Read() == 1 &&
-           (Get_Tick() - t2) <= LORA_AUX_WAIT_MS) { }   /* 等低 */
-    auxAfter = AUX_Read();   /* 期望 0=完成 */
-    durLow = Get_Tick() - t2;
-
-    /* === 日志: 状态码轨迹 + OK/FAIL ===
-     * 正常路径只一行 OK, 带目标地址 + 轨迹码 + 总耗时
-     * 异常路径一行 FAIL, 带目标地址 + 轨迹码 + 原因 + 各阶段耗时 */
-    if (auxBefore == 0 && sawHigh == 1 && auxAfter == 0)
+    /* === 日志: 发前状态 + 等待耗时 ===
+     * 正常路径只一行 OK; 发前 AUX 一直高则一行 FAIL */
+    if (auxBefore == 0)
     {
         Usart_Printf(USART_DEBUG,
-                     "[LoRa] TX 0x%04X OK [%d->%d->%d] %lums\r\n",
-                     (unsigned)dstAddr,
-                     (unsigned)auxBefore, (unsigned)sawHigh, (unsigned)auxAfter,
-                     (unsigned long)(durBefore + durHigh + durLow));
+                     "[LoRa] TX 0x%04X OK (发前AUX闲 %lums)\r\n",
+                     (unsigned)dstAddr, (unsigned long)durBefore);
     }
     else
     {
-        const char *reason;
-        if (auxBefore == 1)
-            reason = "发前AUX忙, 模块卡在发送/接收/切换";
-        else if (sawHigh == 0)
-            reason = "模块未收到数据, 串口/接线异常";
-        else if (auxAfter == 1)
-            reason = "发后AUX一直高, 模块卡死在发送中";
-        else
-            reason = "未知异常";
         Usart_Printf(USART_DEBUG,
-                     "[LoRa] TX 0x%04X FAIL [%d->%d->%d] %s (前%lu/等高%lu/等低%lu ms)\r\n",
-                     (unsigned)dstAddr,
-                     (unsigned)auxBefore, (unsigned)sawHigh, (unsigned)auxAfter,
-                     reason,
-                     (unsigned long)durBefore,
-                     (unsigned long)durHigh,
-                     (unsigned long)durLow);
+                     "[LoRa] TX 0x%04X FAIL 发前AUX忙%lums(模块卡在发送/接收/切换)\r\n",
+                     (unsigned)dstAddr, (unsigned long)durBefore);
     }
 }
 

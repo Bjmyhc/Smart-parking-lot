@@ -131,12 +131,13 @@ int main(void)
         LED_Task();                 /* LED控制 */
         LoRa_Task();                /* LoRa通信: 响应网关轮询 + 下行命令 */
 
-        /* ⭐ 喂狗状态日志 (必须放在喂狗之前: 打印卡死 = 不喂狗 = 4s复位, 符合预期) */
+        /* ⭐ 喂狗状态日志 (必须放在喂狗之前: 打印卡死 = 不喂狗 = 4s复位, 符合预期)
+         * ⭐ 喂狗正常日志已按需求注释(不再周期性打印), 保留 ISR 诊断 */
         if (Get_Tick() - s_lastWdgLogTick >= WDG_LOG_INTERVAL_MS)
         {
             s_lastWdgLogTick = Get_Tick();
-            Usart_Printf(USART_DEBUG, "[WDG] 喂狗正常, 运行 %lu 秒\r\n",
-                         (unsigned long)(Get_Tick() / 1000));
+            /* Usart_Printf(USART_DEBUG, "[WDG] 喂狗正常, 运行 %lu 秒\r\n",
+             *              (unsigned long)(Get_Tick() / 1000)); */
             /* ⭐ USART2 ISR 诊断: oreCount 持续涨=串口过载; rxCount 不涨=RX中断没触发,
              * 用于定位"LoRa 模块有输出但 STM32 收不到命令"类故障 */
             Usart_Printf(USART_DEBUG, "[USART2] ORE(溢出)=%u 收字节=%lu\r\n",

@@ -3,11 +3,11 @@
  * 
  * 功能描述:
  *   实现USART1和USART2的初始化配置、数据发送、格式化打印等功能
- *   USART1用于调试输出，USART2用于与ESP8266模块通信
+ *   USART1用于调试输出，USART2用于与 LoRa 模块通信
  * 
  * 硬件配置:
- *   - USART1: TX-PA9, RX-PA10, 波特率115200
- *   - USART2: TX-PA2, RX-PA3, 波特率115200
+ *   - USART1: TX-PA9, RX-PA10, 波特率115200(调试)
+ *   - USART2: TX-PA2, RX-PA3, 波特率由 LORA_BAUD 决定(9600)
  * 
  * 作者: Bjmyhc
  * 日期: 2026-07-19
@@ -18,6 +18,7 @@
 #include <string.h>
 #include <stdio.h>
 #include "bsp_delay.h"   /* ⭐ 引入 Get_Tick() 用于串口发送超时判断 */
+#include "stm32f10x_dma.h"   /* ⭐ USART2 TX 非阻塞发送使用 DMA1 */
 
 /* ==================== 串口发送超时(ms): 硬件异常时最多阻塞 50ms, 避免死等卡死主循环 ==================== */
 #define USART_SEND_TIMEOUT_MS 50
@@ -26,6 +27,51 @@
 static volatile uint8_t  usart2_rbuf[USART2_RBUF_SIZE];
 static volatile uint16_t usart2_rhead = 0;    /* 写入指针 */
 static volatile uint16_t usart2_rtail = 0;    /* 读取指针 */
+
+/* ==================== USART2 发送缓冲 + DMA(TX 非阻塞) ====================
+ * ⭐ DMA 搬运期间缓冲必须保持有效, 故用静态区(不能是调用者的栈变量).
+ * 单帧最大长度: 3(定点头 AddrH/AddrL/CH) + 1(帧头) + 64(ACK 命令上限) + 2(\r\n) = 70,
+ * 取 128 留足余量 */
+#define USART2_TXBUF_SIZE       128
+#define USART2_TX_DMA_CHANNEL   DMA1_Channel7     /* USART2_TX = DMA1_Channel7 */
+#define USART2_TX_DMA_FLAG_TC   DMA1_FLAG_TC7
+#define USART2_TX_DMA_FLAG_GL   DMA1_FLAG_GL7
+#define USART2_TX_DMA_WAIT_MS   100UL             /* 等上一帧搬完的上限(正常 0) */
+
+static uint8_t s_usart2_txbuf[USART2_TXBUF_SIZE];
+
+/****************************************************************************
+ * 函数名: Usart2_DmaTxInit
+ * 功能:   配置 USART2 TX 的 DMA1_Channel7(仅初始化一次固定字段)
+ * 参数:   无
+ * 返回值: 无
+ * 说明:   每次发送只需改 CNDTR 并重新使能通道, 无需重新 DMA_Init
+ ****************************************************************************/
+static void Usart2_DmaTxInit(void)
+{
+    DMA_InitTypeDef dma;
+
+    RCC_AHBPeriphClockCmd(RCC_AHBPeriph_DMA1, ENABLE);
+
+    DMA_DeInit(USART2_TX_DMA_CHANNEL);
+    dma.DMA_PeripheralBaseAddr = (uint32_t)&USART2->DR;
+    dma.DMA_MemoryBaseAddr     = (uint32_t)s_usart2_txbuf;
+    dma.DMA_DIR                = DMA_DIR_PeripheralDST;
+    dma.DMA_BufferSize         = 0;                       /* 每次发送时再装填 */
+    dma.DMA_PeripheralInc      = DMA_PeripheralInc_Disable;
+    dma.DMA_MemoryInc          = DMA_MemoryInc_Enable;
+    dma.DMA_PeripheralDataSize = DMA_PeripheralDataSize_Byte;
+    dma.DMA_MemoryDataSize     = DMA_MemoryDataSize_Byte;
+    dma.DMA_Mode               = DMA_Mode_Normal;         /* 传完自动关通道 */
+    dma.DMA_Priority           = DMA_Priority_High;
+    dma.DMA_M2M                = DMA_M2M_Disable;
+    DMA_Init(USART2_TX_DMA_CHANNEL, &dma);
+
+    DMA_Cmd(USART2_TX_DMA_CHANNEL, DISABLE);
+
+    /* 允许 USART2 的 TX 请求(每次 TXE)触发 DMA 搬运 */
+    USART_DMACmd(USART2, USART_DMAReq_Tx, ENABLE);
+}
 
 /****************************************************************************
  * 函数名: Usart1_Init
@@ -78,7 +124,7 @@ void Usart1_Init(unsigned int baud)
  * 参数:   baud - 波特率
  * 返回值: 无
  * 引脚:   TX-PA2, RX-PA3
- * 用途:   与ESP8266 WiFi模块通信
+ * 用途:   与 LoRa 模块通信
  ****************************************************************************/
 void Usart2_Init(unsigned int baud)
 {
@@ -116,6 +162,9 @@ void Usart2_Init(unsigned int baud)
     nvicInitStruct.NVIC_IRQChannelPreemptionPriority = 0;
     nvicInitStruct.NVIC_IRQChannelSubPriority = 0;
     NVIC_Init(&nvicInitStruct);
+
+    /* ⭐ USART2 发送改 DMA 非阻塞搬运(接收仍走 RXNE 中断) */
+    Usart2_DmaTxInit();
 }
 
 /****************************************************************************
@@ -123,7 +172,8 @@ void Usart2_Init(unsigned int baud)
  * 功能:   初始化所有串口
  * 参数:   无
  * 返回值: 无
- * 说明:   USART1(115200)-调试串口, USART2(115200)-ESP8266通信串口
+ * 说明:   USART1(115200)-调试串口; USART2 初值 115200,
+ *         随后由 LoRa_Node_Init() 重新配置为 LORA_BAUD(9600)
  ****************************************************************************/
 void Usart_Init(void)
 {
@@ -155,6 +205,54 @@ void Usart_SendString(USART_TypeDef *USARTx, unsigned char *str, unsigned short 
                 break;
         }
     }
+}
+
+/****************************************************************************
+ * 函数名: Usart2_SendAsync
+ * 功能:   USART2 非阻塞发送(DMA1_Channel7 搬运), 启动后立即返回
+ * 参数:   data - 待发送数据指针(会先拷入内部静态缓冲)
+ *         len  - 数据长度(超过 USART2_TXBUF_SIZE 则截断)
+ * 返回值: 无
+ * 说明:   ⭐ DMA 搬运期间源缓冲必须保持有效, 故此处先 memcpy 到内部缓冲,
+ *         调用者的缓冲可立即复用或离开作用域.
+ *         若上一帧尚未搬完, 会先等它结束(节点每轮才回一帧, 正常为 0ms).
+ *         返回不代表"已发完", 只代表"已开始发送".
+ ****************************************************************************/
+void Usart2_SendAsync(const uint8_t *data, uint16_t len)
+{
+    uint32_t t0;
+
+    if (data == 0 || len == 0)
+        return;
+
+    if (len > USART2_TXBUF_SIZE)
+        len = USART2_TXBUF_SIZE;   /* 协议帧最长 70B, 此处仅防御性截断 */
+
+    /* 上一帧还没搬完 -> 先等结束, 否则会覆写正在被 DMA 读取的缓冲 */
+    t0 = Get_Tick();
+    while (Usart2_TxBusy() &&
+           (Get_Tick() - t0) <= USART2_TX_DMA_WAIT_MS) { }
+
+    memcpy(s_usart2_txbuf, data, len);
+
+    /* 改 CNDTR 前必须先关通道; Normal 模式下传完会自动关通道 */
+    DMA_Cmd(USART2_TX_DMA_CHANNEL, DISABLE);
+    DMA_ClearFlag(USART2_TX_DMA_FLAG_TC | USART2_TX_DMA_FLAG_GL);
+    DMA_SetCurrDataCounter(USART2_TX_DMA_CHANNEL, len);
+    DMA_Cmd(USART2_TX_DMA_CHANNEL, ENABLE);
+}
+
+/****************************************************************************
+ * 函数名: Usart2_TxBusy
+ * 功能:   查询上一帧 DMA 是否仍在发送中
+ * 参数:   无
+ * 返回值: 1=DMA 仍在搬运; 0=已完成/空闲
+ ****************************************************************************/
+uint8_t Usart2_TxBusy(void)
+{
+    /* 本 SPL 版本无 DMA_GetCmdStatus, 用剩余传输数判断:
+     * 搬运中 CNDTR>0; 传输完成(Normal 模式自动关通道)或未启动时 = 0 */
+    return (DMA_GetCurrDataCounter(USART2_TX_DMA_CHANNEL) != 0) ? 1 : 0;
 }
 
 /****************************************************************************
