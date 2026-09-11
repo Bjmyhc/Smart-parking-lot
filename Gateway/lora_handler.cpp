@@ -4,9 +4,9 @@
  *   1. 已注册在线节点: 直接 AT+DATA (快速路径, 不经过 PING)
  *   2. 已注册离线节点: 先 AT+PING (短超时 500ms), 通了再 AT+DATA
  *   3. 搜索模式(每次开机 / 按 FLASH 按钮): 对每个地址逐一 AT+PING 探测,
- *      PING 通: 无证书 → AT+CER 注册; 有证书 → 跳过(CER 已有, 代上线由
- *      loginPending + uploadAll 定时处理); 不通直接下一个;
- *      扫完一轮自动退出; 平时空槽位直接跳过不打扰
+ *      PING 通: 一律 AT+CER 索要证书 — 证书是节点身份与固件版本的唯一权威
+ *      来源, 不因 Flash 里有旧证书就跳过(版本不持久化, 跳过会让版本长期为空);
+ *      不通直接下一个; 扫完一轮自动退出; 平时空槽位直接跳过不打扰
  *   4. PING 超时:      跳过, 下一轮再查
  *   5. 控制命令:       优先于轮询, 插入即发
  *
@@ -44,6 +44,15 @@ enum RxState {
     RX_FRAME_CERT,       /* 收 LoraNodeCert_t */
     RX_FRAME_ACK         /* 收命令ACK字符串, 读到\r */
 };
+/* ⭐ 帧尾 DRSSI 消费状态: 载荷消费完后, 模块附加的 1 字节实时 RSSI 必须被吃掉.
+ * 定长帧(DATA/CERT)已把该字节算进 rxNeed, 不用本状态; 只有裸 OTA 响应与
+ * ASCII 帧需要 —— ASCII 载荷为 "字符串+\r\n"(App/Boot 端均强制 \r\n), DRSSI 在 \n 之后 */
+enum RxTail {
+    RX_TAIL_NONE = 0,      /* 无待消费尾字节 */
+    RX_TAIL_DROP_DRSSI,    /* 下一字节即 DRSSI, 无条件丢弃 */
+    RX_TAIL_OPT_LF_DROP    /* 下一字节若为 \n 则先吃掉(属载荷), 再丢弃 DRSSI */
+};
+static RxTail   rxTail      = RX_TAIL_NONE;
 static RxState  rxState     = RX_WAIT_HEADER;
 static uint16_t rxNeed      = 0;   /* 还需收多少字节 */
 static uint16_t rxGot       = 0;   /* 已收多少字节 */
@@ -109,6 +118,10 @@ static uint32_t roundStartAt = 0;
  * 轮询到该节点夹发一次 AT+CER, 用于发现"同地址换节点" */
 static uint8_t  dataPollCnt[LORA_MAX_NODES + 1];
 
+/* ⭐ 版本未知补拉证书次数上限 (每节点, 见 needCertForVersion) */
+#define VER_PROBE_MAX   3
+static uint8_t  verProbeCnt[LORA_MAX_NODES + 1];
+
 /* 离线节点探测退避 (正常轮询对已注册离线节点的 PING 探测):
  * 离线 PING 每超时一次, offlineStage 档位+1(封顶), 下次探测间隔查表
  * OFFLINE_BACKOFF_MS 按指数退避逐档翻倍: 2s→4s→8s→16s→32s→64s;
@@ -139,6 +152,26 @@ static bool shouldVerifyCert(uint8_t nodeId)
         return true;
     }
     return false;
+}
+
+/* ⭐ 版本未知时主动补拉一次证书 (限次).
+ * 发现阶段虽已"一律索要证书", 但只覆盖扫描时在线的节点; 若节点在扫描结束后
+ * 才上电重连, 其版本会一直为空, 只能等 LORA_CERT_VERIFY_EVERY 次轮询(约2分钟)
+ * 的周期校验. 这里在轮询到该节点时提前补拉, 拿到真实版本后 OTA 侧即可即时补报.
+ * 限次(VER_PROBE_MAX)用于防止"节点证书不带版本"时永远不发 DATA 饿死业务轮询 */
+static bool needCertForVersion(uint8_t nodeId, int slot)
+{
+    if (slot < 0) return false;
+
+    if (nodes[slot].fwVersion[0] != '\0')   /* 版本已知: 复位补拉配额 */
+    {
+        verProbeCnt[nodeId] = 0;
+        return false;
+    }
+    if (verProbeCnt[nodeId] >= VER_PROBE_MAX) return false;
+
+    verProbeCnt[nodeId]++;
+    return true;
 }
 
 /* ---------- 控制命令环形队列 (S16) ----------
@@ -176,6 +209,23 @@ static uint8_t  savedPollPhase   = 0;
 static bool     savedWaitingResp = false;
 static uint8_t  savedOtaNode     = 0;   /* OTA 目标节点 ID */
 static uint8_t  forcePingNode    = 0;   /* 非0: 该节点下次轮询强制先 PING 再发数据 */
+/* ⭐ 模块附加 DRSSI 尾字节的统一消费.
+ * 接收端模块开启数据包 RSSI 后, 每个收到包的末尾都会被附加 1 字节实时 RSSI
+ * (见 DX-LR22 手册 5.3.11), 换算关系 rssi = byte - 255. 处理方式分三类:
+ *   - 定长帧(DATA/CERT): 该字节已算进 rxNeed(+1), 收满即随之消费, 无需干预;
+ *   - 裸 OTA 响应(单字节 ACK/NAK/CAN): 载荷后紧跟 1 字节 DRSSI;
+ *   - ASCII 帧: 载荷为 "字符串+\r\n", \n 之后才是 DRSSI.
+ * 该字节必须消费掉: 否则它会落在 RX_WAIT_HEADER 里被当作帧头判断, 一旦命中
+ * 帧头白名单就会误入错误状态并吞掉后续真实帧. 实测依据: 现场 RSSI −26~−30dBm
+ * 时 DRSSI 字节为 0xE1~0xE5, 其中 0xE1 正是 LORA_FRAME_OTA_RETRY, 会造成
+ * 真 ACK 被吞、2000ms 后 OTA 无故重发. */
+
+/* ⭐ 帧头白名单: 唯一合法帧头集合. 帧解析与 DRSSI 诊断共用, 防两处失配 */
+static bool isFrameHeader(uint8_t c)
+{
+    return (c == LORA_FRAME_CERT || c == LORA_FRAME_DATA || c == LORA_FRAME_ACK
+         || c == LORA_FRAME_OTA_OK || c == LORA_FRAME_OTA_RETRY);
+}
 
 /* ==================== 内部函数 ==================== */
 
@@ -713,24 +763,44 @@ static bool feedRx(uint8_t c)
     switch (rxState)
     {
     case RX_WAIT_HEADER:
-        /* OTA 响应字节 (ACK/NAK/CAN): 直接转发给 OTA 处理器, 不进入帧状态机 */
-        if (c == OTA_ACK || c == OTA_NAK || c == OTA_CAN)
+        /* 上一个载荷消费完毕: 模块附加的 DRSSI 尾字节必须吃掉, 否则它会被
+         * 当作帧头参与白名单判断, 命中时误入错误状态并吞掉后续真实帧. */
+        if (rxTail != RX_TAIL_NONE)
+        {
+            if (rxTail == RX_TAIL_OPT_LF_DROP && c == '\n')
+            {
+                rxTail = RX_TAIL_DROP_DRSSI;   /* \n 属载荷结束符, 下一拍再丢 DRSSI */
+                break;
+            }
+            rxTail = RX_TAIL_NONE;
+            /* ⭐ 仅当尾字节恰好命中帧头白名单时才打印: 这正是修复前会被误
+             * 当作帧头、吞掉后续真实帧的那个取值. 正常 RSSI 取值静默丢弃 */
+            if (isFrameHeader(c))
+            {
+                DBG_PRINTF("[LoRa] DRSSI 尾字节 0x%02X 命中帧头白名单, 已丢弃 "
+                           "(修复前会被误当作帧头)\n", (unsigned)c);
+            }
+            break;
+        }
+        /* OTA 活动期间的 ACK/NAK/CAN 直接转发; 下一字节固定为模块附加 DRSSI. */
+        if (ota_getState() != OTA_IDLE &&
+            (c == OTA_ACK || c == OTA_NAK || c == OTA_CAN))
         {
             ota_feedByte(c);
+            rxTail = RX_TAIL_DROP_DRSSI;
             break;
         }
         /* ⭐ 严格帧头白名单: 只接受 5 个合法帧头字节, 其他字节直接丢弃
          * 防止 AT 命令回执/串口噪声/状态机错位被误识别为帧头 */
-        if (c == LORA_FRAME_CERT || c == LORA_FRAME_DATA || c == LORA_FRAME_ACK
-         || c == LORA_FRAME_OTA_OK || c == LORA_FRAME_OTA_RETRY)
+        if (isFrameHeader(c))
         {
             rxState = (c == LORA_FRAME_CERT) ? RX_FRAME_CERT
                    : (c == LORA_FRAME_DATA) ? RX_FRAME_DATA
                    :                          RX_FRAME_ACK;
             /* ⭐ DRSSI: 接收端模块开启数据包RSSI后, 收包末尾会被附加1字节
              * 实时RSSI(见DX-LR22手册5.3.11). 故 DATA/CERT 都多收1字节,
-             * 解析时最后一字节作RSSI剥离, 不参与CRC/字段校验. ACK以\r结尾
-             * 不受影响(附加字节在\r后, 会作为垃圾帧头被丢弃). */
+             * 解析时最后一字节作RSSI剥离, 不参与CRC/字段校验.
+             * ASCII 帧(以\r结尾)不在此消费该字节, 改由 rxTail 丢弃. */
             rxNeed  = (rxState == RX_FRAME_CERT) ? (uint16_t)(sizeof(LoraNodeCert_t) + 1)
                    : (rxState == RX_FRAME_DATA) ? (uint16_t)(sizeof(LoraNodeData_t) + 1)
                    :                              (uint16_t)(RX_BUF_SIZE - 1);   /* ⭐ S17: ACK 显式长度上限 */
@@ -754,6 +824,9 @@ static bool feedRx(uint8_t c)
             rxBuf[rxGot] = '\0';
             gotFrame = handleCompleteFrame(LORA_FRAME_ACK);
             rxState  = RX_WAIT_HEADER;
+            /* ⭐ 收尾后还剩 "\n"(若有) 与模块附加 DRSSI, 交给 rxTail 消费;
+             * 因超长(rxNeed上限)截断时不置位: 后面还有未消费的字符串字节 */
+            rxTail = (c == '\r') ? RX_TAIL_OPT_LF_DROP : RX_TAIL_NONE;
         }
         else if (c != '\n')   /* \n 忽略 */
         {
@@ -811,6 +884,7 @@ void lora_init(void)
 #else
     loraSerial.begin(LORA_BAUD);
 #endif
+    rxTail = RX_TAIL_NONE;
     rxState = RX_WAIT_HEADER;
     currentNode = LORA_POLL_FROM_NODE;
     waitingResp = false;
@@ -908,6 +982,7 @@ bool lora_tick(void)
     if (otaPausedPolling)
     {
         otaPausedPolling = false;
+        rxTail           = RX_TAIL_NONE;
         waitingResp      = false;
         waitingFastPath  = false;
         waitingCmdReply  = false;   /* ⭐ S35: 防御, 清命令回执标志避免跨OTA残留 */
@@ -1049,23 +1124,23 @@ bool lora_tick(void)
                 advanceNextNode();
             }
             /* PONG 已收, 发真实命令:
-             *   搜索模式: 无证书 → CER 注册; 有证书 → PING 已确认在线, 直接跳过
-             *   正常模式: 未注册 → CER; 已注册 → DATA (或每50次夹发CER校验) */
+             *   搜索模式: 一律 CER 索要证书 (节点身份 + 固件版本的唯一权威来源)
+             *   正常模式: 未注册 → CER; 已注册 → DATA (或夹发 CER 校验) */
             else if (discoveryMode)
             {
-                if (!certOk)
-                {
-                    sendAT(currentNode, "CER", 0, false);
-                    respTimeout = LORA_RESPONSE_TIMEOUT_MS;
-                    pollPhase   = 0;
-                }
-                else
-                    advanceNextNode();   /* 有证书: 探测在线即可, 无需再要证书 */
+                /* ⭐ 不因"本地已有证书"而跳过 CER: Flash 里不保存 FwVersion,
+                 * 跳过会让重启后的节点版本长期为空(OTA 版本上报只能缺报),
+                 * 也会把"同地址换节点"的发现推迟到周期校验(约2分钟).
+                 * 代价仅是每节点每次发现多发一帧, 节点通常 100ms 内应答 */
+                sendAT(currentNode, "CER", 0, false);
+                respTimeout = LORA_RESPONSE_TIMEOUT_MS;
+                pollPhase   = 0;
             }
             else
             {
                 bool wantCert = !certOk ||
-                                (certOk && shouldVerifyCert(currentNode));
+                                (certOk && shouldVerifyCert(currentNode)) ||
+                                needCertForVersion(currentNode, slot);
                 sendAT(currentNode, wantCert ? "CER" : "DATA", 0, false);
                 respTimeout = LORA_RESPONSE_TIMEOUT_MS;
                 pollPhase   = 0;
@@ -1099,7 +1174,8 @@ bool lora_tick(void)
              * (命令队列在后续 lora_tick 中投递, 避免抢发) */
             if (!pushThresholdUpdate(slot))
             {
-                bool verify = shouldVerifyCert(currentNode);
+                bool verify = shouldVerifyCert(currentNode) ||
+                              needCertForVersion(currentNode, slot);
                 sendAT(currentNode, verify ? "CER" : "DATA", 0, false);
                 respTimeout = LORA_RESPONSE_TIMEOUT_MS;
                 waitingFastPath = true;   /* 快速路径 DATA/CER 待响应, 超时计入 dataMiss (S9) */
@@ -1143,8 +1219,9 @@ bool lora_tick(void)
         }
     }
 
-    /* --- 5. 链路统计周期报告: 每 STAT_REPORT_MS 汇总一行, 长跑时一眼看出
-     * 空口质量(丢包率/超时/状态机复位/ACK丢弃), 无需翻整段日志 --- */
+    /* --- 5. 链路累计统计周期报告: 计数器不清零, 每 STAT_REPORT_MS 输出
+     * 从启动至当前的累计快照, 用于观察长期空口质量(丢包率/超时/
+     * 状态机复位/ACK丢弃), 不是最近 60 秒的增量 --- */
     if (statLastReport == 0 || (now - statLastReport) >= STAT_REPORT_MS)
     {
         if (statLastReport != 0)   /* 启动首个周期不报, 等有真实数据 */
@@ -1154,9 +1231,8 @@ bool lora_tick(void)
             {
                 uint32_t loss = (statTxFail * 100) / total;
                 logPhase(LOGPH_STAT);   /* ⭐ S34: 周期统计独立成块 */
-                DBG_PRINTF("[LoRa] 链路统计 %us: 发送=%u(成功%u/失败%u,丢%u%%) "
+                DBG_PRINTF("[LoRa] 链路累计统计: 发送=%u(成功%u/失败%u,丢%u%%) "
                            "响应超时=%u 状态机复位=%u ACK丢弃=%u\n",
-                           STAT_REPORT_MS / 1000U,
                            (unsigned)total, (unsigned)statTxOk, (unsigned)statTxFail,
                            (unsigned)loss,
                            (unsigned)statRespTimeout, (unsigned)statRxReset,

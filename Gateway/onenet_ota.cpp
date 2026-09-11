@@ -108,6 +108,12 @@ static uint32_t s_lastCheck  = 0;
 static uint8_t  s_checkCnt   = 0;    /* 版本上报降频计数 */
 static bool     s_busy       = false;
 
+/* ⭐ 版本上报即时触发状态: 上电首轮 / 首次拿到真实节点版本 / 节点版本变化时
+ * 立即上报一轮, 否则平台最长要等 30s×OTA_REPORT_EVERY(约5分钟)才看到真实版本 */
+static bool     s_firstReportDone = false;   /* 是否已完成上电首轮版本上报 */
+static bool     s_verEverReported = false;   /* 是否上报过真实节点版本(非猜测值) */
+static char     s_verReported[16] = {0};     /* 上次上报的节点版本, 用于比对变化 */
+
 /* OTA 全网一键升级门控:
  *   s_otaAllow   : App 经物模型下发 OtaAllow=1 的确认标志
  *   s_pendingSota: 已检测到 SOTA 任务但尚未获 App 确认 (挂起等待) */
@@ -405,8 +411,10 @@ static const OtaIdentity_t *otaTaskIdentity(void)
     return (s_taskType == OTA_TYPE_FOTA) ? &OTA_ID_FOTA : &OTA_ID_SOTA;
 }
 
-/* 节点当前固件版本字符串: 优先用在线节点上报的 FwVersion (自动跟随节点升级),
- * 无在线节点/版本为空时回退到编译期宏 NODE_FW_VERSION */
+/* 节点当前固件版本字符串: 只采用链路存活节点上报的 FwVersion (自动跟随节点升级).
+ * 无在线节点时返回 nullptr 表示"版本未知" —— 绝不用编译期宏 NODE_FW_VERSION
+ * 冒充节点真实版本: 否则节点离线期间会把猜测值写进平台, 导致
+ *   实际更旧却判为最新 → 漏升级;  实际更新却判为旧 → 白刷一遍 */
 static const char *otaNodeCurVersion(void)
 {
     for (uint8_t i = 0; i < nodeCount; i++)
@@ -414,16 +422,36 @@ static const char *otaNodeCurVersion(void)
         if (nodes[i].linkAlive && nodes[i].fwVersion[0] != '\0')   /* S9: 链路存活才采用上报版本 */
             return nodes[i].fwVersion;
     }
-    return NODE_FW_VERSION;
+    return nullptr;
+}
+
+/* 是否需要立即上报版本: 上电首轮, 或首次获得真实节点版本, 或节点版本变化.
+ * 无在线节点时返回 false, 交回 OTA_REPORT_EVERY 降频周期, 避免无谓 HTTP 阻塞 */
+static bool otaVersionReportWanted(void)
+{
+    if (!s_firstReportDone) return true;        /* 上电首轮: 立即让平台记录版本 */
+
+    const char *cur = otaNodeCurVersion();
+    if (cur == nullptr) return false;           /* 版本未知: 不触发, 等降频周期 */
+    if (!s_verEverReported) return true;        /* 首次拿到真实版本: 立即上报 */
+    return (strcmp(cur, s_verReported) != 0);   /* 版本变化(升级完成): 立即上报 */
 }
 
 /* ==================== 平台 API 封装 ==================== */
 
 /* 上报节点版本 (SOTA): 用户级身份, 节点产品下记录 s_version.
- * 注: 平台 /version 要求 s_version 与 f_version 两个字段都填, 缺一报格式错误. */
+ * 注: 平台 /version 要求 s_version 与 f_version 两个字段都填, 缺一报格式错误.
+ * 无在线节点(版本未知)时不上报, 避免把猜测版本写进平台造成漏升级/误升级 */
 static bool otaReportVersionSota(void)
 {
-    String body = String("{\"s_version\":\"") + otaNodeCurVersion() +
+    const char *nodeVer = otaNodeCurVersion();
+    if (nodeVer == nullptr)
+    {
+        DBG_PRINTLN("[OTA][平台] 节点版本未知(无在线节点或未收到证书), 跳过节点版本上报(不上报猜测版本)");
+        return false;
+    }
+
+    String body = String("{\"s_version\":\"") + nodeVer +
                   "\",\"f_version\":\"" + GW_FW_VERSION + "\"}";
     String path = String("/fuse-ota/") + NODE_PROID + "/" + NODE_DEVID + "/version";
     String resp;
@@ -432,10 +460,12 @@ static bool otaReportVersionSota(void)
     return (code == 200);
 }
 
-/* 上报网关版本 (FOTA): 设备级身份, 网关产品下记录 f_version */
+/* 上报网关版本 (FOTA): 设备级身份, 网关产品下记录 f_version.
+ * s_version 为平台必填占位: 该记录描述的是网关自身, 故填网关版本;
+ * 不再借用节点版本(节点离线时无值, 且写进网关产品语义错位) */
 static bool otaReportVersionFota(void)
 {
-    String body = String("{\"s_version\":\"") + otaNodeCurVersion() +
+    String body = String("{\"s_version\":\"") + GW_FW_VERSION +
                   "\",\"f_version\":\"" + GW_FW_VERSION + "\"}";
     String path = String("/fuse-ota/") + ONENET_PROID + "/" + ONENET_DEVID + "/version";
     String resp;
@@ -732,6 +762,10 @@ void onenet_ota_init(void)
     s_st = OTA_PLAT_IDLE;
     s_lastCheck = 0;
     s_busy = false;
+    s_checkCnt = 0;
+    s_firstReportDone = false;
+    s_verEverReported = false;
+    s_verReported[0] = '\0';
     configTime(8 * 3600, 0, "ntp.aliyun.com", "pool.ntp.org");   /* 签名用 */
     DBG_PRINTLN("[OTA][平台] OneNET OTA 客户端初始化完成");
 }
@@ -762,10 +796,9 @@ void onenet_ota_tick(void)
         if (millis() - s_lastCheck >= OTA_CHECK_INTERVAL_MS)
         {
             s_lastCheck = millis();
-            /* 版本上报降频: 平台需要先记录当前版本才能检测任务, 但每次
-             * 检测都上报太费 HTTP; 每 OTA_REPORT_EVERY 次才上报一轮,
-             * 平时直接 check, 降低对 loop 的阻塞(保护 LoRa 轮询) */
-            if (++s_checkCnt >= OTA_REPORT_EVERY)
+            /* 版本上报: 上电首轮 / 首次拿到真实节点版本 / 节点版本变化时立即上报,
+             * 其余按 OTA_REPORT_EVERY 降频(每次检测都上报太费 HTTP, 阻塞 LoRa 轮询) */
+            if (otaVersionReportWanted() || ++s_checkCnt >= OTA_REPORT_EVERY)
             {
                 s_checkCnt = 0;
                 s_st = OTA_PLAT_REPORT_SOTA;
@@ -785,6 +818,18 @@ void onenet_ota_tick(void)
     case OTA_PLAT_REPORT_FOTA:
         /* 2. 上报网关版本 (设备级身份, 网关产品下) */
         otaReportVersionFota();
+        s_firstReportDone = true;
+        /* 记录本轮上报的节点版本, 供"版本变化即时上报"比对.
+         * 版本未知时不记录, 待节点上线后由 otaVersionReportWanted() 立即补报 */
+        {
+            const char *cur = otaNodeCurVersion();
+            if (cur != nullptr)
+            {
+                strncpy(s_verReported, cur, sizeof(s_verReported) - 1);
+                s_verReported[sizeof(s_verReported) - 1] = '\0';
+                s_verEverReported = true;
+            }
+        }
         s_st = OTA_PLAT_CHECK_FOTA;
         break;
 
@@ -799,7 +844,16 @@ void onenet_ota_tick(void)
         break;
 
     case OTA_PLAT_CHECK_SOTA:
-        /* 4. 检测 SOTA (节点) 任务, 版本用节点上报的最新版本 */
+        /* 4. 检测 SOTA (节点) 任务, 版本用节点上报的最新版本.
+         * 无在线节点时没有真实版本可比, 用猜测版本会误判任务(漏升级/误升级),
+         * 故跳过本轮 SOTA 检测, 待节点上线后再检测 */
+        if (otaNodeCurVersion() == nullptr)
+        {
+            s_pendingSota = false;
+            DBG_PRINTLN("[OTA][平台] 节点版本未知, 跳过 SOTA 任务检测");
+            s_st = OTA_PLAT_IDLE;
+            break;
+        }
         if (otaCheckTask(&OTA_ID_SOTA, OTA_TYPE_SOTA, otaNodeCurVersion()))
         {
             /* 门控: 需 App 下发 OtaAllow=1 确认后才执行 (全网一键升级) */

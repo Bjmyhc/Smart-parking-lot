@@ -685,7 +685,7 @@ void ota_tick(void)
     {
         uint8_t eot = OTA_EOT;
         sendRawFrame((uint16_t)s_progress.nodeId, LORA_CHANNEL, &eot, 1);
-        DBG_PRINTLN("[OTA] EOT 已发送(1/2), 等待最终确认");
+        DBG_PRINTLN("[OTA] EOT 已发送(1/2), 下一轮发送第2次");
         s_hasResp = false;
         setState(OTA_SEND_EOT2);
         break;
@@ -695,7 +695,7 @@ void ota_tick(void)
     {
         uint8_t eot = OTA_EOT;
         sendRawFrame((uint16_t)s_progress.nodeId, LORA_CHANNEL, &eot, 1);
-        DBG_PRINTLN("[OTA] EOT 已发送(2/2), 等待最终确认");
+        DBG_PRINTLN("[OTA] EOT 已发送(2/2), 开始等待最终确认");
         s_hasResp = false;
         setState(OTA_WAIT_FINAL_ACK);
         break;

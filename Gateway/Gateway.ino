@@ -394,7 +394,8 @@ void loop(void)
                 lastMqttRetry = now;
                 if (onenet_connect())
                 {
-                    onenet_uploadAll();
+                    if (ota_getState() == OTA_IDLE)
+                        onenet_uploadAll();
                 }
             }
         }

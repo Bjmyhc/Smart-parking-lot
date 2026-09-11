@@ -82,6 +82,9 @@ void loadCertsFromLittleFS(void)
         if (f.read((uint8_t *)&pc, sizeof(PersistedCert_t)) != sizeof(PersistedCert_t))
             break;
         if (!pc.certSent) continue;
+        /* Flash 中固定宽度字段可能没有结尾 NUL, 在复制及 %s 日志前强制终止. */
+        pc.productKey[sizeof(pc.productKey) - 1] = '\0';
+        pc.deviceName[sizeof(pc.deviceName) - 1] = '\0';
 
         /* 注册节点并写证书 */
         int slot = findNode(pc.nodeId);
@@ -92,7 +95,9 @@ void loadCertsFromLittleFS(void)
         /* 存证不代在线: linkAlive=false/mode=UNKNOWN (registerNode 已清零),
          * 等收到 LoRa 应答 (PONG/DATA/CERT) 才由 updateNodeState 激活 */
         memcpy(nodes[slot].productKey, pc.productKey, sizeof(nodes[slot].productKey));
+        nodes[slot].productKey[sizeof(nodes[slot].productKey) - 1] = '\0';
         memcpy(nodes[slot].deviceName, pc.deviceName, sizeof(nodes[slot].deviceName));
+        nodes[slot].deviceName[sizeof(nodes[slot].deviceName) - 1] = '\0';
         nodes[slot].loginPending = true;  /* 重启后需重新代上线 */
         sysEventFlag |= (1 << (pc.nodeId - 1));
         DBG_PRINTF("[LFS] 加载证书: 节点%d (%s/%s)\n",
@@ -206,27 +211,38 @@ void updateNodeCert(uint8_t nodeId, const LoraNodeCert_t *cert)
 
     NodeData &nd = nodes[slot];
 
-    /* 记录旧证书, 用于对比 (周期校验发现同地址换节点) */
-    char oldPk[sizeof(nd.productKey)];
-    char oldDn[sizeof(nd.deviceName)];
-    memcpy(oldPk, nd.productKey, sizeof(oldPk));
-    memcpy(oldDn, nd.deviceName, sizeof(oldDn));
-    bool certChanged = nd.certSent &&
-                       ((memcmp(oldPk, cert->ProductKey, sizeof(oldPk)) != 0) ||
-                        (memcmp(oldDn, cert->DeviceName, sizeof(oldDn)) != 0));
-    bool wasCertSent = nd.certSent;   /* ⭐ S19: 首次收到判断用旧值 */
+    /* 按协议固定宽度比较, 日志缓冲额外留 1 字节 NUL, 不越过帧字段. */
+    char oldPk[sizeof(cert->ProductKey) + 1];
+    char oldDn[sizeof(cert->DeviceName) + 1];
+    char oldFw[sizeof(cert->FwVersion) + 1];
+    memcpy(oldPk, nd.productKey, sizeof(cert->ProductKey));
+    memcpy(oldDn, nd.deviceName, sizeof(cert->DeviceName));
+    memcpy(oldFw, nd.fwVersion, sizeof(cert->FwVersion));
+    oldPk[sizeof(cert->ProductKey)] = '\0';
+    oldDn[sizeof(cert->DeviceName)] = '\0';
+    oldFw[sizeof(cert->FwVersion)] = '\0';
+
+    bool wasCertSent = nd.certSent;
+    bool identityChanged = wasCertSent &&
+                           ((memcmp(nd.productKey, cert->ProductKey,
+                                    sizeof(cert->ProductKey)) != 0) ||
+                            (memcmp(nd.deviceName, cert->DeviceName,
+                                    sizeof(cert->DeviceName)) != 0));
+    bool fwVersionChanged = wasCertSent &&
+                            (memcmp(nd.fwVersion, cert->FwVersion,
+                                    sizeof(cert->FwVersion)) != 0);
 
     nd.certSent   = true;
     /* 收到证书 = 链路活性确认 (S9): 证书只有 App 上报 → 链路活 + 模式=APP;
      * subLogin/loginPending 由下方证书内容校验逻辑管理 */
     updateNodeState((uint8_t)slot, NODE_EVT_CERT);
     nd.subLogin   = false;        /* 证书更新后需要重新代上线 */
-    strncpy(nd.productKey, cert->ProductKey, sizeof(nd.productKey) - 1);
+    memcpy(nd.productKey, cert->ProductKey, sizeof(cert->ProductKey));
     nd.productKey[sizeof(nd.productKey) - 1] = '\0';
-    strncpy(nd.deviceName, cert->DeviceName, sizeof(nd.deviceName) - 1);
-    nd.deviceName[sizeof(nd.deviceName) - 1] = '\0';
-    strncpy(nd.fwVersion, cert->FwVersion, sizeof(nd.fwVersion) - 1);
-    nd.fwVersion[sizeof(nd.fwVersion) - 1] = '\0';   /* ⭐ 节点固件版本从证书帧取, OTA 检测据此自动更新 */
+    memcpy(nd.deviceName, cert->DeviceName, sizeof(cert->DeviceName));
+    nd.deviceName[sizeof(cert->DeviceName)] = '\0';
+    memcpy(nd.fwVersion, cert->FwVersion, sizeof(cert->FwVersion));
+    nd.fwVersion[sizeof(cert->FwVersion)] = '\0';   /* 节点固件版本从证书帧取, OTA 检测据此自动更新 */
 
     /* 证书有效且信息完整才允许代上线 */
     nd.loginPending = (cert->valid != 0) &&
@@ -235,18 +251,19 @@ void updateNodeCert(uint8_t nodeId, const LoraNodeCert_t *cert)
     nd.logoutPending = false;
     dataChanged = true;
 
-    /* ⭐ S19: 证书已更新 -> 置脏标记, 主循环 persistCertsIfDirty 异步落盘.
-     * 不再同步写 Flash (擦写耗时阻塞 LoRa 轮询/MQTT 回调时序);
-     * 仅首次收到或内容变化才置脏 (周期 CER 校验重复上报相同证书不落盘 = 节流,
-     * 减少 Flash 磨损; 阈值变更由 onenet_handler 侧 certsMarkDirty 覆盖) */
-    if (!wasCertSent || certChanged)
+    /* ⭐ S19: 首次证书或身份变化时置脏, 主循环异步落盘.
+     * 注意: FwVersion 不参与持久化 (PersistedCert_t 无此字段), 故版本变化不置脏,
+     * 否则每次开机首次比对(本地版本为空 vs 节点上报版本)都会白写一次 Flash.
+     * 周期 CER 校验收到相同身份时同样不重复写, 减少磨损. */
+    if (!wasCertSent || identityChanged)
         certsMarkDirty();
 
-    /* 同地址换新节点: 打印变更日志 */
-    if (certChanged)
-        DBG_PRINTF("[节点] 节点%d 证书变更: %s/%s -> %s/%s\n",
-                   nodeId, oldPk, oldDn,
-                   cert->ProductKey, cert->DeviceName);
+    if (identityChanged)
+        DBG_PRINTF("[节点] 节点%d 身份变更: %s/%s -> %s/%s\n",
+                   nodeId, oldPk, oldDn, nd.productKey, nd.deviceName);
+    if (fwVersionChanged)
+        DBG_PRINTF("[节点] 节点%d 固件版本变更: %s -> %s\n",
+                   nodeId, oldFw, nd.fwVersion);
 }
 
 /* ⭐ 三态状态统一赋值入口 (S9): linkAlive/mode/serviceOnline 只经此修改.
