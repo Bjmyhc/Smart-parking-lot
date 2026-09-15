@@ -1,4 +1,4 @@
-﻿/****************************************************************************
+/****************************************************************************
  * 应用层周期任务函数接口 - app_tasks.h
  * 
  * 功能描述:
@@ -16,5 +16,9 @@ void QMC_Task(void);
 void ParkingStatus_Check(void);
 void LED_Task(void);
 void LoRa_Task(void);
+
+/* 记录本次复位原因短码(IWDG/WWDG/SW/PWR/RST/UNK), 由 main.c 在
+ * RCC_ClearFlag() 之前调用, 供首次 PING 上报给网关 */
+void App_SetResetCode(const char *code);
 
 #endif /* __APP_TASKS_H */

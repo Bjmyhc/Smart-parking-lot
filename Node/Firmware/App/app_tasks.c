@@ -55,6 +55,19 @@
  * Flash_SaveOtaFlagKeepPartial / Flash_ReadAppPartial 等,
  * App/Boot 共用单一事实源, 此处不再重复定义 */
 
+/* -------- ⭐ 重启上报 -------- */
+/* 本次上电后第一次被 PING 时回复 "PONG,APP,<复位原因>", 之后一律回
+ * "PONG,APP,OK"。网关据此区分两种"数据突然收不到":
+ *   回原因码 -> 该节点自本次上电起从未被 PING 过, 即刚重启
+ *   回 OK     -> 本次上电已被 PING 过, 说明只是丢包(断联), 并非重启
+ * 节点重启后阈值回编译期默认值、固件版本也可能已变(如手工烧录), 而地址
+ * 照常应答、链路不中断, 网关原本完全察觉不到.
+ * 复位原因取自 RCC 复位标志, 由 main.c 在 RCC_ClearFlag() 前调用
+ * App_SetResetCode() 写入(取值: IWDG/WWDG/SW/PWR/RST/UNK).
+ * 只改 AT+PING 的应答, AT+DATA/AT+CER 与配置命令不受影响 */
+static uint8_t s_pongReported = 0;      /* 0=本次上电尚未回过复位原因 */
+static char    s_resetCode[8] = "UNK";  /* 复位原因短码, 见 App_SetResetCode */
+
 /* ==================== 全局变量定义 ==================== */
 
 uint16_t Distance = 0;
@@ -345,6 +358,26 @@ static int ota_version_compare(const char *a, const char *b)
 }
 
 /****************************************************************************
+ * 函数名: App_SetResetCode
+ * 功能:   记录本次复位原因短码, 供首次 PING 上报给网关
+ * 参数:   code - 短码字符串 (IWDG/WWDG/SW/PWR/RST/UNK)
+ * 返回:   无
+ * 说明:   由 main.c 在 RCC_ClearFlag() 之前调用(复位标志清除后即读不到);
+ *         必须在首次 PING 到来之前完成, 否则网关会收到 "UNK"
+ ****************************************************************************/
+void App_SetResetCode(const char *code)
+{
+    if (code == NULL || *code == '\0')
+        return;
+
+    /* 超长直接拒绝: 协议第三段按短码白名单匹配, 截断反而会滑出白名单 */
+    if (strlen(code) >= sizeof(s_resetCode))
+        return;
+
+    strcpy(s_resetCode, code);
+}
+
+/****************************************************************************
  * 函数名: LoRa_CmdCallback
  * 功能:   LoRa 下行命令回调函数
  * 参数:   cmd - 命令名称 (如 "AT+DATA", "AT+CER", "AT+SetLed")
@@ -424,10 +457,24 @@ static void LoRa_CmdCallback(const char *cmd, const char *value)
         }
         LoRa_Node_SendAck("AT+SensorDistance");
     }
-    /* 网关心跳查询: AT+PING -> 回复 PONG,APP (上报处于 App 业务模式, 方案 5.1) */
+    /* 网关心跳查询: AT+PING -> 回复 PONG,APP,<第三段> (上报处于 App 业务模式, 方案 5.1)
+     * 第三段: 本次上电首次被 PING 回复位原因, 网关据此判定"节点刚重启";
+     *         之后一律回 OK, 网关据此判定"本次上电已被 PING 过, 仅丢包" */
     else if (strcmp(cmd, "AT+PING") == 0)
     {
-        LoRa_Node_SendAck("PONG,APP");
+        char ack[24];
+
+        if (!s_pongReported)
+        {
+            s_pongReported = 1;
+            snprintf(ack, sizeof(ack), "PONG,APP,%s", s_resetCode);
+        }
+        else
+        {
+            snprintf(ack, sizeof(ack), "PONG,APP,OK");
+        }
+
+        LoRa_Node_SendAck(ack);
     }
     /* 网关触发 OTA 升级: AT+OTA=start,<版本串>
      * 触发后: 回复ACK → 写升级标志 → 复位 → BootLoader 接收固件

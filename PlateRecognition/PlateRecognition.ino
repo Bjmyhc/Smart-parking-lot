@@ -14,20 +14,19 @@
 #include <PubSubClient.h>
 #include <mbedtls/md5.h>
 #include <mbedtls/base64.h>
-
-// Token 模式: 1=硬编码(推荐), 0=动态获取
-#define USE_HARDCODED_TOKEN 1
+#include <Preferences.h>  // Token NVS持久化缓存(掉电不丢)
 
 // WiFi 信息
 const char* ssid = "Aira";
 const char* passwd = "Zdgdzl934395.";
 
-// 百度云 API 凭证
+// 百度云 API 凭证 (用于OAuth换token, 硬编码在flash, 不上云)
 const char* apiKey = "7dTZbfdpp2iLH1YwP9i14YXy";
 const char* secretKey = "OPQjMV0AMhtEQP5Xek2qr16WQ9jeSV50";
 
-// 硬编码 Token (有效期 30 天, 2026-09-13 过期)
-const char* HARDCODED_TOKEN = "24.dad2e22d9f8fd83f3935dc460bdff3f7.2592000.1789306747.282335-124141210";
+// NVS 命名空间/键名 (Token缓存, 掉电不丢; 百度返回110/111才刷新)
+#define NVS_TOKEN_NS "parkcam"
+#define NVS_KEY_TOKEN "baidu_token"
 
 // 百度 OCR 地址
 const char* OCR_HOST = "aip.baidubce.com";
@@ -124,6 +123,7 @@ static uint8_t  msgSessionWrIdx = 0;
 static volatile uint8_t mqttPendingReplies = 0;
 static int mqttLastReplyCode = -1;    // 最近一次回执code(>=0平台, <=-1000投递失败): callback写 wait读
 static unsigned long mqttWaitStartMs = 0;  // wait入口记录开始时间: 用于"耗时"打印
+Preferences prefs;  // NVS Token 缓存实例
 static void mapMsgToSession(uint32_t msgId, uint32_t sess) {
   msgSessionMap[msgSessionWrIdx].msgId = msgId;
   msgSessionMap[msgSessionWrIdx].sess  = sess;
@@ -209,6 +209,12 @@ char* base64_encode(char *buf, int len);
 // 内部实现: 手动TLS握手 + 15KB分块写body (ESP32 mbedTLS缓存仅16KB, 大body必须分块)
 int httpTlsPost(const char* host, const char* path, const char* body, size_t bodyLen,
                 const char* extraHeaders, String& response);
+// NVS持久化: 读缓存token / 写token / 清缓存
+static bool loadCachedToken(String &token);
+static void saveTokenToNVS(const char *token);
+static void invalidateCachedToken(void);
+// OAuth: 用apiKey/secretKey向百度换新access_token (返回空=失败)
+static String fetchAccessTokenFromBaidu(void);
 // OneNET MQTT: 连接/重连Broker (返回是否已连接)
 bool onenetMqttEnsureConnected();
 // OneNET MQTT: 把params JSON发布到 property/post 主题 (底层上报入口)
@@ -220,7 +226,7 @@ bool uploadToOneNET(const String& plate, const String& color, float confidence,
                     const String& captureTime, int deviceStatus);
 // OneNET: 只上报DeviceStatus (流程中状态变化时轻量调用)
 bool reportDeviceStatus(int deviceStatus);
-// TriggerCapture 服务: 主循环跑完识别后一次性回 invoke_reply (⚠️ 只能回一次)
+// TriggerCapture 服务: 主循环跑完识别后一次性回 invoke_reply (⚠️只能回一次)
 static void srvTriggerReply(const char* msgId, const char* serviceId, int result, int actual);
 // 获取当前时间字符串 "YYYY-MM-DD HH:MM:SS"
 String getTimeString();
@@ -267,7 +273,7 @@ void setup() {
     // ⚠️ 修复: 首次连接失败不再 return 弃疗 —— return 会跳过下方
     //   mqttClient.setServer/setCallback/setBufferSize 初始化, 导致之后 WiFi 即使恢复
     //   (固件自动重连/热点打开) MQTT 也永远连不上, 表现为"必须重启才能连上".
-    //   setServer 等纯配置不依赖 WiFi, 照常执行; 真正建连交给 loop() 启动阶段的懒连接.
+    //   setServer 等纯配置不依赖 WiFi, 照常执行; 真正建连交给loop() 启动阶段的懒连接.
     Serial.printf(" 失败 status=%d, 继续初始化(建连交给loop懒重连)\n", WiFi.status());
   }
   WiFi.setAutoReconnect(true);   // ⭐ 断线自动重连(显式开启, 与网关行为对齐)
@@ -398,7 +404,7 @@ void loop() {
     lastHeartbeatMs = nowMsLoop;
     Serial.println("[心跳] 空闲链路自检 (IDLE上报)");
     if (reportDeviceStatus(DEVSTAT_IDLE)) {
-      // 最多等1s回执: 收不到说明链路假死, 强制断开让重连逻辑立刻接管
+      // 最多等1s回执: 收不到说明链路假死, 强制断开触发重连
       if (onenetMqttWaitAllReplies(1000) > 0) {
         Serial.println("[心跳] 回执超时, 链路疑假死, 强制断开MQTT触发重连");
         mqttClient.disconnect();
@@ -442,6 +448,7 @@ void loop() {
   lastBtnState = curState;
   delay(10);  // 主循环小延时, 降低CPU占用
 }
+
 
 
 
@@ -584,15 +591,15 @@ void recognizePlate(const char* trigger)
   Serial.println("       === END BASE64 ===");
 #endif
 
-  // 获取百度access_token
+  // 获取百度 access_token (优先 NVS 缓存, 百度返回110/111时自动刷新)
   String token = "";
-#if USE_HARDCODED_TOKEN
-  token = String(HARDCODED_TOKEN);
-  Serial.printf("[OCR] Token: 硬编码, 长度 %u\n", (unsigned)token.length());
-#else
-  Serial.printf("[OCR] Token: 动态获取中\n");
-  token = getAccessToken();
-#endif
+  if (loadCachedToken(token)) {
+    Serial.printf("[OCR] Token: NVS缓存, 长度 %u\n", (unsigned)token.length());
+  } else {
+    Serial.println("[OCR] Token: NVS无缓存, OAuth换取得");
+    token = fetchAccessTokenFromBaidu();
+    if (token.length() > 0) saveTokenToNVS(token.c_str());
+  }
   if (token.length() == 0) {
     Serial.println("[OCR] 获取Token失败, 无法识别");
     free(b64);
@@ -676,6 +683,39 @@ void recognizePlate(const char* trigger)
     httpCode = httpTlsPost(OCR_HOST, fullPath.c_str(), body, bodySize, NULL, respBody);
     Serial.printf("[OCR] HTTP %d, 耗时 %lums, 响应 %u 字节\n",
                   httpCode, millis()-reqStart, (unsigned)respBody.length());
+    // 百度返回 HTTP 200 但 body 含 error_code:
+    //   ⭐ 仅 110(token无效)/111(token过期) 才刷新重试; 其余错误码是业务/图片问题,
+    //      刷新token毫无意义, 直接跳出重试循环(避免白刷token + 白等2次重试)
+    if (httpCode == 200 && respBody.indexOf("\"error_code\"") >= 0) {
+      int ecPos = respBody.indexOf("\"error_code\":");
+      if (ecPos >= 0) {
+        ecPos += 13;
+        int p1 = respBody.indexOf(',', ecPos);
+        int p2 = respBody.indexOf('}', ecPos);
+        int ecEnd = -1;
+        if (p1 >= 0 && p2 >= 0) ecEnd = (p1 < p2) ? p1 : p2;
+        else if (p1 >= 0) ecEnd = p1;
+        else ecEnd = p2;
+        String errCode = respBody.substring(ecPos, ecEnd);
+        errCode.trim();
+        int ec = errCode.toInt();
+        if (ec == 110 || ec == 111) {
+          Serial.printf("[OCR] Token失效 error_code=%d, 刷新后重试\n", ec);
+          invalidateCachedToken();
+          String newTok = fetchAccessTokenFromBaidu();
+          if (newTok.length() > 0) {
+            saveTokenToNVS(newTok.c_str());
+            token = newTok;
+            Serial.printf("[OCR] Token已刷新, 新长度 %u, 继续重试\n", (unsigned)token.length());
+            continue;  // 用新 token 重试本次 POST
+          }
+          Serial.println("[OCR] Token刷新失败, 无法继续");
+        } else {
+          Serial.printf("[OCR] 百度业务错误 error_code=%d (非Token问题), 不再重试\n", ec);
+        }
+      }
+      break;  // 非Token错误 → 立即退出重试循环
+    }
     if (httpCode == 200) break;
   }
   free(body);
@@ -713,7 +753,14 @@ void recognizePlate(const char* trigger)
   // 百度API返回结构: {"words_result":{"number":"京Q06666","color":"blue","probability":[...],"vertexes_location":[...]},"log_id":...}
   JsonObject words = document["words_result"].as<JsonObject>();
   if (!words) {
-    Serial.println("[OCR] 未识别到车牌 (words_result为空)");
+    int apiErr = document["error_code"] | 0;
+    if (apiErr != 0) {
+      const char* apiMsg = document["error_msg"] | "";
+      Serial.printf("[OCR] 识别失败: error_code=%d, msg=%s\n", apiErr, apiMsg);
+      Serial.println("[OCR] 提示: 282102/282103 为图片问题(无车牌/过小/模糊/光照不足), 非Token与网络问题");
+    } else {
+      Serial.println("[OCR] 未识别到车牌 (words_result为空)");
+    }
 #if PRINT_BASE64_TO_SERIAL == 0
     Serial.printf("[OCR] 原始响应: %s\n", respBody.c_str());
 #endif
@@ -772,6 +819,7 @@ void recognizePlate(const char* trigger)
                 sessionSeq, millis() - tSessionStart);
 }
 #endif
+
 
 
 
@@ -851,218 +899,169 @@ void sendImageToSerial(const uint8_t *jpgBuf, size_t jpgLen) {
 
 
 
-
 #if !SERIAL_BRIDGE_MODE
 char* base64_encode(char* buf,int len)
-
 {
-
   int retLen = ceil(len*1.0/3*4);
-
   char *retBuf = (char*)ps_malloc(sizeof(char)*(retLen+4));
   if (!retBuf) return NULL;
-
   int index=0;
-
   int currIndex=0;
-
   int i=0;
-
   int lastCnt = len%3;
-
-  
-
   for(i=0;i<(len-lastCnt);i+=3){
-
     index = ( (buf[i] & 0xFC) >> 2);
-
     retBuf[currIndex]=base64Map[index];
-
     index = ( ( (buf[i] & 0x03) <<4) + ( (buf[i+1] & 0xF0) >> 4) );
-
     retBuf[currIndex+1]=base64Map[index];
-
     index = ( ( (buf[i+1] & 0x0F) << 2) + ( (buf[i+2] & 0xC0) >> 6) );
-
     retBuf[currIndex+2]=base64Map[index];
-
     index = (buf[i+2] & 0x3F);
-
     retBuf[currIndex+3]=base64Map[index];
-
     currIndex+=4;
-
   }
-
-  
-
   if(lastCnt==1){
-
     index = ( (buf[i] & 0xFC) >> 2);
-
     retBuf[currIndex]=base64Map[index];
-
     index = ( (buf[i] & 0x03) << 4);
-
     retBuf[currIndex+1]=base64Map[index];
-
     retBuf[currIndex+2]='=';
-
     retBuf[currIndex+3]='=';
-
     currIndex+=4;
-
   }else if(lastCnt==2){
-
     index = ( (buf[i] & 0xFC) >> 2);
-
     retBuf[currIndex]=base64Map[index];
-
     index = ( ( (buf[i] & 0x03) <<4) + ( (buf[i+1] & 0xF0) >> 4) );
-
     retBuf[currIndex+1]=base64Map[index];
-
     index = ( (buf[i+1] & 0x0F) << 2);
-
     retBuf[currIndex+2]=base64Map[index];
-
     retBuf[currIndex+3]='=';
-
     currIndex+=4;
-
   }
-
-  
-
   retBuf[currIndex]='\0';
-
   return retBuf;
-
 }
 #endif  // !SERIAL_BRIDGE_MODE
 
 
 
+// ========== Token NVS 持久化缓存 (掉电不丢, 百度说过期才刷新) ==========
+// 策略: 不依赖 NTP/时间判断过期, 只在百度返回 110/111 时才主动刷新。
+// 缓存命中时直接读(零请求开销), 断电重启后读到上次的 token 继续用。
+static bool loadCachedToken(String &token) {
+  prefs.begin(NVS_TOKEN_NS, false);
+  token = prefs.getString(NVS_KEY_TOKEN, "");
+  prefs.end();
+  return token.length() > 0;
+}
+static void saveTokenToNVS(const char *token) {
+  if (token == NULL || strlen(token) == 0) return;
+  prefs.begin(NVS_TOKEN_NS, false);
+  prefs.putString(NVS_KEY_TOKEN, token);
+  prefs.end();
+}
+static void invalidateCachedToken(void) {
+  prefs.begin(NVS_TOKEN_NS, false);
+  prefs.remove(NVS_KEY_TOKEN);
+  prefs.end();
+}
+
+// ========== OAuth: 用 apiKey/secretKey 向百度换新 access_token ==========
+// 返回空字符串表示失败(如 TLS 连接失败/响应无access_token)
+static String fetchAccessTokenFromBaidu(void) {
+  WiFiClientSecure client;
+  client.setInsecure();
+  client.setTimeout(15);
+  String path = String("/oauth/2.0/token?grant_type=client_credentials&client_id=")
+                + apiKey + "&client_secret=" + secretKey;
+  if (!client.connect("aip.baidubce.com", 443, 15000)) {
+    client.stop();
+    Serial.println("[OCR] Token: OAuth TLS 连接失败");
+    return "";
+  }
+  client.print(String("GET ") + path + " HTTP/1.1\r\nHost: aip.baidubce.com\r\nConnection: close\r\n\r\n");
+  // 读响应 (HTTP body 中 {"access_token":"...","expires_in":2592000,...})
+  String resp = "";
+  unsigned long t0 = millis();
+  while (client.connected() || client.available()) {
+    while (client.available()) resp += (char)client.read();
+    if (millis() - t0 > 15000) break;
+    yield();
+  }
+  client.stop();
+  // 简单定位 access_token (避免依赖 ArduinoJson 解析整个响应, body 很小)
+  int p = resp.indexOf("\"access_token\":\"");
+  if (p < 0) {
+    Serial.printf("[OCR] Token: OAuth响应无access_token, 响应=%s\n", resp.c_str());
+    return "";
+  }
+  p += 16;
+  int q = resp.indexOf('"', p);
+  if (q < 0) {
+    Serial.printf("[OCR] Token: OAuth响应格式异常, 响应=%s\n", resp.c_str());
+    return "";
+  }
+  String tok = resp.substring(p, q);
+  Serial.printf("[OCR] Token: OAuth换得, 长度 %u\n", (unsigned)tok.length());
+  return tok;
+}
+
+
 void vCameraInit(void)
-
 {
-
   camera_config_t config;
-
   config.ledc_channel = LEDC_CHANNEL_0;
-
   config.ledc_timer = LEDC_TIMER_0;
-
   config.pin_d0 = Y2_GPIO_NUM;
-
   config.pin_d1 = Y3_GPIO_NUM;
-
   config.pin_d2 = Y4_GPIO_NUM;
-
   config.pin_d3 = Y5_GPIO_NUM;
-
   config.pin_d4 = Y6_GPIO_NUM;
-
   config.pin_d5 = Y7_GPIO_NUM;
-
   config.pin_d6 = Y8_GPIO_NUM;
-
   config.pin_d7 = Y9_GPIO_NUM;
-
   config.pin_xclk = XCLK_GPIO_NUM;
-
   config.pin_pclk = PCLK_GPIO_NUM;
-
   config.pin_vsync = VSYNC_GPIO_NUM;
-
   config.pin_href = HREF_GPIO_NUM;
-
   config.pin_sscb_sda = SIOD_GPIO_NUM;
-
   config.pin_sscb_scl = SIOC_GPIO_NUM;
-
   config.pin_pwdn = PWDN_GPIO_NUM;
-
   config.pin_reset = RESET_GPIO_NUM;
-
   config.xclk_freq_hz = 20000000;
-
   config.pixel_format = PIXFORMAT_RGB565;
-
   config.frame_size = FRAMESIZE_VGA;     // 640x480, 适合车牌识别
-
   config.fb_count = 2;
-
   config.fb_location = CAMERA_FB_IN_PSRAM;
-
   config.grab_mode = CAMERA_GRAB_WHEN_EMPTY;
-
-
-
   esp_err_t err = esp_camera_init(&config);
-
   if (err != ESP_OK) {
-
     Serial.printf("摄像头初始化失败: 0x%x\r\n", err);
-
     return;
-
   }
-
-
-
   sensor_t * s = esp_camera_sensor_get();
-
   if (s == NULL) {
-
     Serial.println("摄像头传感器为空!");
-
     return;
-
   }
-
-
-
   Serial.printf("摄像头型号: 0x%x\r\n", s->id.PID);
-
-
-
   // === 图像质量调节 ===
-
   s->set_brightness(s, 0);    // 亮度默认
-
   s->set_contrast(s, 1);      // 对比度+1, 车牌字符更清晰
-
   s->set_saturation(s, 0);    // 饱和度默认
-
   // 保持自动曝光和自动白平衡开启, 让传感器自动调节
-
   s->set_exposure_ctrl(s, 1);
-
   s->set_whitebal(s, 1);
-
   // 最大增益限制到4倍, 减少噪点
-
   s->set_gainceiling(s, GAINCEILING_4X);
-
-
-
   // GC0308/GC032A 需要镜像/翻转处理
-
   if (s->id.PID == GC0308_PID) {
-
     s->set_hmirror(s, 0);
-
   } else if (s->id.PID == GC032A_PID) {
-
     s->set_vflip(s, 1);
-
   } else if (s->id.PID == OV2640_PID || s->id.PID == OV3660_PID) {
-
     s->set_vflip(s, 1);
-
   }
-
 }
 
 
@@ -1158,7 +1157,7 @@ int httpTlsPost(const char* host, const char* path, const char* body, size_t bod
       yield();
       if (millis() - lastData > 2000) break;  // 数据静止2秒, 认为响应已读完
     }
-    if (millis() - rStart > 30000) break;     // 总超时30秒兑底
+    if (millis() - rStart > 30000) break;     // 总超时30秒兜底
   }
   client.stop();
   Serial.printf("[Resp] 读取 %d bytes, 耗时 %lums\n", (int)response.length(), millis() - rStart);
@@ -1246,7 +1245,7 @@ bool onenetMqttEnsureConnected() {
     return false;
   }
   // ⭐ 重连退避: 上一轮两连全失败后至少等5s再发起新一轮,
-  //    避免热点/网络刚恢复时高频重试把失败状态"咬死"(持续 state=-2 需重启才恢复)
+  //    避免热点/网络刚恢复时高频重试把失败状态"咬死"(持续 state=-2需重启才恢复)
   static unsigned long lastFailMs = 0;
   if (lastFailMs != 0 && nowMs - lastFailMs < 5000UL) return false;
   // 最多尝试2次, 避免卡死
@@ -1485,4 +1484,3 @@ bool uploadToOneNET(const String& plate, const String& color, float confidence,
   return onenetMqttPublishProps(pJson);
 }
 #endif  // !SERIAL_BRIDGE_MODE
-

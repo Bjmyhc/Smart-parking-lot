@@ -43,8 +43,8 @@ struct NodeData {
     bool     otaRefused;
 
     /* ---- 子设备证书与 OneNET 代上线状态 (来自 LoraNodeCert_t) ---- */
-    char     productKey[12];  /* 子设备产品ID */
-    char     deviceName[33];  /* 子设备设备名(park1/park2...) */
+    char     productKey[13];  /* 子设备产品ID: 协议字段 12B + NUL (原为 12B, 无法放下 NUL) */
+    char     deviceName[9];   /* 子设备设备名: 协议字段 8B + NUL (原为 33B, 历史遗留) */
     bool     loginPending;    /* 已拿到证书, 待代上线 */
     bool     logoutPending;   /* 节点离线, 待代下线 */
     bool     subLogin;        /* 已代子设备上线成功 */

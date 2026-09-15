@@ -9,14 +9,17 @@
 
 typedef struct {
     uint8_t  nodeId;               /* 节点ID 1..N */
-    char     productKey[12];       /* 子设备产品ID */
-    char     deviceName[33];       /* 子设备设备名 */
+    char     productKey[13];       /* 子设备产品ID: 协议字段 12B + NUL */
+    char     deviceName[9];        /* 子设备设备名: 协议字段 8B + NUL */
     bool     certSent;             /* 是否收到过证书 */
     uint32_t zombieThresholdSec;   /* 僵尸车判定阈值(秒), 0=未设置/使用默认 */
     uint16_t sensorDistanceCm;     /* ⭐ 超声波距离阈值(cm), 0=未设置/使用默认 */
 } PersistedCert_t;
 
-static const uint8_t CERTS_MAGIC = 0xA6;  /* 文件有效性标识 (含sensorDistanceCm) */
+/* 文件有效性标识. 2026-09 因 productKey(12→13)/deviceName(33→9) 改为与协议字段
+ * 对齐, 布局变化 → 升版使旧证书文件失效, 由发现扫描重建 (旧文件内的阈值配置
+ * 一并丢弃, 待平台重新下发) */
+static const uint8_t CERTS_MAGIC = 0xA7;
 
 /* ⭐ S19: 证书/阈值持久化脏标记. 变更只置位, 由主循环 persistCertsIfDirty()
  * 统一异步落盘, 消除 Flash 擦写在 LoRa 轮询/MQTT 回调链中的同步阻塞 */
@@ -47,8 +50,10 @@ void saveCertsToLittleFS(void)
     {
         if (!nodes[i].certSent) continue;
         PersistedCert_t pc;
+        memset(&pc, 0, sizeof(pc));   /* 清零结构体 padding, 保证落盘内容确定 */
         pc.nodeId   = nodes[i].nodeId;
         pc.certSent = true;
+        /* 两侧字段已与协议宽度对齐(productKey 13 / deviceName 9), 按目标大小拷贝即可 */
         memcpy(pc.productKey, nodes[i].productKey, sizeof(pc.productKey));
         memcpy(pc.deviceName, nodes[i].deviceName, sizeof(pc.deviceName));
         /* ⭐ 保存僵尸车阈值: 只有已设置的节点才保存 (非0值) */
@@ -236,18 +241,26 @@ void updateNodeCert(uint8_t nodeId, const LoraNodeCert_t *cert)
     /* 收到证书 = 链路活性确认 (S9): 证书只有 App 上报 → 链路活 + 模式=APP;
      * subLogin/loginPending 由下方证书内容校验逻辑管理 */
     updateNodeState((uint8_t)slot, NODE_EVT_CERT);
-    nd.subLogin   = false;        /* 证书更新后需要重新代上线 */
     memcpy(nd.productKey, cert->ProductKey, sizeof(cert->ProductKey));
     nd.productKey[sizeof(nd.productKey) - 1] = '\0';
     memcpy(nd.deviceName, cert->DeviceName, sizeof(cert->DeviceName));
-    nd.deviceName[sizeof(cert->DeviceName)] = '\0';
+    nd.deviceName[sizeof(cert->DeviceName)] = '\0';   /* 按协议字段宽度终止, 不越界 */
     memcpy(nd.fwVersion, cert->FwVersion, sizeof(cert->FwVersion));
     nd.fwVersion[sizeof(cert->FwVersion)] = '\0';   /* 节点固件版本从证书帧取, OTA 检测据此自动更新 */
 
-    /* 证书有效且信息完整才允许代上线 */
-    nd.loginPending = (cert->valid != 0) &&
-                      (nd.productKey[0] != '\0') &&
-                      (nd.deviceName[0] != '\0');
+    /* ⭐ 仅"首次拿到证书 / 身份变化 / 证书失效"才重新代上线.
+     * 身份相同时(节点常规重启、强制补拉证书)不打扰平台 —— 节点重启不影响
+     * 网关与平台之间的 MQTT 会话, 平台侧子设备的登录状态依然有效, 无需重新
+     * 注册; 否则每次重启都白走一轮 sub/login 注销→重注册, 平台短暂显示离线.
+     * 注: MQTT 重连(会话重建)与离线恢复各有独立的 loginPending 置位路径,
+     * 不依赖此处, 故收窄判定不影响那两条路径 */
+    if (!wasCertSent || identityChanged || (cert->valid == 0))
+    {
+        nd.subLogin     = false;
+        nd.loginPending = (cert->valid != 0) &&   /* 证书有效且信息完整才允许代上线 */
+                          (nd.productKey[0] != '\0') &&
+                          (nd.deviceName[0] != '\0');
+    }
     nd.logoutPending = false;
     dataChanged = true;
 

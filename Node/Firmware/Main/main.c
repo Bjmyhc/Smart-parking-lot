@@ -76,6 +76,7 @@ static void WDG_Feed(void)
 static void PrintResetReason(void)
 {
     uint8_t any = 0;
+    const char *code = "UNK";
     Usart_Printf(USART_DEBUG, "[BOOT] reset cause:");
     if (RCC_GetFlagStatus(RCC_FLAG_PORRST) != RESET)
     { Usart_Printf(USART_DEBUG, " POR/PDR(power drop)"); any = 1; }
@@ -89,6 +90,17 @@ static void PrintResetReason(void)
     { Usart_Printf(USART_DEBUG, " SW(software/OTA)"); any = 1; }
     if (!any) Usart_Printf(USART_DEBUG, " none/unknown");
     Usart_Printf(USART_DEBUG, "\r\n");
+
+    /* ⭐ 复位原因短码: 多标志同时置位时按"最值得追查"的优先级取一个.
+     * 上电时 POR 与 PIN 常同时置位, 故 POR 排在 PIN 之前(掉电优先于按键).
+     * 必须在 RCC_ClearFlag() 之前计算并写入, 清除后即读不到 */
+    if      (RCC_GetFlagStatus(RCC_FLAG_IWDGRST) != RESET) code = "IWDG";
+    else if (RCC_GetFlagStatus(RCC_FLAG_WWDGRST) != RESET) code = "WWDG";
+    else if (RCC_GetFlagStatus(RCC_FLAG_SFTRST)  != RESET) code = "SW";
+    else if (RCC_GetFlagStatus(RCC_FLAG_PORRST)  != RESET) code = "PWR";
+    else if (RCC_GetFlagStatus(RCC_FLAG_PINRST)  != RESET) code = "RST";
+    App_SetResetCode(code);
+
     RCC_ClearFlag();   /* clear flags so next reset cause is independent */
 }
 

@@ -28,11 +28,6 @@
 #define LORA_POLL_FROM_NODE         1
 #define LORA_POLL_TO_NODE           LORA_MAX_NODES  /* 最大搜索 1..16 号 */
 
-/* 证书周期性校验: 已注册节点每 LORA_CERT_VERIFY_EVERY 次数据轮询,
- * 夹发一次 AT+CER 校验证书. 用于发现"同地址换了新节点"(设备名变化),
- * 自动更新证书并重新代上线. 调大省空口, 调小发现更及时. */
-#define LORA_CERT_VERIFY_EVERY      50
-
 /* 搜索模式(开机/短按FLASH)每地址 PING 总尝试次数:
  * LoRa 首帧易丢, 一轮只 PING 一次常因首帧丢失误判"不在线",
  * 多试几次可显著提高搜索阶段发现成功率 (代价: 搜索时长×尝试次数).

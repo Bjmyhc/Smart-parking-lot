@@ -114,13 +114,27 @@ static uint32_t roundStartAt = 0;
 /* PING 短超时 (快速探测, 不阻塞) */
 #define PING_TIMEOUT_MS         500
 
-/* 证书周期性校验计数: 以 nodeId 为下标, 每 LORA_CERT_VERIFY_EVERY 次
- * 轮询到该节点夹发一次 AT+CER, 用于发现"同地址换节点" */
-static uint8_t  dataPollCnt[LORA_MAX_NODES + 1];
-
 /* ⭐ 版本未知补拉证书次数上限 (每节点, 见 needCertForVersion) */
 #define VER_PROBE_MAX   3
 static uint8_t  verProbeCnt[LORA_MAX_NODES + 1];
+
+/* ⭐ 节点刚重启待补拉证书 (由 PONG 分支的复位原因判定置位).
+ * 与 verProbeCnt 的分工: 后者只覆盖"版本未知", 本标志覆盖"版本已知但节点
+ * 刚重启"——重启后阈值回编译期默认值、固件版本/身份也可能已变(手工烧录、
+ * 换板), 而地址照常应答、链路不中断, 网关原本完全察觉不到.
+ * 置位后无条件补拉一次(收到证书即清), 与 verProbeCnt 共用配额以防饿死业务轮询 */
+static bool     bootCertProbe[LORA_MAX_NODES + 1];
+
+/* ⭐ 数据帧 seq 回退 → 疑似节点重启 (见 LORA_FRAME_DATA 分支).
+ * 节点重启后 loraSeq 归零(SendData/SendCert 共用的静态计数器), 重启首帧
+ * seq=1, 表现为"比上次小". 但 uint8_t 每 256 帧(按 2.1s 一帧约 9 分钟)
+ * 会 255→0 回绕一次, 同样表现为"变小", 二者在数值上无法区分.
+ * 故此处只标记"疑似", 交由下一轮的 AT+PING 拍板 —— 节点回
+ * PONG,APP,<复位原因> 即确认重启(s_pongReported 归零, 不受回绕干扰),
+ * 回 PONG,APP,OK 则只是回绕. 拍板用的 PING 若超时, 保守按重启处理,
+ * 以免"重启后 seq 由 1 正常递增、再无回退"导致这次重启永久漏判 */
+static bool     rebootSuspect[LORA_MAX_NODES + 1];   /* 疑似重启, 待 PING 拍板 */
+static uint8_t  lastSeq[LORA_MAX_NODES + 1];         /* 上次数据帧 seq; 初值0 天然安全 */
 
 /* 离线节点探测退避 (正常轮询对已注册离线节点的 PING 探测):
  * 离线 PING 每超时一次, offlineStage 档位+1(封顶), 下次探测间隔查表
@@ -143,25 +157,26 @@ static uint32_t statRxReset     = 0;
 static uint32_t statAckDrop     = 0;
 static uint32_t statLastReport  = 0;
 
-/* 返回 true 表示本轮轮到该校验一次证书 */
-static bool shouldVerifyCert(uint8_t nodeId)
-{
-    if (++dataPollCnt[nodeId] >= LORA_CERT_VERIFY_EVERY)
-    {
-        dataPollCnt[nodeId] = 0;
-        return true;
-    }
-    return false;
-}
-
-/* ⭐ 版本未知时主动补拉一次证书 (限次).
+/* ⭐ 版本未知或节点刚重启时主动补拉一次证书 (限次).
  * 发现阶段虽已"一律索要证书", 但只覆盖扫描时在线的节点; 若节点在扫描结束后
- * 才上电重连, 其版本会一直为空, 只能等 LORA_CERT_VERIFY_EVERY 次轮询(约2分钟)
- * 的周期校验. 这里在轮询到该节点时提前补拉, 拿到真实版本后 OTA 侧即可即时补报.
+ * 才上电重连, 其版本会一直为空. 这里在轮询到该节点时提前补拉, 拿到真实版本后
+ * OTA 侧即可即时补报.
  * 限次(VER_PROBE_MAX)用于防止"节点证书不带版本"时永远不发 DATA 饿死业务轮询 */
 static bool needCertForVersion(uint8_t nodeId, int slot)
 {
     if (slot < 0) return false;
+
+    /* 节点刚重启: 无视"版本已知"强制补拉一次 */
+    if (bootCertProbe[nodeId])
+    {
+        if (verProbeCnt[nodeId] >= VER_PROBE_MAX)
+        {
+            bootCertProbe[nodeId] = false;   /* 多次未果: 放弃, 避免饿死业务轮询 */
+            return false;
+        }
+        verProbeCnt[nodeId]++;
+        return true;
+    }
 
     if (nodes[slot].fwVersion[0] != '\0')   /* 版本已知: 复位补拉配额 */
     {
@@ -172,6 +187,49 @@ static bool needCertForVersion(uint8_t nodeId, int slot)
 
     verProbeCnt[nodeId]++;
     return true;
+}
+
+/* ⭐ 按内存中保存的用户设置重新置位阈值下发标志 (PONG 兜底 / 节点重启判定共用).
+ * 所有"重新上线"场景都汇合于此: 节点必然先被 PING 再回 PONG,APP.
+ * 仅当用户设置过(Value>0)才重发, 未设置过不打扰 */
+static void requestThresholdResend(int slot)
+{
+    if (slot < 0) return;
+
+    if (nodes[slot].thresholdValue > 0)
+    {
+        nodes[slot].thresholdNeedsUpdate = true;
+        nodes[slot].thresholdRetryCount = 0;
+    }
+    if (nodes[slot].sensorDistanceValue > 0)
+    {
+        nodes[slot].sensorDistanceNeedsUpdate = true;
+        nodes[slot].sensorDistanceRetryCount = 0;
+    }
+}
+
+/* PONG,APP,<第三段> 的复位原因白名单 (节点 main.c 按 RCC 复位标志生成).
+ * 只有白名单内的取值才判定为"节点刚重启": 半双工链路可能污染第三段,
+ * 白名单可拦住被污染的 "OK"(如变成 "�K") 从而避免误判重启.
+ * 反向的漏判(原因码本身被污染)无兜底机制: 该次重启不会被纠正, 但节点
+ * 后续的 seq 只增不减, 也不会因此产生误判 */
+static bool resetCodeIsKnown(const char *code)
+{
+    static const char *const KNOWN[] = { "IWDG", "WWDG", "SW", "PWR", "RST", "UNK" };
+
+    for (uint8_t i = 0; i < sizeof(KNOWN) / sizeof(KNOWN[0]); i++)
+    {
+        if (strcmp(code, KNOWN[i]) == 0)
+            return true;
+    }
+    return false;
+}
+
+/* ⭐ seq 拍板答复: 第三段为 OK 表示"节点本次上电已被 PING 过", 即只是 uint8
+ * 回绕而非重启 (见节点 app_tasks.c) */
+static bool resetCodeIsAlive(const char *code)
+{
+    return (code != NULL) && (strcmp(code, "OK") == 0);
 }
 
 /* ---------- 控制命令环形队列 (S16) ----------
@@ -548,6 +606,17 @@ static bool handleCompleteFrame(uint8_t header)
                            (unsigned long)d->OccupiedTime);
                 break;
             }
+            /* ⭐ seq 回退 → 疑似重启. 只标记不动作: 回绕(255→0)与重启(→1)
+             * 在数值上不可区分, 由下一轮 AT+PING 拍板 (见 rebootSuspect 注释) */
+            if (d->seq < lastSeq[nodeId])
+            {
+                rebootSuspect[nodeId] = true;
+                logPhase(LOGPH_LINK);
+                DBG_PRINTF("[LoRa] 节点%d 数据帧 seq 回退 (%d → %d): 疑似重启, 下轮 PING 拍板\n",
+                           nodeId, lastSeq[nodeId], d->seq);
+            }
+            lastSeq[nodeId] = d->seq;
+
             updateNodeFromRaw(nodeId, d);
             /* ⭐ RSSI 存入对应节点, 供 MQTT 代子设备上报 */
             int slot = findNode(nodeId);
@@ -590,6 +659,7 @@ static bool handleCompleteFrame(uint8_t header)
                 break;
             }
             updateNodeCert(nodeId, cert);
+            bootCertProbe[nodeId] = false;   /* 已拿到证书: 解除强制补拉状态 */
             DBG_PRINTF("[LoRa] 收到 <- 节点%d 证书 (有效=%d 产品=%s 设备=%s seq=%d)\n",
                        nodeId, cert->valid, cert->ProductKey, cert->DeviceName, cert->seq);
         }
@@ -697,6 +767,12 @@ static bool handleCompleteFrame(uint8_t header)
             {
                 const char *mode = (const char *)rxBuf + 4;   /* 指向 ",BOOT"/",APP"/"" */
                 bool isBoot = (strncmp(mode, ",BOOT", 5) == 0);
+                /* ⭐ 本次 PONG 是否为"seq 拍板"的答复. 是且答复为 OK 时, 节点全程
+                 * 在线、阈值并未丢失, 必须跳过下方 S30 阈值兜底重发 (见该处注释) */
+                bool rebootProbe = rebootSuspect[nodeId];
+                /* ⭐ PONG 即拍板答复: 疑似重启已由本次 PING 澄清, 解除标记.
+                 * 回复位原因码 → 下方判定为真重启; 回 OK(旧固件无第三段) → 只是 seq 回绕 */
+                rebootSuspect[nodeId] = false;
                 uint8_t prevMode = nodes[slot].mode;  /* ⭐ P1-4: 记录跃迁前模式, 仅状态变化时打印 */
                 updateNodeState((uint8_t)slot,
                                 isBoot ? NODE_EVT_PONG_BOOT : NODE_EVT_PONG_APP);
@@ -704,6 +780,42 @@ static bool handleCompleteFrame(uint8_t header)
                 /* ⭐ S15: 节点确认进入 APP (PONG,APP) → 清理最近一次 OTA 的固件文件 */
                 if (!isBoot)
                     ota_notifyNodeApp(nodeId);
+
+                /* ⭐ 节点重启判定 (协议: PONG,APP,<第三段>, 见节点 app_tasks.c):
+                 *   第三段 = 复位原因白名单 → 该节点自本次上电起从未被 PING 过,
+                 *            即刚重启: 身份/固件版本可能已变(手工烧录、换板),
+                 *            强制补拉一次证书; 阈值已回编译期默认值, 由下方 S30
+                 *            兜底重发一并覆盖
+                 *   第三段 = OK             → 本次上电已被 PING 过, 说明数据丢失
+                 *            只是断联/丢包, 不做额外动作
+                 *   第三段缺失(旧固件)      → 无法判定, 行为与改动前一致 */
+                bool saidAlive = false;   /* 拍板答复明确表示"已被 PING 过", 即非重启 */
+                if (!isBoot)
+                {
+                    const char *reason = NULL;
+                    /* 精确匹配 ",APP," 前缀后再取原因字段. 不能用 strchr 找
+                     * "第一个逗号": mode 本身以 ',' 开头, 那样取到的是
+                     * ",APP,SW" 整串, 白名单必然落空 —— 上一版正是踩了这个
+                     * 坑, 现场表现为静默漏判(日志里只有 PONG,APP,SW 却无重启判定) */
+                    if (strncmp(mode, ",APP,", 5) == 0)
+                        reason = mode + 5;
+
+                    if (reason != NULL && reason[0] != '\0' &&
+                        resetCodeIsKnown(reason))
+                    {
+                        bootCertProbe[nodeId] = true;   /* 收到证书即清 */
+                        verProbeCnt[nodeId]    = 0;     /* 给强制补拉一份新配额 */
+                        /* ⭐ 同步重置 seq 基线: 否则重启后第一帧 DATA(seq=1) 会再次
+                         * 小于旧基线, 让 seq 路径对同一个重启重复触发一次 PING */
+                        lastSeq[nodeId] = 0;
+                        DBG_PRINTF("[LoRa] 节点%d 确认重启(原因=%s): 强制补拉证书\n",
+                                   nodeId, reason);
+                    }
+                    else if (resetCodeIsAlive(reason))
+                    {
+                        saidAlive = true;   /* 只是 seq 回绕, 不是重启 */
+                    }
+                }
 
                 /* Boot 模式: 不索数据不下发配置, 只保活 + 转 OTA 判定器 (7.1#1) */
                 if (isBoot)
@@ -721,16 +833,18 @@ static bool handleCompleteFrame(uint8_t header)
                  * 网关断电重启、OTA 成功后节点重启)都汇合于此——节点必然先被
                  * PING 再回 PONG,APP. 此处统一按内存/LFS 保存的用户设置重新置位,
                  * 一处覆盖全部重启场景 (替代原 LFS 加载与 OTA 成功后两处散落置位).
-                 * 仅当用户设置过(Value>0)才重发, 未设置过不打扰 */
-                if (nodes[slot].thresholdValue > 0)
+                 * 仅当用户设置过(Value>0)才重发, 未设置过不打扰.
+                 * 节点重启判定(上方)不再单独重发阈值: 本调用已覆盖 */
+                if (rebootProbe && saidAlive)
                 {
-                    nodes[slot].thresholdNeedsUpdate = true;
-                    nodes[slot].thresholdRetryCount = 0;
+                    /* ⭐ seq 拍板答复 "OK" = 节点全程在线, 阈值并未丢失.
+                     * 重发不但无意义, 还会挤掉两轮数据(每 256 帧回绕一次, 约 9 分钟) */
+                    logPhase(LOGPH_LINK);
+                    DBG_PRINTF("[LoRa] 节点%d seq 回绕(非重启), 跳过阈值兜底重发\n", nodeId);
                 }
-                if (nodes[slot].sensorDistanceValue > 0)
+                else
                 {
-                    nodes[slot].sensorDistanceNeedsUpdate = true;
-                    nodes[slot].sensorDistanceRetryCount = 0;
+                    requestThresholdResend(slot);
                 }
                 /* ⭐ S7: 阈值下发统一走单函数 (与快速路径分支共用,
                  * 消除双实现; 返回 true=已入队下发) */
@@ -1069,6 +1183,23 @@ bool lora_tick(void)
                     }
                 }
             }
+            /* ⭐ 拍板用的 PING 超时: 不能就此作废 —— 重启后 seq 会由 1 正常
+             * 递增、再也不回退, 这次重启将永久漏判. 故保守按重启处理 */
+            if (rebootSuspect[currentNode])
+            {
+                int s = findNode(currentNode);
+                rebootSuspect[currentNode] = false;
+                if (s >= 0)
+                {
+                    bootCertProbe[currentNode] = true;
+                    verProbeCnt[currentNode]   = 0;
+                    lastSeq[currentNode]       = 0;   /* 同步重置 seq 基线, 避免重复触发 */
+                    requestThresholdResend(s);
+                    logPhase(LOGPH_LINK);
+                    DBG_PRINTF("[LoRa] 节点%d 拍板 PING 超时, 保守按重启处理: 补拉证书 + 重发阈值\n",
+                               currentNode);
+                }
+            }
             statRespTimeout++;
             LOG_W("[LoRa] 节点%d 超时 (跳过)\n", currentNode);
             /* 正常模式离线节点 PING 超时: 离线探测退避档位+1, 拉长下次
@@ -1125,12 +1256,11 @@ bool lora_tick(void)
             }
             /* PONG 已收, 发真实命令:
              *   搜索模式: 一律 CER 索要证书 (节点身份 + 固件版本的唯一权威来源)
-             *   正常模式: 未注册 → CER; 已注册 → DATA (或夹发 CER 校验) */
+             *   正常模式: 未注册 → CER; 已注册 → DATA (版本未知时改发 CER) */
             else if (discoveryMode)
             {
                 /* ⭐ 不因"本地已有证书"而跳过 CER: Flash 里不保存 FwVersion,
-                 * 跳过会让重启后的节点版本长期为空(OTA 版本上报只能缺报),
-                 * 也会把"同地址换节点"的发现推迟到周期校验(约2分钟).
+                 * 跳过会让重启后的节点版本长期为空(OTA 版本上报只能缺报).
                  * 代价仅是每节点每次发现多发一帧, 节点通常 100ms 内应答 */
                 sendAT(currentNode, "CER", 0, false);
                 respTimeout = LORA_RESPONSE_TIMEOUT_MS;
@@ -1139,7 +1269,6 @@ bool lora_tick(void)
             else
             {
                 bool wantCert = !certOk ||
-                                (certOk && shouldVerifyCert(currentNode)) ||
                                 needCertForVersion(currentNode, slot);
                 sendAT(currentNode, wantCert ? "CER" : "DATA", 0, false);
                 respTimeout = LORA_RESPONSE_TIMEOUT_MS;
@@ -1165,7 +1294,8 @@ bool lora_tick(void)
         }
         else if (certOk && slot >= 0 &&
                  nodes[slot].mode == NODE_MODE_APP && nodes[slot].serviceOnline &&
-                 currentNode != forcePingNode)   /* ⭐ S12: OTA 目标节点强制先 PING 复核 */
+                 currentNode != forcePingNode &&      /* ⭐ S12: OTA 目标节点强制先 PING 复核 */
+                 !rebootSuspect[currentNode])         /* ⭐ seq 疑似回退: 本轮改走 PING 拍板 */
         {
             /* 已注册 APP 在线节点: 快速路径, 直接发 DATA (不经过 PING);
              * 仅当三态=链路活+模式APP+业务在线才走此通道 (S9) */
@@ -1174,8 +1304,7 @@ bool lora_tick(void)
              * (命令队列在后续 lora_tick 中投递, 避免抢发) */
             if (!pushThresholdUpdate(slot))
             {
-                bool verify = shouldVerifyCert(currentNode) ||
-                              needCertForVersion(currentNode, slot);
+                bool verify = needCertForVersion(currentNode, slot);
                 sendAT(currentNode, verify ? "CER" : "DATA", 0, false);
                 respTimeout = LORA_RESPONSE_TIMEOUT_MS;
                 waitingFastPath = true;   /* 快速路径 DATA/CER 待响应, 超时计入 dataMiss (S9) */
@@ -1210,9 +1339,13 @@ bool lora_tick(void)
             respTimeout = PING_TIMEOUT_MS;
             pollPhase   = 1;
             noteCmdSent(currentNode, "PING");   /* ⭐ S33 */
+            if (rebootSuspect[currentNode] || currentNode == forcePingNode)
+                logPhase(LOGPH_LINK);   /* ⭐ S34: 链路保活阶段 */
+            if (rebootSuspect[currentNode])
+                DBG_PRINTF("[LoRa] 节点%d seq 疑似回退, 已发 PING 拍板是否重启\n",
+                           currentNode);
             if (currentNode == forcePingNode)
             {
-                logPhase(LOGPH_LINK);   /* ⭐ S34: OTA 后 PING 复核, 链路保活阶段 */
                 DBG_PRINTF("[LoRa] 节点%d OTA 后强制 PING 复核\n", currentNode);
                 forcePingNode = 0;
             }
@@ -1254,6 +1387,12 @@ void lora_triggerDiscovery(void)
     waitingCmdReply = false;    /* ⭐ S35: 防命令回执残留吞掉本轮 PONG */
     pollPhase   = 0;
     discoverPingAttempts = 0;   /* 重新触发扫描时清零尝试计数 */
+    /* 全量扫描本身会对每个地址索要证书, 清掉残留的强制补拉标志,
+     * 避免扫描结束后又多补一次 AT+CER */
+    memset(bootCertProbe, 0, sizeof(bootCertProbe));
+    /* seq 基线与疑似标记一并清空: 重新扫描即从零重建基线, 避免拿旧基线误判 */
+    memset(rebootSuspect, 0, sizeof(rebootSuspect));
+    memset(lastSeq, 0, sizeof(lastSeq));
     discoveryMode = true;
     DBG_PRINTLN("[LoRa] 手动触发节点发现 (全量扫描)");
 }
