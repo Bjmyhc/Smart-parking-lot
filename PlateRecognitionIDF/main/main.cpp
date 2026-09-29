@@ -68,6 +68,12 @@ static const int TIME_STEPS = 18;
 //   注意: 上限就是推理的 0.40s, 想更快只能换更小的模型, 调这个参数没用。
 static const uint32_t AUTO_PERIOD_MS = 200;
 
+// P5.24: 连续模式下"结果可疑就自动补打一行诊断", 不用按 BOOT。
+//   为什么需要: 连续模式每帧只打 2 行是刻意的(掩码/缩略图那两块 ASCII 图才是刷屏元凶),
+//   但"什么都不打"会让人正好错过出问题的那一帧。这里按"可疑"触发, 并限流 4 s 一次。
+//   要看完整的掩码 + 94x24 缩略图, 还是长按 BOOT。想彻底关掉自动诊断就改成 0。
+#define AUTO_DIAG_ON_SUSPECT 1
+
 // 训练/校验用的图像归一化参数 (见文件头「预处理必须与训练一致」)
 static const float NORM_MEAN = 127.5f;
 static const float NORM_STD = 128.0f;
@@ -122,62 +128,109 @@ static void IRAM_ATTR boot_btn_isr(void *arg) {
     }
 }
 
-/** CTC 贪婪解码, 逻辑与 predict.py 的 greedy_decode 严格一致 */
-static std::string greedy_decode(const float *logits /* [NUM_CLASS][TIME_STEPS] */) {
-    const int blank = NUM_CLASS - 1;
+/**
+ * P5.24: 解码结果 + 置信度明细。
+ *   为什么需要: 之前日志只有一个结果字符串, 分不清两种情况 ——
+ *     "图糊/框歪 => 模型自己也在犹豫" (该改定位/预处理), 与
+ *     "图很干净但模型没见过这种字形 => 自信地认错" (只能靠素材微调)。
+ *   把每一步的 top1 概率和"次选是谁"打出来, 这两种情况就能一眼分开。
+ */
+typedef struct {
+    std::string text;      // CTC 折叠后的文本 (与 predict.py 的 greedy_decode 同逻辑)
+    std::string seq;       // 18 步原始 argmax 拼成的串 (空白记作 "_", 不做任何合并)
+    std::string steps;     // 每步 "字符 概率%(次选 概率%)" 明细
+    float mean_top1;       // 非空白步的平均 top1 概率 (0..1)
+    float min_top1;        // 非空白步里最低的 top1 概率
+    int   min_top1_t;      // 上面那一步的下标 (-1 = 一个非空白步都没有)
+    int   nseg;            // 折叠后的段数 = 识别出的字符数
+    int   nchar_steps;     // 非空白的步数
+    int   ambig;           // "领先 <10%" 的步数 —— 模型在这些步上没底
+} decode_report_t;
 
-    std::vector<int> labels(TIME_STEPS);
+/**
+ * CTC 贪婪解码, 逻辑与 predict.py 的 greedy_decode 严格一致。
+ * rep 非空时顺带填好置信度明细 —— 解码出的文本与不填时逐字节相同。
+ * 概率 = softmax(该步 68 类输出)。⚠ 必须先减最大值再 expf: 输出 logits 的跨度实测可达
+ * 100 上下, 直接 expf 会溢出成 inf, 概率就全成 NaN 了。
+ */
+static std::string greedy_decode_impl(const float *logits, decode_report_t *rep) {
+    const int blank = NUM_CLASS - 1;
+    int   labels[TIME_STEPS];
+    float p1v[TIME_STEPS], p2v[TIME_STEPS];
+    int   nxt[TIME_STEPS];           // 次选类别 (看 top1 是不是"勉强"赢的)
+
     for (int t = 0; t < TIME_STEPS; t++) {
-        int best = 0;
-        float best_v = logits[t];
+        float vmax = logits[t];
         for (int c = 1; c < NUM_CLASS; c++) {
-            float v = logits[c * TIME_STEPS + t];
-            if (v > best_v) {
-                best_v = v;
-                best = c;
-            }
+            const float v = logits[c * TIME_STEPS + t];
+            if (v > vmax) vmax = v;
+        }
+        float sum = 0.0f, e1 = 0.0f, e2 = 0.0f;
+        int best = 0, second = 0;
+        for (int c = 0; c < NUM_CLASS; c++) {
+            const float e = expf(logits[c * TIME_STEPS + t] - vmax);
+            sum += e;
+            if (e > e1) { e2 = e1; second = best; e1 = e; best = c; }
+            else if (e > e2) { e2 = e; second = c; }
         }
         labels[t] = best;
+        nxt[t] = second;
+        p1v[t] = (sum > 0.0f) ? (e1 / sum) : 0.0f;
+        p2v[t] = (sum > 0.0f) ? (e2 / sum) : 0.0f;
     }
 
+    // ---- 折叠 (与 predict.py 一字不差) ----
     std::string out;
     int prev = labels[0];
-    if (prev != blank) {
-        out += CHARS[prev];
-    }
+    int nseg = (prev != blank) ? 1 : 0;
+    if (prev != blank) out += CHARS[prev];
     for (int t = 0; t < TIME_STEPS; t++) {
-        int c = labels[t];
+        const int c = labels[t];
         if (prev == c || c == blank) {
-            if (c == blank) {
-                prev = c;
-            }
+            if (c == blank) prev = c;
             continue;
         }
         out += CHARS[c];
+        nseg++;
         prev = c;
+    }
+
+    if (rep != nullptr) {
+        rep->text = out;
+        rep->nseg = nseg;
+        rep->seq.clear();
+        rep->steps.clear();
+        rep->mean_top1 = 0.0f;
+        rep->min_top1 = 2.0f;
+        rep->min_top1_t = -1;
+        rep->nchar_steps = 0;
+        rep->ambig = 0;
+        float sum_top1 = 0.0f;
+        char buf[48];
+        for (int t = 0; t < TIME_STEPS; t++) {
+            const bool is_blank = (labels[t] == blank);
+            if (is_blank) rep->seq += '_';
+            else rep->seq += CHARS[labels[t]];
+            const char *nm2 = (nxt[t] != blank) ? CHARS[nxt[t]] : "_";
+            snprintf(buf, sizeof(buf), "%s%.0f(%s%.0f) ",
+                     is_blank ? "_" : CHARS[labels[t]], p1v[t] * 100.0f, nm2, p2v[t] * 100.0f);
+            rep->steps += buf;
+            if (!is_blank) {
+                rep->nchar_steps++;
+                sum_top1 += p1v[t];
+                if (p1v[t] < rep->min_top1) { rep->min_top1 = p1v[t]; rep->min_top1_t = t; }
+                if (p1v[t] - p2v[t] < 0.10f) rep->ambig++;
+            }
+        }
+        rep->mean_top1 = (rep->nchar_steps > 0) ? (sum_top1 / (float)rep->nchar_steps) : 0.0f;
+        if (rep->nchar_steps == 0) rep->min_top1 = 0.0f;
     }
     return out;
 }
 
-/**
- * P5.7: 把 18 个时间步的原始 argmax 拼成字符串 (blank 记作 "_"), 不做任何合并。
- * 用途: 分清"重复字符丢字"到底怪谁 —— 京Q06666 若只认出 京Q0666,
- *   这里若是 京Q0_6666_66 (有 4 段 6) => 是解码/后处理的锅;
- *   若只有 3 段 6 => 模型本身就没分开, 只能靠数据/训练解决。
- */
-static std::string ctc_label_seq(const float *logits) {
-    const int blank = NUM_CLASS - 1;
-    std::string s;
-    for (int t = 0; t < TIME_STEPS; t++) {
-        int best = 0;
-        float best_v = logits[t];
-        for (int c = 1; c < NUM_CLASS; c++) {
-            const float v = logits[c * TIME_STEPS + t];
-            if (v > best_v) { best_v = v; best = c; }
-        }
-        s += (best == blank) ? "_" : CHARS[best];
-    }
-    return s;
+/** 只要文本时用这个 (与预测脚本一致) */
+static std::string greedy_decode(const float *logits) {
+    return greedy_decode_impl(logits, nullptr);
 }
 
 /** 归一化 + 量化 LUT: lut[c*256+v] = quantize((v-mean)/std) */
@@ -211,6 +264,50 @@ static void build_norm_lut(int8_t *lut, int exponent) {
             lut[c * 256 + v] = (int8_t)q;
         }
     }
+}
+
+// ---- P5.28: 直接读写 GC2145 寄存器 ----
+// 这个驱动的 set_brightness / set_contrast / set_saturation / set_exposure_ctrl /
+// set_whitebal / set_gainceiling 全是 set_dummy, 只打印一行 "Unsupported" 就返回, 什么都没干。
+// 真正有效的只有 set_reg / get_reg, 但它不分页 —— 所以每次都得先往 0xfe 写页号。
+#define GC_PAGE_AEC     1
+#define GC_REG_AEC_TGT  0x13    // AEC 目标亮度, 驱动默认 0x40; 调小 = 整体拍暗, 用来压过曝/泛白
+#define GC_AEC_TARGET   0       // 0 = 保持驱动默认; 想试就填 0x38 / 0x30 / 0x28
+
+static int gc_rd(sensor_t *s, uint8_t page, uint8_t reg) {
+    s->set_reg(s, 0xfe, 0xff, page);
+    return s->get_reg(s, reg, 0xff);
+}
+
+static int gc_wr(sensor_t *s, uint8_t page, uint8_t reg, uint8_t v) {
+    s->set_reg(s, 0xfe, 0xff, page);
+    return s->set_reg(s, reg, 0xff, v);
+}
+
+static void camera_tune_registers(sensor_t *s) {
+    if (s->id.PID != GC2145_PID) {
+        return;                             // 只有 GC2145 的分页规则是确认过的
+    }
+    const int tgt = gc_rd(s, GC_PAGE_AEC, GC_REG_AEC_TGT);
+    if (tgt < 0) {
+        ESP_LOGE(TAG, "GC2145 寄存器读失败 (%d): SCCB 不通, 下面几个值都不可信", tgt);
+        return;
+    }
+    ESP_LOGI(TAG, "GC2145 寄存器: 曝光目标(页1 0x13)=0x%02x | AEC使能(0xb6)=0x%02x | 自动开关(页0 0x82)=0x%02x",
+             tgt, gc_rd(s, GC_PAGE_AEC, 0xb6) & 0xff, gc_rd(s, 0, 0x82) & 0xff);
+    ESP_LOGI(TAG, "GC2145 AEC窗口: X1=0x%02x X2=0x%02x Y1=0x%02x Y2=0x%02x 中心权重(0x0c)=0x%02x",
+             gc_rd(s, GC_PAGE_AEC, 0x01) & 0xff, gc_rd(s, GC_PAGE_AEC, 0x02) & 0xff,
+             gc_rd(s, GC_PAGE_AEC, 0x03) & 0xff, gc_rd(s, GC_PAGE_AEC, 0x04) & 0xff,
+             gc_rd(s, GC_PAGE_AEC, 0x0c) & 0xff);
+
+    // 无论开不开这个开关都写一次: 写回读一致 => 证明"能真正控制这颗芯片"。
+    const uint8_t want = GC_AEC_TARGET ? (uint8_t)GC_AEC_TARGET : (uint8_t)tgt;
+    gc_wr(s, GC_PAGE_AEC, GC_REG_AEC_TGT, want);
+    const int now = gc_rd(s, GC_PAGE_AEC, GC_REG_AEC_TGT);
+    ESP_LOGI(TAG, "曝光目标 0x%02x -> 0x%02x | 写回读 0x%02x (%s)", tgt, want, now & 0xff,
+             (now == (int)want) ? "读写在控, 通道没问题" : "没写进去!");
+
+    s->set_reg(s, 0xfe, 0xff, 0x00);
 }
 
 /** 摄像头初始化: 参数与 PlateRecognition.ino 的 vCameraInit() 完全一致 */
@@ -255,13 +352,7 @@ static esp_err_t camera_start(void) {
     }
     ESP_LOGI(TAG, "摄像头 PID=0x%x", (unsigned)s->id.PID);
 
-    // 图像质量调节, 与 PlateRecognition.ino 一致
-    s->set_brightness(s, 0);            // 亮度默认
-    s->set_contrast(s, 1);              // 对比度+1, 车牌字符更清晰
-    s->set_saturation(s, 0);            // 饱和度默认
-    s->set_exposure_ctrl(s, 1);         // 保持自动曝光
-    s->set_whitebal(s, 1);              // 保持自动白平衡
-    s->set_gainceiling(s, GAINCEILING_4X);   // 最大增益限制到 4 倍, 减少噪点
+    camera_tune_registers(s);
     if (s->id.PID == OV2640_PID || s->id.PID == OV3660_PID) {
         s->set_vflip(s, 1);
     } else if (s->id.PID == GC032A_PID) {
@@ -275,16 +366,27 @@ static esp_err_t camera_start(void) {
 /** 丢弃前 n 帧, 让自动曝光/白平衡收敛 (与 PlateRecognition.ino 的拍照流程一致) */
 // 丢帧数: 每次识别前丢 CAM_DISCARD_FRAMES 帧, 保证拿到的是"刚拍的新帧"而不是缓冲里的旧帧;
 // 摄像头刚启动/重启时用 CAM_WARMUP_FRAMES 多丢一些, 等 AE/AGC 稳定 (否则第一帧偏暗)。
-#define CAM_WARMUP_FRAMES 12
-#define CAM_DISCARD_FRAMES 3
+#define CAM_WARMUP_FRAMES    12
+#define CAM_WARMUP_DELAY_MS  100   // 开机那一次: 慢慢丢, 给 AE/AWB 时间收敛
+// P5.27: 每次识别前丢几帧 / 丢帧之间等多久。
+//   原来这里固定 vTaskDelay(100) x 3 = **整整 300 ms 纯等待**, 占单帧约 1.3 s 的 23%。
+//   它是从旧的"拍一张照"流程照搬来的 (PlateRecognition.ino: 丢 10 帧 + delay(100)) ——
+//   那边是"初始化相机 -> 拍一张", 所以必须等 AE 收敛; 这里相机是**一直流**的:
+//   esp_camera_fb_get() 本身就会阻塞到有新帧, 丢 3 帧天然前进 3 个帧周期,
+//   而 AE/AWB 在这一秒多的循环里早就跟上了, 根本不需要再空等。
+//   万一发现"刚移动相机后的头一两帧偏亮/偏暗", 把 CAM_DISCARD_DELAY_MS 改回 100 即可。
+#define CAM_DISCARD_FRAMES    3
+#define CAM_DISCARD_DELAY_MS  0
 
-static void camera_discard_frames(int n) {
+static void camera_discard_frames(int n, int delay_ms) {
     for (int i = 0; i < n; i++) {
         camera_fb_t *tmp = esp_camera_fb_get();
         if (tmp) {
             esp_camera_fb_return(tmp);
         }
-        vTaskDelay(pdMS_TO_TICKS(100));
+        if (delay_ms > 0) {
+            vTaskDelay(pdMS_TO_TICKS(delay_ms));
+        }
     }
 }
 
@@ -306,47 +408,15 @@ static void log_input_stats(const dl::TensorBase *t) {
              lo, hi, (float)sum / (float)n, (unsigned)n);
 }
 
-/**
- * 打印裁剪块的通道均值与约 47x12 的灰度缩略图。
- * 均值可反推颜色顺序: 本模型 lut[v]=v-127 (mean=127.5/std=128/exponent=-7), 故 像素 ≈ int8值+127;
- * 张量通道序是 BGR (DL_IMAGE_CAP_RGB_SWAP) => 蓝牌应当 B 明显最大; 若 R 最大, 说明字节序/通道序搞反了。
- */
-static void log_crop_diag_raw(const int8_t *p, int w, int h) {
-    const size_t n = (size_t)w * (size_t)h;
-    long sb = 0, sg = 0, sr = 0;
-    for (size_t i = 0; i < n; i++) {
-        sb += p[i * 3 + 0];
-        sg += p[i * 3 + 1];
-        sr += p[i * 3 + 2];
-    }
-    const float k = 1.0f / (float)n;
-    ESP_LOGI(TAG, "裁剪块均值(像素 0..255): B=%.0f G=%.0f R=%.0f  (蓝牌应 B 最大)",
-             (float)sb * k + 127.0f, (float)sg * k + 127.0f, (float)sr * k + 127.0f);
-
-    // 1:1 打印 (94 字符 x 24 行), 用 G 通道当灰阶。蓝底白字的车牌在这里应当能一眼读出字;
-    // 读不出字 => 是裁剪块的问题, 不是模型的问题。终端窄的话 monitor 会自动折行, 不影响数格子。
-    static const char *RAMP = " .:-=+*#%@";   // 10 级, 由暗到亮
-    std::string art = "\n";
-    for (int y = 0; y < h; y++) {
-        for (int x = 0; x < w; x++) {
-            int gray = p[((size_t)y * w + x) * 3 + 1] + 127;   // G 通道
-            if (gray < 0) gray = 0;
-            if (gray > 255) gray = 255;
-            art += RAMP[(gray * 9) / 255];
-        }
-        art += '\n';
-    }
-    ESP_LOGI(TAG, "裁剪块 1:1 缩略图 (94x24, 字符越靠后越亮):%s", art.c_str());
-}
-
-static void log_crop_diag(const dl::TensorBase *t) {
-    log_crop_diag_raw((const int8_t *)t->data, (int)t->shape[2], (int)t->shape[1]);
-}
-
-// "结果不像车牌"时要补打的那张缩略图: 必须在 run() 之前把输入张量拷一份 —— run() 之后
-// 这块显存已经被 esp-dl 的内存管理器回收 (见文件头「必须在 run() 之前打印」), 再读就是别的张量了。
-static int8_t *crop_snap = nullptr;
-static const size_t CROP_SNAP_BYTES = (size_t)IMG_W * IMG_H * 3;
+// P5.26: 这里原本有两个东西, 都删了。
+//   1) "裁剪块 1:1 缩略图" —— 94 字符宽 x 24 行的 ASCII 灰度画。实测没人看得清: 94 列在任何
+//      终端/串口助手里都会折行, 一旦折行就没法对着字认了。而它想回答的问题
+//      ("这块图糊不糊/过曝不过曝/颜色对不对") 现在全部有数字答案:
+//      均值 B/G/R、亮度跨度、过曝/死黑占比、锐度、每步置信度。
+//      真要看"模型到底吃了什么", 用短按 BOOT 切到模式 2 —— 串口会直接发那张 94x24 的真 JPEG 图,
+//      既能肉眼看, 又能存下来当训练素材, 比字符画强得多。
+//   2) crop_snap —— 每帧把输入张量拷 6.8 KB 到 PSRAM。它是**死代码**: 只在 !verbose 时分配,
+//      唯一使用它的地方却要求 verbose, 于是永远是 nullptr, 白拷了一整轮、一次都没打出来过。
 
 /** 结果格式粗校验: 省份简称(1 个汉字) + 1 个字母 + 5~6 个数字/字母
  *  等价于 auto_crop_predict.py 里的 PLATE_RE, 用来把"明显跑偏的输出"挑出来。 */
@@ -423,6 +493,7 @@ typedef struct {
     float rot_fill;       // 旋转矩形内的填充率 (低 => 连通域是散块/被背景撑大)
     float rot_deg;        // 相对水平方向的倾角, 单位度
     float qx[4], qy[4];   // 摆正用四角(原图像素): 左上/右上/右下/左下, 已按原脚本比例去边
+    const char *rot_why;  // P5.24: 拟合失败的具体原因 ("旋转长宽比越界" 等), 供日志/自动诊断用
 } roi_box_t;
 
 // ==================== P5.12: 串口图像输出 (给「BY串口助手」实时预览) ====================
@@ -446,18 +517,105 @@ typedef struct {
 #define IMG_TX_W        (640 / IMG_TX_SCALE)
 #define IMG_TX_H        (480 / IMG_TX_SCALE)
 
+// P5.21: 94x24 裁剪块的 JPEG 输出缓冲上限。
+//   原来这里写死成 IMG_W*IMG_H = 2256 字节, 注释还写着"一定小于这个数" —— 是错的:
+//   实测 q90 编出来就有 2764 字节, 而 jpeg_enc_process() 不会因为 outbuf_size 小而收手,
+//   多出来的 508 字节直接写到紧跟在后面的那些全局变量上 (g_tx_* / g_enc / g_tx_rgb ... 全被糊掉),
+//   于是"切到模式 2 的第一帧"就 panic (LoadProhibited)。
+//   JPEG 体积正常不会超过原始 RGB 大小, 这里按原始大小再留 4 KB 余量, 溢不出来。
+#define IMG_TX_CROP_JPG_MAX  (IMG_W * IMG_H * 3 + 4096)
+
 
 // P5.15/P5.16: 图片输出模式 —— 短按 BOOT 循环切换。默认 0。
 //   0 = 干净预览图 (320x240, 采数据/日常看画面)
 //   1 = 预览图 + ROI 绿框 (专门用来看"框套得准不准")
 //   2 = 模型输入块 (94x24) —— 就是模型真正吃到的那张小图, 逐像素一致, 直接当训练素材
 static volatile int g_img_mode = 0;
-static uint8_t g_crop_u8[IMG_W * IMG_H * 3];   // 模式 2: 输入张量反量化回来的 RGB (JPEG 源序)
+static uint8_t g_crop_u8[IMG_W * IMG_H * 3] __attribute__((aligned(16)));  // 模式 2: 输入张量反量化回来的 RGB (JPEG 源序)。必须 16 字节对齐 —— esp_new_jpeg v0.6 起在 S3 上会检查编码器输入缓冲的对齐
 static uint8_t *g_tx_rgb = nullptr;              // RGB888 (16 字节对齐), PSRAM
 static uint8_t *g_tx_jpg = nullptr;              // JPEG 输出缓冲, PSRAM
-static jpeg_enc_handle_t g_tx_enc = nullptr;
-static jpeg_enc_handle_t g_crop_enc = nullptr;   // P5.16: 94x24 裁剪块的编码器 (与预览图那个不同尺寸)
-static bool g_tx_dead = false;                   // 出过一次错就永久关掉, 免得每帧刷屏
+// P5.17: 硬件 JPEG 编码器只有一份 —— 以前预览图 (320x240) 和裁剪块 (94x24) 各开了一个句柄,
+//   两个句柄抢同一份硬件: 用另一个尺寸编过之后, 再切回旧句柄编码就卡死在 jpeg_enc_process()
+//   里出不来了 (表现: 按 BOOT 切完模式后毫无反应, 必须重启)。现在只留一个句柄,
+//   配置变了就 close 再 open。
+static jpeg_enc_handle_t g_enc = nullptr;
+static int g_enc_w = 0, g_enc_h = 0, g_enc_q = 0;
+// P5.20: 这里原来有个"一次性关掉图片输出"的开关 —— 一旦置上就再也不发图了, 只能重启单片机。
+//   现在改成: 这一帧失败就只跳过这一帧, 下一帧照常重试; 失败原因 + 次数会打出来 (同一原因最多 3 s 报一次)。
+static uint32_t g_tx_ok = 0;                     // 累计成功发出的帧数
+static uint32_t g_tx_bytes = 0;                  // 累计发出的字节数
+static uint32_t g_tx_fail = 0;                   // 连续失败次数
+static const char *g_tx_fail_why = nullptr;      // 最近一次失败原因
+static int64_t g_tx_warn_us = 0;                 // 上次打印失败原因的时刻 (给日志限流)
+
+/** 保证编码器当前是按 (w,h,q) 打开的; 配置变了就换一个 (close 再 open) */
+static bool img_tx_enc_ensure(int w, int h, int q) {
+    if (g_enc != nullptr && g_enc_w == w && g_enc_h == h && g_enc_q == q) return true;
+    if (g_enc != nullptr) {
+        jpeg_enc_close(g_enc);
+        g_enc = nullptr;
+    }
+    jpeg_enc_config_t cfg = {};                 // 逐字段赋值, 不用 DEFAULT_JPEG_ENC_CONFIG() (C++ 下那个宏有坑)
+    cfg.width = w;
+    cfg.height = h;
+    cfg.src_type = JPEG_PIXEL_FORMAT_RGB888;    // 编码器不吃 RGB565, 必须 RGB888
+    cfg.subsampling = JPEG_SUBSAMPLE_420;
+    cfg.quality = (uint8_t)q;
+    cfg.rotate = JPEG_ROTATE_0D;
+    cfg.task_enable = false;
+    cfg.hfm_task_priority = 0;
+    cfg.hfm_task_core = 0;
+    if (jpeg_enc_open(&cfg, &g_enc) != JPEG_ERR_OK || g_enc == nullptr) {
+        g_enc = nullptr;
+        ESP_LOGW(TAG, "JPEG 编码器打开失败 (%dx%d q%d) -> 本帧不发图", w, h, q);
+        return false;
+    }
+    g_enc_w = w;
+    g_enc_h = h;
+    g_enc_q = q;
+    return true;
+}
+
+/** 这一帧的图成功发出去了: 记一笔账; 要是刚才是连续失败, 报一次"恢复" */
+static void img_tx_note_ok(int len) {
+    g_tx_ok++;
+    g_tx_bytes += (uint32_t)len;
+    if (g_tx_fail > 0) {
+        ESP_LOGW(TAG, "发图已恢复 (刚才连续失败 %u 次, 原因: %s)", (unsigned)g_tx_fail,
+                 g_tx_fail_why ? g_tx_fail_why : "?");
+        g_tx_fail = 0;
+        g_tx_fail_why = nullptr;
+    }
+    if (g_tx_ok % 30 == 0) {   // 每 30 帧报一次: 这就是"字节确实从单片机发出去过"的证据
+        ESP_LOGI(TAG, "发图统计: 累计成功 %u 帧, 共 %u KB", (unsigned)g_tx_ok, (unsigned)(g_tx_bytes / 1024));
+    }
+}
+
+/** 这一帧的图没发出去: 只跳过这一帧 (不再永久关闭图片输出), 同一原因最多 3 s 报一次, 免得刷屏 */
+static void img_tx_note_fail(const char *why) {
+    g_tx_fail++;
+    g_tx_fail_why = why;
+    const int64_t now = esp_timer_get_time();
+    if (g_tx_fail == 1 || now - g_tx_warn_us > 3000000) {
+        g_tx_warn_us = now;
+        ESP_LOGW(TAG, "这一帧发图失败 (%u 次): %s", (unsigned)g_tx_fail, why);
+    }
+}
+
+/**
+ * 把"图片输出"这条链整体复位: 关掉编码器、清掉失败计数。
+ * 按一下 BOOT 就会走这里 —— 万一以后又卡住, 按一下就能救回来, 不用再重启单片机。
+ */
+static void img_tx_reset(const char *why) {
+    if (g_enc != nullptr) {
+        jpeg_enc_close(g_enc);
+        g_enc = nullptr;
+    }
+    g_enc_w = g_enc_h = g_enc_q = 0;
+    g_tx_fail = 0;
+    g_tx_fail_why = nullptr;
+    ESP_LOGW(TAG, "图片输出已复位 (%s): 编码器已关闭, 下一帧重新打开", why);
+}
 
 /** zlib CRC-32 (与 Python binascii.crc32 完全一致) */
 static uint32_t img_tx_crc32(const uint8_t *p, size_t n) {
@@ -499,15 +657,25 @@ static void img_tx_send_jpeg(const uint8_t *jpg, int len) {
     img_tx_raw_write((const uint8_t *)"$END\r\n", 6);
 }
 
-/** 画一条线 (Bresenham), 只用来把 ROI 框画在预览图上 —— 纯绿, 一眼能看见 */
-static void img_tx_line(uint8_t *rgb, int w, int h, int x0, int y0, int x1, int y1) {
+// P5.22: 框线宽度 (像素)。原来固定 1 px, 在图上细得看不清 —— 现在 4 px。
+#define IMG_TX_BOX_THICK 4
+
+/** 画一条线 (Bresenham), 只用来把 ROI 框画在预览图上 —— 纯绿, 一眼能看见。
+ *  thick = 线宽: 每个像素点落一个 thick×thick 的实心方块 (框线用这个够了, 不用抗锯齿)。 */
+static void img_tx_line(uint8_t *rgb, int w, int h, int x0, int y0, int x1, int y1, int thick) {
+    if (thick < 1) thick = 1;
+    const int half = thick / 2;
     const int dx = abs(x1 - x0), sx = (x0 < x1) ? 1 : -1;
     const int dy = -abs(y1 - y0), sy = (y0 < y1) ? 1 : -1;
     int err = dx + dy;
     for (;;) {
-        if (x0 >= 0 && x0 < w && y0 >= 0 && y0 < h) {
-            uint8_t *q = rgb + ((size_t)y0 * w + x0) * 3;
-            q[0] = 0; q[1] = 255; q[2] = 0;
+        for (int oy = -half; oy < thick - half; oy++) {
+            for (int ox = -half; ox < thick - half; ox++) {
+                const int px = x0 + ox, py = y0 + oy;
+                if (px < 0 || px >= w || py < 0 || py >= h) continue;
+                uint8_t *q = rgb + ((size_t)py * w + px) * 3;
+                q[0] = 0; q[1] = 255; q[2] = 0;
+            }
         }
         if (x0 == x1 && y0 == y1) break;
         const int e2 = 2 * err;
@@ -523,28 +691,26 @@ static void img_tx_line(uint8_t *rgb, int w, int h, int x0, int y0, int x1, int 
  */
 static void img_tx_send(const uint8_t *rgb565be, int w, int h, const roi_box_t *box) {
 #if IMG_TX_ENABLE
-    if (g_tx_dead) return;
     if (w != IMG_TX_W * IMG_TX_SCALE || h != IMG_TX_H * IMG_TX_SCALE) {
-        g_tx_dead = true;   // 只支持 640x480 这一档 (改了 framesize 就要同步改 IMG_TX_*)
-        ESP_LOGW(TAG, "图像输出只支持 %dx%d, 当前 %dx%d -> 关掉图片输出",
-                 IMG_TX_W * IMG_TX_SCALE, IMG_TX_H * IMG_TX_SCALE, w, h);
+        // 只支持 640x480 这一档 (改了 framesize 就要同步改 IMG_TX_*)
+        img_tx_note_fail("相机帧尺寸不是 640x480");
         return;
     }
 
+    // 必须 16 字节对齐 (S3 上编码器按 128bit 读); 放 PSRAM, 不占内部 RAM。
+    // P5.20: 两个缓冲分开补 —— 以前只要有一次没分配上, 图片输出就被永久关掉了。
     if (g_tx_rgb == nullptr) {
-        // 必须 16 字节对齐 (S3 上编码器按 128bit 读); 放 PSRAM, 不占内部 RAM
         g_tx_rgb = (uint8_t *)heap_caps_aligned_calloc(16, 1, (size_t)IMG_TX_W * IMG_TX_H * 3,
-                                                      MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-        g_tx_jpg = (uint8_t *)heap_caps_malloc((size_t)IMG_TX_W * IMG_TX_H,
-                                               MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+                                                       MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    }
+    if (g_tx_jpg == nullptr) {
+        g_tx_jpg = (uint8_t *)heap_caps_aligned_calloc(16, 1, (size_t)IMG_TX_W * IMG_TX_H,
+                                                       MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     }
     if (g_tx_rgb == nullptr || g_tx_jpg == nullptr) {
-        g_tx_dead = true;
-        ESP_LOGW(TAG, "图像输出缓冲分配失败 (%d B + %d B) -> 关掉图片输出",
-                 IMG_TX_W * IMG_TX_H * 3, IMG_TX_W * IMG_TX_H);
+        img_tx_note_fail("PSRAM 缓冲分配失败 (内存不够或者太碎)");
         return;
     }
-
     // ---- 1) RGB565(大端) -> RGB888, 顺便 2x2 平均降采样 (平均比抽点干净, 不会有摩尔纹) ----
     const int s = IMG_TX_SCALE, nn = s * s;
     for (int y = 0; y < IMG_TX_H; y++) {
@@ -582,36 +748,29 @@ static void img_tx_send(const uint8_t *rgb565be, int w, int h, const roi_box_t *
             px[3] = (int)(box->x1 * inv); py[3] = (int)(box->y2 * inv);
         }
         for (int k = 0; k < 4; k++) {
-            img_tx_line(g_tx_rgb, IMG_TX_W, IMG_TX_H, px[k], py[k], px[(k + 1) & 3], py[(k + 1) & 3]);
+            img_tx_line(g_tx_rgb, IMG_TX_W, IMG_TX_H, px[k], py[k], px[(k + 1) & 3], py[(k + 1) & 3], IMG_TX_BOX_THICK);
         }
     }
 
-    // ---- 3) JPEG 编码 (句柄开一次就够) ----
-    if (g_tx_enc == nullptr) {
-        jpeg_enc_config_t cfg = {};                // 逐字段赋值, 不用 DEFAULT_JPEG_ENC_CONFIG()
-        cfg.width = IMG_TX_W;                      // (那个宏是 C 的指定初始化器, C++ 下有坑)
-        cfg.height = IMG_TX_H;
-        cfg.src_type = JPEG_PIXEL_FORMAT_RGB888;   // 编码器不吃 RGB565, 必须 RGB888
-        cfg.subsampling = JPEG_SUBSAMPLE_420;
-        cfg.quality = IMG_TX_QUALITY;
-        cfg.rotate = JPEG_ROTATE_0D;
-        cfg.task_enable = false;
-        cfg.hfm_task_priority = 0;
-        cfg.hfm_task_core = 0;
-        if (jpeg_enc_open(&cfg, &g_tx_enc) != JPEG_ERR_OK || g_tx_enc == nullptr) {
-            g_tx_dead = true;
-            ESP_LOGW(TAG, "JPEG 编码器打开失败 -> 关掉图片输出");
-            return;
-        }
+    // ---- 3) JPEG 编码 (全局单句柄, 见 img_tx_enc_ensure) ----
+    if (!img_tx_enc_ensure(IMG_TX_W, IMG_TX_H, IMG_TX_QUALITY)) {
+        img_tx_note_fail("JPEG 编码器打不开");
+        return;
     }
+
     int out_len = 0;
-    if (jpeg_enc_process(g_tx_enc, g_tx_rgb, IMG_TX_W * IMG_TX_H * 3,
+    if (jpeg_enc_process(g_enc, g_tx_rgb, IMG_TX_W * IMG_TX_H * 3,
                          g_tx_jpg, IMG_TX_W * IMG_TX_H, &out_len) != JPEG_ERR_OK || out_len <= 0) {
-        ESP_LOGW(TAG, "JPEG 编码失败 (out_len=%d), 本帧不发图", out_len);
+        img_tx_note_fail("JPEG 编码失败 (预览图 320x240)");
+        return;
+    }
+    if (out_len > IMG_TX_W * IMG_TX_H) {   // 防御: 同上, 超了就不发
+        img_tx_note_fail("JPEG 编出来超过缓冲 (预览图)");
         return;
     }
 
     img_tx_send_jpeg(g_tx_jpg, out_len);
+    img_tx_note_ok(out_len);
 #else
     (void)rgb565be; (void)w; (void)h; (void)box;
 #endif
@@ -620,32 +779,25 @@ static void img_tx_send(const uint8_t *rgb565be, int w, int h, const roi_box_t *
 /** 模式 2: 把"模型输入块"发出去。图只有 94x24, 但它是训练素材的正品 —— 和推理输入逐像素一致 */
 static void img_tx_send_crop(void) {
 #if IMG_TX_ENABLE
-    if (g_tx_dead) return;
-    if (g_crop_enc == nullptr) {
-        jpeg_enc_config_t cfg = {};                 // 逐字段赋值, 不用 C 的指定初始化器
-        cfg.width = IMG_W;
-        cfg.height = IMG_H;
-        cfg.src_type = JPEG_PIXEL_FORMAT_RGB888;
-        cfg.subsampling = JPEG_SUBSAMPLE_420;
-        cfg.quality = 90;                           // 训练素材, 压得轻一点
-        cfg.rotate = JPEG_ROTATE_0D;
-        cfg.task_enable = false;
-        cfg.hfm_task_priority = 0;
-        cfg.hfm_task_core = 0;
-        if (jpeg_enc_open(&cfg, &g_crop_enc) != JPEG_ERR_OK || g_crop_enc == nullptr) {
-            g_tx_dead = true;
-            ESP_LOGW(TAG, "裁剪块 JPEG 编码器打开失败 -> 关掉图片输出");
-            return;
-        }
+    if (!img_tx_enc_ensure(IMG_W, IMG_H, 90)) {   // 训练素材, 压得轻一点 (q90)
+        img_tx_note_fail("JPEG 编码器打不开 (94x24)");
+        return;
     }
-    static uint8_t jpg[IMG_W * IMG_H];              // 94x24 的 JPEG 一定小于这个数
+
+    // P5.21: 必须用足够大的缓冲 —— 见 IMG_TX_CROP_JPG_MAX 的说明 (写小了会把后面的全局变量糊掉)
+    static uint8_t jpg[IMG_TX_CROP_JPG_MAX] __attribute__((aligned(16)));
     int out_len = 0;
-    if (jpeg_enc_process(g_crop_enc, g_crop_u8, IMG_W * IMG_H * 3,
+    if (jpeg_enc_process(g_enc, g_crop_u8, IMG_W * IMG_H * 3,
                          jpg, sizeof(jpg), &out_len) != JPEG_ERR_OK || out_len <= 0) {
-        ESP_LOGW(TAG, "裁剪块 JPEG 编码失败, 本帧不发图");
+        img_tx_note_fail("JPEG 编码失败 (94x24 裁剪块)");
+        return;
+    }
+    if (out_len > (int)sizeof(jpg)) {   // 防御: 真编超了就宁可不发, 也不能越界写坏内存
+        img_tx_note_fail("JPEG 编出来超过缓冲 (94x24)");
         return;
     }
     img_tx_send_jpeg(jpg, out_len);
+    img_tx_note_ok(out_len);
 #endif
 }
 
@@ -653,16 +805,31 @@ static void img_tx_send_crop(void) {
 static const char *g_roi_note = "(未知原因)";
 static int g_frame_no = 0;
 
-/** 是否是车牌颜色: 复刻 auto_crop_predict.py 里 cv2.inRange 的阈值
- *  (OpenCV 8bit: H 0..179, S/V 0..255) 蓝 H in [100,124] / 绿 H in [35,85], 且 S>=43, V>=46
- *  -> 换算成色相角度就是 [200,248] / [70,170] */
+/** 是否是车牌颜色: 蓝/绿车牌的色相窗口 + 饱和度/亮度下限
+ *  (OpenCV 8bit: H 0..179, S/V 0..255)
+ *
+ *  P5.17 把蓝色窗口从 [100,124] (即 200°~248°, 只有 48° 宽) 放宽到 180°~270° + S>=35.
+ *  为什么: 绿牌窗口 70°~170° 有 100° 宽, 蓝牌却只有 48° —— 蓝牌那边本来就写窄了.
+ *  实测 (97 张屏幕翻拍的蓝牌, 见文档第二十八章):
+ *      蓝色窗口        牌内像素通过   牌外误报   能出框的比例
+ *      [200°,248°]      30.8%        1.7%         19%     <- 改之前: 掩码是碎的/中空的
+ *      [185°,265°]      61.7%        2.2%         75%
+ *      [180°,270°]+S35  70.1%        2.8%         90%
+ *  色相窗口太窄 => 掩码只剩零散碎片 => "有效填充率"过不了 60% 的门槛 => 整帧被丢掉,
+ *  表现就是"明明车牌拍得很清楚, 却一直跳过推理". 放宽后牌外误报几乎没涨,
+ *  因为真正区分"车牌"和"蓝东西"的是后面的形状/填充率门槛, 不是像素颜色. */
 static inline bool roi_is_plate_color(int r, int g, int b) {
     const int v = (r > g) ? ((r > b) ? r : b) : ((g > b) ? g : b);
     const int m = (r < g) ? ((r < b) ? r : b) : ((g < b) ? g : b);
     if (v < 46) return false;                  // V >= 46
     const int delta = v - m;
     if (delta == 0) return false;
-    if ((255 * delta) / v < 43) return false;  // S >= 43
+    // P5.27 性能: 先做一个"不用除法"的饱和度粗筛。s = 255*delta/v < 35 等价于 255*delta < 35*v,
+    //   而这种像素色相再合适也过不了 (蓝牌要 s>=35, 绿牌要 s>=43)。
+    //   整帧 30 万像素里绝大多数是灰/白/黑/低饱和, 这一句让它们直接返回,
+    //   省掉除法 + 取色相那一段 —— 那是"定位 156 ms"里的主要开销。
+    if (255 * delta < 35 * v) return false;
+    const int s = (255 * delta) / v;           // 饱和度
     int deg;
     if (v == r) {
         deg = 60 * (g - b) / delta;
@@ -672,7 +839,9 @@ static inline bool roi_is_plate_color(int r, int g, int b) {
     } else {
         deg = 60 * (r - g) / delta + 240;
     }
-    return (deg >= 200 && deg <= 248) || (deg >= 70 && deg <= 170);
+    if (deg >= 180 && deg <= 270) return s >= 35;   // 蓝牌 (P5.17: 由 [200,248]+S43 放宽)
+    if (deg >= 70 && deg <= 170) return s >= 43;    // 绿牌 (新能源), 未动
+    return false;
 }
 
 /** 粗网格上的水平形态学: opp=0 膨胀(OR) / opp=1 腐蚀(AND); 结构元 4x1, 锚点居中(偏移 -2..+1) */
@@ -719,6 +888,9 @@ typedef struct {
     float deg;            // 相对水平方向的倾角, 单位度
     float uw, vh;         // 旋转矩形的边长, 单位格
     float qx[4], qy[4];   // 去边后的四角, 原图像素, 顺序 左上/右上/右下/左下
+    // --- P5.22: 诊断字段 (只在详细模式/按 BOOT 时打出来, 连续模式不占任何开销) ---
+    const char *why;      // 拟合结论: "通过" 或具体死在哪一条
+    int np;               // 这个连通域里"车牌色格"的个数
 } roi_fit_t;
 
 /**
@@ -731,6 +903,8 @@ static bool roi_fit_rotated(const uint8_t *cell, const uint8_t *bin, int16_t *pa
                             const roi_slot_t *sl, int w, int h, roi_fit_t *fit) {
     fit->ok = false;
     fit->ratio = fit->fill = fit->deg = fit->uw = fit->vh = 0.0f;
+    fit->why = "未完成拟合";
+    fit->np = 0;
     int np = 0;
     double sx = 0, sy = 0;
     for (int y = sl->y1; y <= sl->y2; y++) {
@@ -743,7 +917,8 @@ static bool roi_fit_rotated(const uint8_t *cell, const uint8_t *bin, int16_t *pa
             sy += y;
         }
     }
-    if (np < 30) return false;   // 30 格 = 480 px^2, 再小拟合没有意义
+    fit->np = np;
+    if (np < 30) { fit->why = "车牌色格数太少 (<30 格)"; return false; }   // 30 格 = 480 px^2, 再小拟合没有意义
     const double mx = sx / np, my = sy / np;
     double cxx = 0, cyy = 0, cxy = 0;
     for (int y = sl->y1; y <= sl->y2; y++) {
@@ -777,7 +952,7 @@ static bool roi_fit_rotated(const uint8_t *cell, const uint8_t *bin, int16_t *pa
         }
     }
     const double uw = umax - umin, vh = vmax - vmin;
-    if (uw < 6.0 || vh < 3.0) return false;   // 至少 24x12 像素才值得摆正
+    if (uw < 6.0 || vh < 3.0) { fit->why = "旋转矩形太小 (要 >=24x12 像素)"; return false; }   // 至少 24x12 像素才值得摆正
     const double ratio = uw / vh;
     const double fill = (double)np / ((uw + 1.0) * (vh + 1.0));
     fit->ratio = (float)ratio;
@@ -785,12 +960,12 @@ static bool roi_fit_rotated(const uint8_t *cell, const uint8_t *bin, int16_t *pa
     fit->deg = (float)(theta * 57.29577951308232);
     fit->uw = (float)uw;
     fit->vh = (float)vh;
-    if (ratio < 1.2 || ratio > 8.0) return false;
-    if (fill < 0.45) return false;   // 散块/被背景撑大 -> 不值得摆正, 让调用方用轴对齐
+    if (ratio < 1.2 || ratio > 8.0) { fit->why = "旋转长宽比越界 (要 1.2~8.0)"; return false; }
+    if (fill < 0.45) { fit->why = "旋转矩形填充不足 (<45%)"; return false; }   // 散块/被背景撑大 -> 不值得摆正, 让调用方用轴对齐
     // 去边: 与轴对齐分支同一套比例 (左右 1% / 上下 3%), 在 u/v 上就是收缩区间
     const double um0 = umin + uw * ROI_TRIM_X, um1 = umax - uw * ROI_TRIM_X;
     const double vm0 = vmin + vh * ROI_TRIM_Y, vm1 = vmax - vh * ROI_TRIM_Y;
-    if (um1 <= um0 || vm1 <= vm0) return false;
+    if (um1 <= um0 || vm1 <= vm0) { fit->why = "去边后区间为空"; return false; }
     const double uu[4] = {um0, um1, um1, um0};
     const double vv[4] = {vm0, vm0, vm1, vm1};
     double cxs[4], cys[4];
@@ -817,6 +992,7 @@ static bool roi_fit_rotated(const uint8_t *cell, const uint8_t *bin, int16_t *pa
         fit->qy[k] = (float)cys[ord[k]];
     }
     fit->ok = true;
+    fit->why = "通过";
     return true;
 }
 
@@ -924,6 +1100,7 @@ static bool roi_locate(const uint8_t *rgb565be, int w, int h, roi_box_t *box, bo
     memset(cell, 0, (size_t)ROI_GRID_N);
     long sum_r = 0, sum_g = 0, sum_b = 0;
     long color_px = 0;
+    long over_px = 0, dark_px = 0;   // P5.24: 整帧过曝/死黑像素数 (顺手统计, 几乎不花时间)
     for (int y = 0; y < h; y++) {
         const uint8_t *row = rgb565be + (size_t)y * w * 2;
         uint8_t *crow = cell + (size_t)(y / ROI_GRID_STEP) * ROI_GRID_W;
@@ -935,6 +1112,11 @@ static bool roi_locate(const uint8_t *rgb565be, int w, int h, roi_box_t *box, bo
             sum_r += r;
             sum_g += g;
             sum_b += b;
+            // P5.24: 曝光体检。过曝会把车牌色的饱和度洗掉(掩码变碎、填充率过不了 60% 门槛),
+            //   欠曝则蓝底发黑压不出色相 —— 这两种都能靠"最亮通道"的分布直接看出来。
+            const int mx3 = (r > g) ? ((r > b) ? r : b) : ((g > b) ? g : b);
+            if (mx3 >= 250) over_px++;
+            else if (mx3 <= 5) dark_px++;
             if (roi_is_plate_color(r, g, b)) {
                 crow[x / ROI_GRID_STEP]++;
                 color_px++;
@@ -949,6 +1131,12 @@ static bool roi_locate(const uint8_t *rgb565be, int w, int h, roi_box_t *box, bo
         ESP_LOGI(TAG, "整帧均值(像素 0..255): R=%.0f G=%.0f B=%.0f | 车牌色像素 %ld/%d = %.1f%%",
                  (float)sum_r * inv_px, (float)sum_g * inv_px, (float)sum_b * inv_px,
                  color_px, w * h, 100.0f * (float)color_px * inv_px);
+        const float over_p = 100.0f * (float)over_px * inv_px;
+        const float dark_p = 100.0f * (float)dark_px * inv_px;
+        ESP_LOGI(TAG, "整帧曝光: 过曝(最亮通道>=250) %.1f%% | 死黑(<=5) %.1f%% | %s",
+                 over_p, dark_p,
+                 (over_p > 8.0f) ? "明显过曝 —— 车牌色会被洗淡, 避开强光/反光再试"
+                                 : ((dark_p > 25.0f) ? "整体偏暗 —— 蓝底可能压不出色相" : "正常"));
     }
     int color_cells = 0;
     // 快照一份车牌色格给 recognize_once 用: 本函数返回后 cell 仍是本帧数据,
@@ -1028,63 +1216,85 @@ static bool roi_locate(const uint8_t *rgb565be, int w, int h, roi_box_t *box, bo
     // 密度 = 连通域格数 / 外接框格数: 真车牌是一整块蓝底(白字挖掉一点), 接近 1; 散块很低。
     float c_ratio[ROI_MAX_SLOTS], c_axis_ratio[ROI_MAX_SLOTS];
     float c_dens[ROI_MAX_SLOTS], c_denseff[ROI_MAX_SLOTS], c_score[ROI_MAX_SLOTS];
-    bool c_ok[ROI_MAX_SLOTS], c_okr[ROI_MAX_SLOTS], taken[ROI_MAX_SLOTS];
+    bool c_ok[ROI_MAX_SLOTS], c_okr[ROI_MAX_SLOTS];
+    const char *c_why[ROI_MAX_SLOTS];   // P5.22: 每个候选"为什么通过/被淘汰" (详细模式打出来)
     static roi_fit_t c_fit[ROI_MAX_SLOTS];   // 每个候选的旋转拟合结果 (大数组放静态区)
     for (int k = 0; k < ROI_MAX_SLOTS; k++) {
         c_ratio[k] = c_axis_ratio[k] = c_dens[k] = c_denseff[k] = c_score[k] = 0.0f;
-        c_ok[k] = c_okr[k] = taken[k] = false;
+        c_ok[k] = c_okr[k] = false;
+        c_why[k] = "未评估";
         c_fit[k].ok = false;
     }
     for (int k = 0; k < nslot; k++) {
-        if (slots[k].area < min_cells) continue;
+        if (slots[k].area < min_cells) { c_why[k] = "连通域太小"; continue; }
         const float bw = (float)(slots[k].x2 - slots[k].x1 + 1);
         const float bh = (float)(slots[k].y2 - slots[k].y1 + 1);
         c_axis_ratio[k] = bw / bh;
         roi_fit_rotated(cell, bin, parent, &slots[k], w, h, &c_fit[k]);
         const float ratio = c_fit[k].ok ? c_fit[k].ratio : c_axis_ratio[k];
         c_ratio[k] = ratio;
-        if (ratio < ROI_RATIO_LO || ratio > ROI_RATIO_HI) continue;
+        if (ratio < ROI_RATIO_LO || ratio > ROI_RATIO_HI) {
+            // 倾斜的牌照最常死在这一条: 旋转拟合没成功 -> 退回轴对齐外接框 -> 外接框被倾斜撑胖 -> 比例不过
+            c_why[k] = c_fit[k].ok ? "旋转宽高比越界" : "宽高比越界(拟合失败, 退回轴对齐)";
+            continue;
+        }
         c_okr[k] = true;
         c_dens[k] = (float)slots[k].area / (bw * bh);
         // 有效填充率: 摆正得了就用旋转矩形的填充率 (不随倾角掉), 否则退回轴对齐外接框密度
         c_denseff[k] = c_fit[k].ok ? c_fit[k].fill : c_dens[k];
         c_score[k] = (float)slots[k].area / (1.0f + fabsf(ratio - ROI_RATIO_IDEAL));
-        if (c_denseff[k] < ROI_MIN_FILL) { dens_rej++; continue; }   // 太稀 => 不是车牌, 宁可不猜
+        if (c_denseff[k] < ROI_MIN_FILL) { dens_rej++; c_why[k] = "有效填充不足"; continue; }   // 太稀 => 不是车牌, 宁可不猜
         c_ok[k] = true;
+        c_why[k] = "通过";
     }
 
-    // 打印得分前 5 的候选, 用来判断选中的是不是"又大又稀"的假目标
-    for (int rank = 0; rank < 5; rank++) {
-        int pick = -1;
-        for (int k = 0; k < nslot; k++) {
-            if (!c_okr[k] || taken[k]) continue;
-            if (pick < 0 || c_score[k] > c_score[pick]) pick = k;
+    // P5.22: 详细模式把**每一个**候选都打出来 (不只前 5 名), 并写清"为什么被淘汰" ——
+    //   倾斜的牌照最常死在"旋转拟合没成功 -> 退回轴对齐 -> 比例/填充不过"这条路上, 必须能看见。
+    if (verbose) {
+        int shown = 0;
+        for (int k = 0; k < nslot && k < ROI_MAX_SLOTS; k++) {
+            if (c_why[k] == nullptr || strcmp(c_why[k], "未评估") == 0) continue;
+            shown++;
+            if (c_fit[k].ok) {
+                ESP_LOGI(TAG, "候选%d: 像素x[%d,%d) y[%d,%d) 格%dx%d 色格%d | 旋转比例 %.2f 倾角 %+.1f° 旋转填充 %.0f%% | 轴对齐比例 %.2f 外接框密度 %.0f%% | 得分 %.0f -> %s",
+                         k, slots[k].x1 * ROI_GRID_STEP, (slots[k].x2 + 1) * ROI_GRID_STEP,
+                         slots[k].y1 * ROI_GRID_STEP, (slots[k].y2 + 1) * ROI_GRID_STEP,
+                         slots[k].x2 - slots[k].x1 + 1, slots[k].y2 - slots[k].y1 + 1, slots[k].area,
+                         c_fit[k].ratio, c_fit[k].deg, c_fit[k].fill * 100.0f,
+                         c_axis_ratio[k], c_dens[k] * 100.0f, c_score[k], c_why[k]);
+            } else {
+                ESP_LOGI(TAG, "候选%d: 像素x[%d,%d) y[%d,%d) 格%dx%d 色格%d | 旋转拟合失败: %s | 轴对齐比例 %.2f 外接框密度 %.0f%% | 得分 %.0f -> %s",
+                         k, slots[k].x1 * ROI_GRID_STEP, (slots[k].x2 + 1) * ROI_GRID_STEP,
+                         slots[k].y1 * ROI_GRID_STEP, (slots[k].y2 + 1) * ROI_GRID_STEP,
+                         slots[k].x2 - slots[k].x1 + 1, slots[k].y2 - slots[k].y1 + 1, slots[k].area,
+                         c_fit[k].why ? c_fit[k].why : "?",
+                         c_axis_ratio[k], c_dens[k] * 100.0f, c_score[k], c_why[k]);
+            }
         }
-        if (pick < 0) break;
-        taken[pick] = true;
-        if (!verbose) continue;   // P5.12: 候选表只在详细模式打
-        if (c_fit[pick].ok) {
-            ESP_LOGI(TAG, "候选%d: x[%d,%d) y[%d,%d) %dx%d 旋转宽高比 %.2f (轴对齐 %.2f) 倾角 %.1f° 外接框密度 %.0f%% 有效填充 %.0f%% 得分 %.0f [%s]",
-                     rank + 1, slots[pick].x1 * ROI_GRID_STEP, (slots[pick].x2 + 1) * ROI_GRID_STEP,
-                     slots[pick].y1 * ROI_GRID_STEP, (slots[pick].y2 + 1) * ROI_GRID_STEP,
-                     slots[pick].x2 - slots[pick].x1 + 1, slots[pick].y2 - slots[pick].y1 + 1,
-                     c_ratio[pick], c_axis_ratio[pick], c_fit[pick].deg,
-                     c_dens[pick] * 100.0f, c_denseff[pick] * 100.0f, c_score[pick],
-                     c_ok[pick] ? "通过" : "填充不足");
-        } else {
-            ESP_LOGI(TAG, "候选%d: x[%d,%d) y[%d,%d) %dx%d 宽高比 %.2f (轴对齐, 旋转拟合不可用) 外接框密度 %.0f%% 得分 %.0f [%s]",
-                     rank + 1, slots[pick].x1 * ROI_GRID_STEP, (slots[pick].x2 + 1) * ROI_GRID_STEP,
-                     slots[pick].y1 * ROI_GRID_STEP, (slots[pick].y2 + 1) * ROI_GRID_STEP,
-                     slots[pick].x2 - slots[pick].x1 + 1, slots[pick].y2 - slots[pick].y1 + 1,
-                     c_ratio[pick], c_dens[pick] * 100.0f, c_score[pick],
-                     c_ok[pick] ? "通过" : "填充不足");
-        }
+        ESP_LOGI(TAG, "候选小结: 列出 %d 个 / 连通域共 %d 个; 门槛 = 面积>=%d格 比例%.1f~%.1f 有效填充>=%.0f%%",
+                 shown, nslot, min_cells, ROI_RATIO_LO, ROI_RATIO_HI, ROI_MIN_FILL * 100.0f);
     }
-
     int best_k = -1;
     for (int k = 0; k < nslot; k++) {
         if (!c_ok[k]) continue;
         if (best_k < 0 || c_score[k] > c_score[best_k]) best_k = k;
+    }
+    // P5.24: 最佳与第二名的得分差距 —— 差距很小说明"这一帧选得勉强", 一旦选错, 后面再准也没用。
+    if (verbose && best_k >= 0) {
+        int k2 = -1;
+        for (int k = 0; k < nslot; k++) {
+            if (!c_ok[k] || k == best_k) continue;
+            if (k2 < 0 || c_score[k] > c_score[k2]) k2 = k;
+        }
+        if (k2 >= 0) {
+            const float s1 = c_score[best_k], s2 = c_score[k2];
+            const float lead = (s1 > 0.0f) ? (100.0f * (s1 - s2) / s1) : 0.0f;
+            ESP_LOGI(TAG, "选中 候选%d (得分 %.0f); 第二名 候选%d (得分 %.0f, 落后 %.0f%%)%s",
+                     best_k, s1, k2, s2, lead,
+                     (lead < 15.0f) ? " —— 两个候选很接近, 有选错的风险" : "");
+        } else {
+            ESP_LOGI(TAG, "选中 候选%d (得分 %.0f) —— 没有第二个合格候选", best_k, c_score[best_k]);
+        }
     }
     if (verbose && dens_rej > 0) {
         ESP_LOGW(TAG, "形状像车牌但有效填充 < %.0f%% 被淘汰的候选: %d 个 (真车牌一般 >=65%%, 散块噪点 <=55%%)",
@@ -1146,12 +1356,52 @@ static bool roi_locate(const uint8_t *rgb565be, int w, int h, roi_box_t *box, bo
     box->rot_ratio = c_fit[best_k].ratio;
     box->rot_fill = c_fit[best_k].fill;
     box->rot_deg = c_fit[best_k].deg;
+    box->rot_why = c_fit[best_k].why;   // P5.24: 失败原因也带出去, 供"自动诊断"那一行用
     for (int k = 0; k < 4; k++) {
         box->qx[k] = c_fit[best_k].qx[k];
         box->qy[k] = c_fit[best_k].qy[k];
     }
     if (box->rot_ok) {   // 占屏比例也算旋转矩形的, 不然日志里会偏大
         box->area_pct = 100.0f * c_fit[best_k].uw * c_fit[best_k].vh / (float)ROI_GRID_N;
+    }
+
+    // ---- 5.5) P5.22 倾斜诊断 (只在详细模式/按 BOOT 时打) ----
+    //   一眼看出"倾斜的牌照到底死在哪一环": 旋转拟合没过(退化成外接框) 还是 拟合过了但模型不认。
+    if (verbose) {
+        const roi_fit_t *f = &c_fit[best_k];
+        ESP_LOGI(TAG, "倾斜诊断: 选中候选%d | 倾角 %+.1f° | 旋转拟合 %s (%s) 旋转比例 %.2f 旋转填充 %.0f%% | 轴对齐外接框 %dx%d 比例 %.2f | 本帧走 = %s",
+                 best_k, f->deg, f->ok ? "成功" : "失败", f->why ? f->why : "?",
+                 f->ratio, f->fill * 100.0f,
+                 slots[best_k].x2 - slots[best_k].x1 + 1, slots[best_k].y2 - slots[best_k].y1 + 1,
+                 c_axis_ratio[best_k],
+                 f->ok ? "摆正(四边形采样)" : "轴对齐裁剪(退化路径)");
+        if (f->ok) {
+            // P5.24: 把四角坐标也打出来 —— 只看比例/填充率分不清"框很规整"和"框被背景撑成一条斜长条"。
+            //   四边形面积 / 轴对齐外接框面积: 接近 1 说明框正(外接框几乎贴着四边形);
+            //   明显小于 1 (比如 0.6) 说明外接框被"斜"撑得很大 —— 这种框去硬裁必然混进大量背景。
+            const float *cx = f->qx;
+            const float *cy = f->qy;
+            const double qa = 0.5 * fabs((double)cx[0] * cy[1] - (double)cx[1] * cy[0]
+                                         + (double)cx[1] * cy[2] - (double)cx[2] * cy[1]
+                                         + (double)cx[2] * cy[3] - (double)cx[3] * cy[2]
+                                         + (double)cx[3] * cy[0] - (double)cx[0] * cy[3]);
+            const float bw_px = (float)(slots[best_k].x2 - slots[best_k].x1 + 1) * ROI_GRID_STEP;
+            const float bh_px = (float)(slots[best_k].y2 - slots[best_k].y1 + 1) * ROI_GRID_STEP;
+            ESP_LOGI(TAG, "四角(左上/右上/右下/左下, 原图像素): (%.0f,%.0f) (%.0f,%.0f) (%.0f,%.0f) (%.0f,%.0f) | 四边形/外接框面积 = %.2f",
+                     cx[0], cy[0], cx[1], cy[1], cx[2], cy[2], cx[3], cy[3],
+                     (bw_px * bh_px > 0.0f) ? (qa / (double)(bw_px * bh_px)) : 0.0);
+            ESP_LOGI(TAG, "四角边长: 长边 %.0f px 短边 %.0f px 比例 %.2f | 旋转矩形的长宽比 %.2f (真车牌约 3.1~3.4)",
+                     f->uw * ROI_GRID_STEP, f->vh * ROI_GRID_STEP,
+                     (f->vh > 0.0f) ? (f->uw / f->vh) : 0.0f, f->ratio);
+        } else {
+            ESP_LOGI(TAG, "四角: 无 —— 旋转拟合失败, 这一帧只能用轴对齐外接框硬裁 (斜牌这样裁必糊)");
+        }
+        if (!f->ok && fabsf(f->deg) >= 8.0f) {
+            ESP_LOGW(TAG, "!! 牌照明显倾斜 (%.1f°) 但旋转拟合没成功 -> 只能用外接框裁, 框里混进背景、字符被压扁, 大概率认错", f->deg);
+        }
+        if (f->ok && fabsf(f->deg) >= 8.0f) {
+            ESP_LOGW(TAG, "   倾斜 %.1f° 已走摆正路径 —— 若这一帧结果仍是乱码, 说明问题在模型(没见过这么大的倾角), 不在定位", f->deg);
+        }
     }
 
     // ---- 6) 去边 (auto_crop_predict.py 的 左右 1% / 上下 3%) ----
@@ -1268,6 +1518,23 @@ static void sample_rgb565_bilinear(const uint8_t *frame, int w, int h, float fx,
 
 static uint8_t g_crop_rgb[IMG_W * IMG_H * 3];   // 裁剪块(摆正+面积平均后)暂存: B G R 交错
 static int g_luma_hist[256];
+/** P5.24: 裁剪块质量指标 —— 在光度归一化那一趟顺手算出来, 用来分开"图糊/过曝"和"模型不认识"。
+ *  sharp = 平均 |Laplacian|(灰度): 白字笔画越利落值越大; 糊掉的图基本 < 5。
+ *  valid = 本帧是否真的走过摆正路径 (轴对齐回退不经过这里, 那时这些数字是上一帧的, 不能信)。 */
+typedef struct {
+    int   valid;
+    int   p_lo, p_hi, spread;    // 亮度 p5 / p95 / 跨度 (归一化前的原图, 0..255)
+    float norm_s;                // 实际用上的对比度倍数
+    int   over_pct, dark_pct;    // 过曝(最亮通道>=250) / 死黑(<=5) 的百分比
+    float sharp;                 // 平均 |Laplacian|
+    int   mb, mg, mr;            // 三通道均值 (0..255)
+} crop_quality_t;
+static crop_quality_t g_crop_q;
+
+/** 裁剪块单像素灰度 (与亮度直方图同一套系数: 0.299R + 0.587G + 0.114B) */
+static inline int crop_luma(const uint8_t *p, int i) {
+    return (77 * p[i * 3 + 2] + 150 * p[i * 3 + 1] + 29 * p[i * 3 + 0]) >> 8;
+}
 
 static void crop_photometric_norm(int8_t *dst, const int8_t *lut, float *out_s) {
     const int NP = IMG_W * IMG_H;
@@ -1310,6 +1577,42 @@ static void crop_photometric_norm(int8_t *dst, const int8_t *lut, float *out_s) 
         o[0] = lut[b];
         o[1] = lut[256 + g];
         o[2] = lut[512 + r];
+    }
+    // P5.24: 质量指标 (只能在这里算 —— g_crop_rgb 就是把这张图, 出了这个函数就被下一帧覆盖)。
+    //   纯诊断, 不参与任何判断。
+    {
+        long over = 0, dark = 0, lap = 0;
+        int lapn = 0;
+        for (int i = 0; i < NP; i++) {
+            const int b = g_crop_rgb[i * 3 + 0];
+            const int g = g_crop_rgb[i * 3 + 1];
+            const int r = g_crop_rgb[i * 3 + 2];
+            int mx = (r > g) ? r : g;
+            if (b > mx) mx = b;
+            if (mx >= 250) over++;
+            else if (mx <= 5) dark++;
+        }
+        for (int y = 1; y + 1 < IMG_H; y++) {
+            for (int x = 1; x + 1 < IMG_W; x++) {
+                const int i = y * IMG_W + x;
+                const int d = 4 * crop_luma(g_crop_rgb, i)
+                              - crop_luma(g_crop_rgb, i - 1) - crop_luma(g_crop_rgb, i + 1)
+                              - crop_luma(g_crop_rgb, i - IMG_W) - crop_luma(g_crop_rgb, i + IMG_W);
+                lap += (d < 0) ? -d : d;
+                lapn++;
+            }
+        }
+        g_crop_q.valid = 1;
+        g_crop_q.p_lo = p_lo;
+        g_crop_q.p_hi = p_hi;
+        g_crop_q.spread = spread;
+        g_crop_q.norm_s = s;
+        g_crop_q.over_pct = (int)(100.0f * (float)over / (float)NP + 0.5f);
+        g_crop_q.dark_pct = (int)(100.0f * (float)dark / (float)NP + 0.5f);
+        g_crop_q.sharp = lapn ? ((float)lap / (float)lapn) : 0.0f;
+        g_crop_q.mb = (int)(mb + 0.5f);
+        g_crop_q.mg = (int)(mg + 0.5f);
+        g_crop_q.mr = (int)(mr + 0.5f);
     }
     if (out_s) *out_s = s;
 }
@@ -1494,9 +1797,10 @@ static bool recognize_once(dl::Model *model,
                            const char *trigger,
                            bool verbose) {
     const int fn = ++g_frame_no;   // P5.12: 帧号 —— 之后每行日志都带 #n, 便于对照
+    g_crop_q.valid = 0;            // P5.24: 本帧的裁剪块质量由预处理那一趟填; 先清掉, 免得日志报上一帧的数字
     if (verbose) ESP_LOGI(TAG, "------------ 会话: %s (帧 #%d) ------------", trigger, fn);
 
-    camera_discard_frames(CAM_DISCARD_FRAMES);
+    camera_discard_frames(CAM_DISCARD_FRAMES, CAM_DISCARD_DELAY_MS);
 
     camera_fb_t *fb = esp_camera_fb_get();
     if (fb == NULL) {
@@ -1629,26 +1933,19 @@ static bool recognize_once(dl::Model *model,
                      (unsigned)fb->height, (unsigned)fb->len, box.x2 - box.x1, box.y2 - box.y1,
                      scale_x, scale_y);
             log_input_stats(model_input);
-            log_crop_diag(model_input);
             if (box.rot_ok) {   // P5.6: 把"框套得准不准"量出来
                 roi_probe_profile(fb->buf, (int)fb->width, (int)fb->height, box.qx, box.qy, v_lo, v_hi);
             }
         }
 
-        // 精简模式下先把裁剪块拷一份, 万一结果不像车牌, run() 之后还能把这张图打出来
-        if (!verbose) {
-            if (crop_snap == nullptr) {
-                crop_snap = (int8_t *)heap_caps_malloc(CROP_SNAP_BYTES, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-            }
-            if (crop_snap) memcpy(crop_snap, model_input->data, CROP_SNAP_BYTES);
-        }
 
         int64_t t_inf = esp_timer_get_time();
         model->run();
         int64_t inf_ms = (esp_timer_get_time() - t_inf) / 1000;
 
         output_float->assign(model->get_outputs().begin()->second);
-        std::string plate = greedy_decode((const float *)output_float->data);
+        decode_report_t rep;   // P5.24: 顺带算出每一步的置信度 (不改变解码结果)
+        std::string plate = greedy_decode_impl((const float *)output_float->data, &rep);
 
         // P5.13: 蓝牌永远是 7 位(省 + 字母 + 5 位)。外扩 8% 之后, 偶尔会从画面外沿的暗边上
         //   再"读"出一个字母挂在尾巴上 (实测 京Q06666 -> 京Q06666L / 京Q06666U, 21 帧里 12 帧)。
@@ -1669,19 +1966,59 @@ static bool recognize_once(dl::Model *model,
                      v_lo * 100.0f, v_hi * 100.0f,
                      (long long)roi_ms, (long long)pre_ms, (long long)inf_ms,
                      ss_nx, ss_ny, norm_s, cm_b, cm_g, cm_r);
-            if (verbose) {
-                ESP_LOGI(TAG, "时间步原始输出(18 步, _=blank): %s", ctc_label_seq((const float *)output_float->data).c_str());
-            }
+
         } else {
             ESP_LOGI(TAG, "#%d ROI %dx%d 占屏%.1f%%%s | 定位%lld 预处理%lld 推理%lld ms",
                      fn, box.x2 - box.x1, box.y2 - box.y1, box.area_pct,
                      box.rot_ok ? "" : " 轴对齐",
                      (long long)roi_ms, (long long)pre_ms, (long long)inf_ms);
         }
+        // P5.24: 结果后面直接跟置信度 —— 连续模式(每帧 2 行)也能一眼看出"这次是模型有把握还是瞎猜"
         if (plate.empty()) {
-            ESP_LOGW(TAG, "#%d >>> RESULT: (未识别到车牌)", fn);
+            ESP_LOGW(TAG, "#%d >>> RESULT: (未识别到车牌) | 置信 %.0f%%",
+                     fn, rep.mean_top1 * 100.0f);
         } else {
-            ESP_LOGI(TAG, "#%d >>> RESULT: %s", fn, plate.c_str());
+            ESP_LOGI(TAG, "#%d >>> RESULT: %s | 置信 %.0f%% (最弱步 %.0f%%)", fn, plate.c_str(),
+                     rep.mean_top1 * 100.0f, rep.min_top1 * 100.0f);
+        }
+
+        // P5.24: 详细模式把"模型到底有多确定 + 这块图本身行不行"摊开 ——
+        //   这是分清"图不行(该改定位/预处理)"和"模型不行(只能靠素材微调)"的关键证据。
+        if (verbose) {
+            const float conf = rep.mean_top1 * 100.0f;
+            if (rep.min_top1_t >= 0) {
+                ESP_LOGI(TAG, "置信度: 字符步平均 %.0f%% | 最低 %.0f%% (第 %d 步) | 领先<10%% 的模糊步 %d 个 | 折叠后 %d 个字符 (%d 个非空白步 / 18)",
+                         conf, rep.min_top1 * 100.0f, rep.min_top1_t, rep.ambig, rep.nseg, rep.nchar_steps);
+                if (rep.ambig >= 3) {
+                    ESP_LOGW(TAG, "   模糊步偏多 (>=3 个) => 模型在这几个字上没底; 通常是裁剪块偏糊/偏曝, 或这种字形它没见过");
+                }
+            } else {
+                ESP_LOGW(TAG, "置信度: 18 步全是空白 —— 模型认为这块图里没有车牌 (裁剪块/框有问题, 或车牌太糊太小)");
+            }
+            ESP_LOGI(TAG, "时间步(18 步, _=空白): %s", rep.seq.c_str());
+            ESP_LOGI(TAG, "每步 top1(次选)%%: %s", rep.steps.c_str());
+            if (g_crop_q.valid) {
+                ESP_LOGI(TAG, "裁剪块质量: 亮度 p5=%d p95=%d 跨度=%d | 过曝 %d%% 死黑 %d%% | 锐度 %.1f | 均值 B%d G%d R%d | 对比度归一 x%.2f",
+                         g_crop_q.p_lo, g_crop_q.p_hi, g_crop_q.spread, g_crop_q.over_pct,
+                         g_crop_q.dark_pct, g_crop_q.sharp, g_crop_q.mb, g_crop_q.mg, g_crop_q.mr,
+                         g_crop_q.norm_s);
+                if (g_crop_q.sharp < 5.0f) {
+                    ESP_LOGW(TAG, "   锐度偏低 (<5) => 这块图本身是糊的, 认错很正常 (先解决对焦/手抖/距离, 再谈模型)");
+                }
+            } else {
+                ESP_LOGW(TAG, "裁剪块质量: 无 —— 这一帧走的是轴对齐硬裁, 不经过光度归一化 (斜牌这样裁必糊)");
+            }
+            // 轴对齐回退时不经过子采样/光度归一化, 这两个数字无意义 —— 明确写"n/a", 免得看成 0 是故障
+            char samp[32], sharpbuf[16];
+            if (ss_nx > 0) snprintf(samp, sizeof(samp), "%dx%d", ss_nx, ss_ny);
+            else           snprintf(samp, sizeof(samp), "n/a");
+            if (g_crop_q.valid) snprintf(sharpbuf, sizeof(sharpbuf), "%.1f", g_crop_q.sharp);
+            else                snprintf(sharpbuf, sizeof(sharpbuf), "n/a");
+            ESP_LOGI(TAG, "本帧小结: 路径=%s | 框 %dx%d 比例 %.2f 有效填充 %.0f%% | 子采样 %s | 置信 %.0f%% (最弱 %.0f%%) | 锐度 %s | 结果 %s",
+                     box.rot_ok ? "摆正" : "轴对齐硬裁",
+                     box.x2 - box.x1, box.y2 - box.y1, box.ratio, box.density * 100.0f,
+                     samp, conf, rep.min_top1 * 100.0f, sharpbuf,
+                     plate.empty() ? "(未识别到)" : plate.c_str());
         }
 
         // 结果不像车牌时补打一次掩码: 这是事后唯一能确认「框到底有没有套住车牌」的证据。
@@ -1689,16 +2026,63 @@ static bool recognize_once(dl::Model *model,
         // 读得出字却认错, 才是模型的锅。这两者必须分开看, 否则只能瞎猜。
         // P5.12: 这段是之前最大的刷屏源(掩码 60 行 + 覆盖率 12 行 + 缩略图 24 行 ≈ 8 KB ≈ 0.7 s)。
         // 连续模式下不再自动打, 想看就按 BOOT 走详细模式。
+        // P5.22: 倾斜 >=8° 的帧也把"模型看到的裁剪块"打出来 —— 诊断倾斜问题就靠它
+        const bool tilted_frame = (fabsf(box.rot_deg) >= 8.0f);
         static int mask_result_budget = 12;
-        if (verbose && mask_result_budget > 0 && (plate.empty() || !plate_looks_valid(plate))) {
+        if (verbose && mask_result_budget > 0 && (plate.empty() || !plate_looks_valid(plate) || tilted_frame)) {
             mask_result_budget--;
-            ESP_LOGW(TAG, "结果不像车牌, 补打一次【裁剪缩略图 + 掩码】(本机还剩 %d 次)", mask_result_budget);
-            if (crop_snap) log_crop_diag_raw(crop_snap, IMG_W, IMG_H);
-            if (box.rot_ok) {   // P5.6: 顺带把覆盖率剖面量出来 (纯诊断)
-                roi_probe_profile(fb->buf, (int)fb->width, (int)fb->height, box.qx, box.qy, v_lo, v_hi);
-            }
+            ESP_LOGW(TAG, "结果不像车牌, 补打一次掩码 (本机还剩 %d 次)", mask_result_budget);
+            // P5.26: 这里原来还重打一遍缩略图和覆盖率剖面 —— 前者是死代码, 后者在预处理那一趟
+            //   已经打过完全相同的一份 (同样的框、同样的收边区间), 纯属重复。
             roi_dump_mask(roi_cell_snap, ROI_CELL_NEED, &box);
         }
+
+        // P5.24: 连续模式下"结果可疑就自动补打诊断" —— 不用按 BOOT 也不会错过出问题的那一帧。
+        //   只打文字(置信度/路径/质量), 不打掩码和缩略图那两块 ASCII 图 (它们才是刷屏元凶, 长按 BOOT 才有)。
+        //   限流 4 s 一次, 免得一屋子可疑帧把串口灌满。
+#if AUTO_DIAG_ON_SUSPECT
+        if (!verbose) {
+            const bool nothing = (rep.nchar_steps == 0);                     // 18 步全空白
+            const bool low_conf = (rep.nchar_steps > 0) && (rep.mean_top1 < 0.70f);
+            const bool bad_fmt = (!plate.empty()) && !plate_looks_valid(plate);
+            if (nothing || low_conf || rep.ambig >= 3 || tilted_frame || bad_fmt) {
+                static int64_t last_auto_diag_us = 0;
+                const int64_t now_us = esp_timer_get_time();
+                if (now_us - last_auto_diag_us > 4000000) {
+                    last_auto_diag_us = now_us;
+                    ESP_LOGW(TAG, "#%d !! 这帧可疑, 自动补打诊断 (%s%s%s%s%s) —— 同一原因 4s 内只报一次",
+                             fn,
+                             nothing ? "一个字符都没认出 " : "",
+                             low_conf ? "置信偏低 " : "",
+                             (rep.ambig >= 3) ? "模糊步偏多 " : "",
+                             tilted_frame ? "牌照明显倾斜 " : "",
+                             bad_fmt ? "结果格式不对 " : "");
+                    ESP_LOGI(TAG, "#%d 置信: 字符步均 %.0f%% | 最弱 %.0f%% (第 %d 步) | 模糊步 %d 个 | 非空白步 %d/18",
+                             fn, rep.mean_top1 * 100.0f, rep.min_top1 * 100.0f, rep.min_top1_t,
+                             rep.ambig, rep.nchar_steps);
+                    ESP_LOGI(TAG, "#%d 每步 top1(次选)%%: %s", fn, rep.steps.c_str());
+                    if (box.rot_ok) {
+                        ESP_LOGI(TAG, "#%d 路径: 摆正(四边形采样) | 倾角 %+.1f° 旋转比例 %.2f 旋转填充 %.0f%% | 四角 (%.0f,%.0f)(%.0f,%.0f)(%.0f,%.0f)(%.0f,%.0f)",
+                                 fn, box.rot_deg, box.rot_ratio, box.rot_fill * 100.0f,
+                                 box.qx[0], box.qy[0], box.qx[1], box.qy[1],
+                                 box.qx[2], box.qy[2], box.qx[3], box.qy[3]);
+                    } else {
+                        ESP_LOGI(TAG, "#%d 路径: 轴对齐硬裁 | 倾角 %+.1f° | 旋转拟合失败原因: %s | 外接框比例 %.2f 有效填充 %.0f%% (斜牌这样裁必糊)",
+                                 fn, box.rot_deg, box.rot_why ? box.rot_why : "?", box.ratio,
+                                 box.density * 100.0f);
+                    }
+                    if (g_crop_q.valid) {
+                        ESP_LOGI(TAG, "#%d 质量: 亮度跨度 %d (p5=%d p95=%d) | 过曝 %d%% 死黑 %d%% | 锐度 %.1f | 均值 B%d G%d R%d | 对比度归一 x%.2f",
+                                 fn, g_crop_q.spread, g_crop_q.p_lo, g_crop_q.p_hi, g_crop_q.over_pct,
+                                 g_crop_q.dark_pct, g_crop_q.sharp, g_crop_q.mb, g_crop_q.mg, g_crop_q.mr,
+                                 g_crop_q.norm_s);
+                    } else {
+                        ESP_LOGI(TAG, "#%d 质量: n/a (轴对齐回退, 这一帧没走光度归一化)", fn);
+                    }
+                }
+            }
+        }
+#endif
         ok = true;
     } while (0);
 
@@ -1707,7 +2091,18 @@ static bool recognize_once(dl::Model *model,
     // P5.14: 绿框只在详细模式(开机/按 BOOT)那一帧画 —— 那帧是专门用来看"框套得准不准"的;
     //        定时连续帧不画框, 因为那些才是要采下来当训练素材的图 (画上去还得再擦一遍, 擦不干净)。
     if (g_img_mode == 2) {
-        if (ok) img_tx_send_crop();      // 没跑推理就没有"模型输入块"可发
+        // 模式 2 发的是"喂给模型的那张小图": 这一帧没跑到推理(没定位到车牌)就没有东西可发。
+        // 说一句, 免得以为图片输出坏了 —— 限制 5 s 一次, 不刷屏。
+        if (ok) {
+            img_tx_send_crop();
+        } else {
+            static int64_t last_hint_us = 0;
+            const int64_t now_us = esp_timer_get_time();
+            if (now_us - last_hint_us > 5000000) {
+                last_hint_us = now_us;
+                ESP_LOGW(TAG, "模式 2: 这一帧没定位到车牌, 没有 94x24 输入块可发 (只发有牌的那几帧)");
+            }
+        }
     } else {
         img_tx_send(fb->buf, (int)fb->width, (int)fb->height,
                    (has_roi && g_img_mode == 1) ? &box : nullptr);
@@ -1739,9 +2134,12 @@ static void run_embedded_selfcheck(dl::Model *model,
 }
 
 extern "C" void app_main(void) {
-    ESP_LOGI(TAG, "=== LPRNet on ESP32-S3 (P5.12: 精简日志 + 串口图片预览 + 控制台 921600 + P5.10/P5.11) ===");
-    ESP_LOGI(TAG, "    连续模式: 每帧只打 2 行(#n 指标行 + #n RESULT); 细节看按 BOOT 的那一轮");
-    ESP_LOGI(TAG, "    串口图片: $IMG,<len>\\n + JPEG + CRC32(大端4B) + $END\\n  -> BY串口助手选「二进制帧」+ 921600");
+    ESP_LOGI(TAG, "=== LPRNet on ESP32-S3 —— 固件 P5.28 ===");
+    ESP_LOGI(TAG, "    构建时间: %s %s —— 开机看到 P5.28 才说明烧进去的是新固件", __DATE__, __TIME__);
+    ESP_LOGI(TAG, "    连续模式: 每帧 2 行(#n 指标行 + #n RESULT, 结果带置信度); 结果可疑时自动补打一行诊断");
+    ESP_LOGI(TAG, "    完整诊断(掩码+候选表+覆盖率剖面): 长按 BOOT >=2s 走一轮; 自动诊断开关 = main.cpp 的 AUTO_DIAG_ON_SUSPECT");
+    ESP_LOGI(TAG, "    串口图片: $IMG,<len> + JPEG + CRC32(大端4B) + $END  -> BY串口助手选「二进制帧」, 波特率 %d", CONFIG_ESP_CONSOLE_UART_BAUDRATE);
+    ESP_LOGI(TAG, "    图片输出一旦不发图: 按一下 BOOT 会自动复位(关编码器再重开), 不必重启");
 
     // ---- 1. 建模型 (直接从 flash rodata 加载) ----
     int64_t t0 = esp_timer_get_time();
@@ -1795,7 +2193,7 @@ extern "C" void app_main(void) {
     // ---- 4. 摄像头 ----
     bool camera_ok = (camera_start() == ESP_OK);
     if (camera_ok) {
-        camera_discard_frames(CAM_WARMUP_FRAMES);   // 等 AE/AGC 稳定, 否则头几帧偏暗
+        camera_discard_frames(CAM_WARMUP_FRAMES, CAM_WARMUP_DELAY_MS);   // 等 AE/AGC 稳定, 否则头几帧偏暗
         ESP_LOGI(TAG, "摄像头就绪: VGA RGB565, XCLK 20MHz, fb_count=2");
         if (AUTO_PERIOD_MS > 0) {
             ESP_LOGI(TAG, "触发方式: 开机 1 次 + 每 %u ms 自动 1 次 + 短按 BOOT 立即拍一帧",
@@ -1831,8 +2229,10 @@ extern "C" void app_main(void) {
                 const bool long_press = (press_ms != 0) && (dur_ms >= 2000);
                 const bool short_press = (press_ms == 0) || (dur_ms < 1000);   // press_ms==0 = 轮询兜底, 量不出时长, 一律当短按
                 if (long_press) {
+                    img_tx_reset("BOOT 长按");   // P5.20: 顺手复位图片输出 —— 卡住时按一下就能救回来
                     recognize_once(model, model_input, output_float, norm_lut, "BOOT 长按(详细)", true);
                 } else if (short_press) {
+                    img_tx_reset("BOOT 短按");   // P5.20: 同理, 不用再重启单片机
                     g_img_mode = (g_img_mode + 1) % 3;
                     static const char *mode_name[3] = {
                         "干净预览图 (320x240, 画面/采数据)",
@@ -1860,7 +2260,7 @@ extern "C" void app_main(void) {
             esp_camera_deinit();
             camera_ok = (camera_start() == ESP_OK);
             if (camera_ok) {
-                camera_discard_frames(CAM_WARMUP_FRAMES);
+                camera_discard_frames(CAM_WARMUP_FRAMES, CAM_WARMUP_DELAY_MS);
                 ESP_LOGI(TAG, "摄像头重试成功");
                 next_auto = 0;
             } else {
@@ -1868,6 +2268,8 @@ extern "C" void app_main(void) {
             }
         }
 
-        vTaskDelay(pdMS_TO_TICKS(50));
+        // P5.27: 原来是 50 ms。这一句只是"没事时别空转"的礼貌延时, 但每圈都会实打实
+        //   推迟下一帧的触发, 一帧就是 50 ms 的净损失(约 4%)。降到 10 ms, 空闲时依旧让出 CPU。
+        vTaskDelay(pdMS_TO_TICKS(10));
     }
 }
