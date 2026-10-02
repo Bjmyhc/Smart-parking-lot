@@ -1,0 +1,29 @@
+/**
+ * P5.67: 找"省字窗口该从哪开始" —— 沿车牌中线扫出蓝面真正的左边缘, 返回它的 u 值。
+ *   为什么不信框的 u=0 边: 兜底框的左边缘可能把一圈背景(反光/泛蓝)一起框进来, 于是整扇省字窗被右推;
+ *   PC 归因实验里"窗右推 20%~40% 个窗宽"正是唯一能把省字置信从中位 94% 打到 39% 的劣化。
+ *   三条中线各扫一遍取中位数 —— 省字笔画密, 单条线可能整条压在白字上扫不到车牌色。
+ *   返回 < 0 = 三条线都没扫到车牌色 (调用方退回老做法 u=0)。
+ */
+static float prov_find_u_left(const uint8_t *frame, int w, int h, const float *qx, const float *qy) {
+    float uu[3] = {0.0f, 0.0f, 0.0f};
+    int n = 0;
+    for (int k = 0; k < 3; k++) {
+        const float v = 0.30f + 0.20f * (float)k;      // 三条中线: v = 0.30 / 0.50 / 0.70
+        for (int i = 0; i <= PROV_SCAN_N; i++) {
+            const float u = (float)i / (float)PROV_SCAN_N * PROV_SCAN_UMax;
+            float sx, sy;
+            quad_eval(qx, qy, u, v, &sx, &sy);
+            int b, g, r;
+            sample_rgb565_bilinear(frame, w, h, sx, sy, &b, &g, &r);
+            if (roi_is_plate_color(r, g, b)) { uu[n++] = u; break; }
+        }
+    }
+    if (n == 0) return -1.0f;
+    if (n == 1) return uu[0];
+    if (n == 2) return 0.5f * (uu[0] + uu[1]);
+    if (uu[1] < uu[0]) { const float t = uu[0]; uu[0] = uu[1]; uu[1] = t; }
+    if (uu[2] < uu[0]) { const float t = uu[0]; uu[0] = uu[2]; uu[2] = t; }
+    if (uu[2] < uu[1]) { const float t = uu[1]; uu[1] = uu[2]; uu[2] = t; }
+    return uu[1];                                       // 三个数取中位数
+}

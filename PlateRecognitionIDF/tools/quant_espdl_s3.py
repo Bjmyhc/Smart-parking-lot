@@ -30,10 +30,14 @@ def parse_args():
     p.add_argument('--onnx', default=os.path.join(_HERE, 'out', 'lprnet_s3.onnx'))
     p.add_argument('--out', default=os.path.join(_HERE, 'out', 'lprnet_s3.espdl'))
     p.add_argument('--calib-n', type=int, default=128)
+    p.add_argument('--calib-dirs', default=None,
+                   help='校准图目录, 逗号分隔; 默认 <lprnet>/data/test。想贴合现场就把实拍素材目录也写上')
     p.add_argument('--calib-algorithm', default='minmax',
                    help="espdl_setting 默认 kl; 本模型用 kl 会把归一化分母裁掉, 精度暴跌")
     p.add_argument('--eval-n', type=int, default=0, help='>0 时用验证集测 int8 精度')
     p.add_argument('--eval-dir', default=None)
+    p.add_argument('--eval-dirs', default=None,
+                   help='逗号分隔的多个验证集, 比如 "实拍目录,data/official_val"')
     p.add_argument('--weights', default=None)
     return p.parse_args()
 
@@ -52,9 +56,28 @@ def preprocess(path):
     return img.transpose(2, 0, 1)
 
 
+def _clean(s):
+    return s.split('_')[0].replace('-', '').strip()
+
+
 def label_of(path):
+    """2026-10-01 修: 文件名认不出车牌就退回文件夹名 —— BY串口助手导出的实拍素材
+    文件名是 IMG_20260930_xxx.jpg, 车牌只在文件夹名上 (和 finetune_s3.py / eval_ckpt.py 一致)。"""
     name = os.path.splitext(os.path.basename(path))[0]
-    return name.split('-')[0].split('_')[0]
+    cand = _clean(name)
+    if len(cand) >= 6:
+        return cand
+    return _clean(os.path.basename(os.path.dirname(os.path.abspath(path))))
+
+
+def list_imgs(d):
+    """递归收图 —— 实拍素材是按车牌分子文件夹存的, os.listdir 那种平铺写法收不到。"""
+    out = []
+    for root, _dirs, files in os.walk(d):
+        for f in files:
+            if os.path.splitext(f)[1].lower() in ('.jpg', '.jpeg', '.png'):
+                out.append(os.path.join(root, f))
+    return sorted(out)
 
 
 def greedy_decode(logits, chars):
@@ -84,21 +107,29 @@ def greedy_decode(logits, chars):
     return ''.join(chars[i] for i in result)
 
 
-def load_calib_images(lprnet_dir, count):
+def load_calib_images(lprnet_dir, count, dirs=None):
+    """P5.44: 校准集可以指定多个目录。
+    为什么重要: 校准集决定量化时每一层激活的截断范围 —— 拿 CCPD 图去校准一个
+    "专治屏幕翻拍"的模型, 截断范围对不上目标域, int8 精度会掉一大截
+    (实测 r4: float 实拍 83.0% -> int8 只有 66.1%, 就是校准集不匹配造成的)。"""
     import torch
 
-    calib_dir = os.path.join(lprnet_dir, 'data', 'test')
-    names = [f for f in os.listdir(calib_dir) if f.lower().endswith(('.jpg', '.png'))]
+    if not dirs:
+        dirs = [os.path.join(lprnet_dir, 'data', 'test')]
+    dirs = [d if os.path.isabs(d) else os.path.join(lprnet_dir, d) for d in dirs if d.strip()]
+    names = []
+    for d in dirs:
+        names += list_imgs(d)
     random.seed(0)
     random.shuffle(names)
     names = names[:count]
 
     samples = []
     for name in names:
-        arr = preprocess(os.path.join(calib_dir, name))
+        arr = preprocess(name)
         if arr is not None:
             samples.append(torch.from_numpy(arr))
-    print('校准图: 载入 %d 张 <- %s' % (len(samples), calib_dir))
+    print('校准图: 载入 %d 张 <- %s' % (len(samples), ', '.join(dirs)))
     return samples
 
 
@@ -109,7 +140,7 @@ def eval_accuracy(graph, lprnet_dir, eval_dir, eval_n, chars, weights):
     from esp_ppq.executor import TorchExecutor
     from lprnet_s3_model import build_lprnet_s3
 
-    names = [f for f in os.listdir(eval_dir) if f.lower().endswith(('.jpg', '.png'))]
+    names = list_imgs(eval_dir)
     random.seed(1234)
     random.shuffle(names)
     names = names[:eval_n]
@@ -124,10 +155,10 @@ def eval_accuracy(graph, lprnet_dir, eval_dir, eval_n, chars, weights):
     hit_float = 0
     hit_int8 = 0
     for name in names:
-        arr = preprocess(os.path.join(eval_dir, name))
+        arr = preprocess(name)
         if arr is None:
             continue
-        gt = label_of(os.path.join(eval_dir, name))
+        gt = label_of(name)
         if any(c not in chars for c in gt):
             continue
         total += 1
@@ -169,7 +200,8 @@ def main():
     from esp_ppq import QuantizationSettingFactory
     from esp_ppq.api import espdl_quantize_onnx
 
-    samples = load_calib_images(lprnet_dir, args.calib_n)
+    samples = load_calib_images(lprnet_dir, args.calib_n,
+                               args.calib_dirs.split(',') if args.calib_dirs else None)
     if not samples:
         print('校准图载入失败')
         return 1
@@ -214,8 +246,15 @@ def main():
         sys.path.insert(0, lprnet_dir)
         from data.load_data import CHARS
 
-        eval_dir = args.eval_dir or os.path.join(lprnet_dir, 'data', 'official_val')
-        eval_accuracy(graph, lprnet_dir, eval_dir, args.eval_n, CHARS, weights)
+        dirs = (args.eval_dirs or args.eval_dir
+                or os.path.join(lprnet_dir, 'data', 'official_val')).split(',')
+        for d in dirs:
+            d = d.strip()
+            if not d:
+                continue
+            if not os.path.isabs(d):
+                d = os.path.join(lprnet_dir, d)
+            eval_accuracy(graph, lprnet_dir, d, args.eval_n, CHARS, weights)
 
     print('')
     print('下一步: python inspect_espdl.py %s' % args.out)

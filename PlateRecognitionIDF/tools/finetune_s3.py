@@ -43,9 +43,22 @@ DEFAULT_LPRNET_DIR = r'G:\All_Project\AI_Project\LPRNet_Pytorch'
 IMG_W, IMG_H = 94, 24
 
 
+def _clean(s):
+    return s.split('_')[0].replace('-', '').strip()
+
+
 def label_of(path):
+    """车牌号从哪来 —— 两种素材命名都认:
+         (a) 老格式: 文件名自带车牌, 如 京Q06666_001.jpg
+         (b) 新格式: BY串口助手直接导出的 IMG_20260930_002444_078431.jpg,
+                     车牌只在**文件夹名**上 (saved/images/京Q-06666/)
+       先看文件名; 文件名里认不出车牌(比如 "IMG")就退回去用文件夹名。
+       2026-09-30 修: 以前只认文件名, 新素材 165 张全被打成同一个标签 "IMG"。"""
     name = os.path.splitext(os.path.basename(path))[0]
-    return name.split('-')[0].split('_')[0]
+    cand = _clean(name)
+    if len(cand) >= 6:
+        return cand
+    return _clean(os.path.basename(os.path.dirname(os.path.abspath(path))))
 
 
 def load_bgr(path):
@@ -114,6 +127,23 @@ def main():
     ap.add_argument('--batch', type=int, default=32)
     ap.add_argument('--replay-per-epoch', type=int, default=800,
                     help='每轮混进来的 CCPD 训练图张数 (0 = 不混)')
+    ap.add_argument('--replay-dirs', default=None,
+                    help='replay 目录, 逗号分隔 (默认 data/official_train, 那是皖为主的一份)。'
+                         'P5.44: 要补省份字就换成 data/ccpd_plates/train —— 那份覆盖 31 个省, 每省 400 张')
+    ap.add_argument('--replay-per-province', type=int, default=0,
+                    help='replay 池每个省字最多取几张 (0=不限)。ccpd_plates 每省 400, 限一限能大幅提速')
+    ap.add_argument('--shoot-repeat', type=int, default=1,
+                    help='每轮把实拍图重复几遍 (想让现场域占更大比重时调大)')
+    ap.add_argument('--no-baseline-bar', action='store_true',
+                    help='存盘不要求超过微调前基线, 只取本轮最高分 (否则基线强的模型永远存不下东西)')
+    ap.add_argument('--val-dirs', default=None,
+                    help='验证目录(逗号分隔), 默认 data/official_val —— 那份 98%% 是皖, '
+                         '会把"省字不塌"的轮次判低分。P5.62 起建议 data/ccpd_plates/val (27 省均衡)')
+    ap.add_argument('--freeze-until', type=int, default=0,
+                    help='冻结 backbone 前 N 层 (0=不冻)。15 = 冻住全部卷积主干, 只训最后的 head, '
+                         '小数据微调时最能防"把通用能力带偏"')
+    ap.add_argument('--min-ccpd', type=float, default=0.84,
+                    help='CCPD 验证的告警门槛 (P5.44 起只告警, 不再一票否决)')
     ap.add_argument('--seed', type=int, default=0)
     ap.add_argument('--out', default=os.path.join(_HERE, 'out', 'finetune', 'finetuned_s3.pth'))
     a = ap.parse_args()
@@ -140,10 +170,21 @@ def main():
             shoot += collect([sub])
     shoot = [p for p in shoot if all(c in CHARS_DICT for c in label_of(p))]
     tr_shoot, va_shoot = split_holdout(shoot, 5)
-    replay_all = collect([os.path.join(lprnet_dir, 'data', 'official_train')])
+    rd = (a.replay_dirs or os.path.join(lprnet_dir, 'data', 'official_train')).split(',')
+    rd = [d if os.path.isabs(d) else os.path.join(lprnet_dir, d) for d in rd if d.strip()]
+    replay_all = collect(rd)
     replay_all = [p for p in replay_all if all(c in CHARS_DICT for c in label_of(p))]
-    val_dir = os.path.join(lprnet_dir, 'data', 'official_val')
-    va_ccpd = [p for p in collect([val_dir]) if all(c in CHARS_DICT for c in label_of(p))]
+    if a.replay_per_province > 0:
+        byp = {}
+        for p in replay_all:
+            byp.setdefault(label_of(p)[0], []).append(p)
+        replay_all = []
+        for k in sorted(byp):
+            v = byp[k]
+            replay_all += rng.sample(v, min(a.replay_per_province, len(v)))
+    vd = (a.val_dirs or os.path.join(lprnet_dir, 'data', 'official_val')).split(',')
+    vd = [d if os.path.isabs(d) else os.path.join(lprnet_dir, d) for d in vd if d.strip()]
+    va_ccpd = [p for p in collect(vd) if all(c in CHARS_DICT for c in label_of(p))]
     print('实拍: 训练 %d / 留出 %d | CCPD replay %d | CCPD 验证 %d'
           % (len(tr_shoot), len(va_shoot), len(replay_all), len(va_ccpd)))
     print('实拍标签分布:', dict(Counter(label_of(p) for p in shoot)))
@@ -151,6 +192,19 @@ def main():
     net = build_lprnet(lpr_max_len=8, phase=True, class_num=len(CHARS), dropout_rate=0.5)
     net.load_state_dict(torch.load(weights, map_location='cpu'))
     print('已加载权重:', weights)
+    if a.freeze_until > 0:
+        for i, m in enumerate(net.backbone.children()):
+            if i < a.freeze_until:
+                for q in m.parameters():
+                    q.requires_grad = False
+                # BN 的 running_mean/var 不是参数, requires_grad=False 挡不住它漂 ——
+                #   momentum 置 0 才是真的冻住 (否则冻结层照样被实拍数据把统计量带跑)
+                if isinstance(m, nn.BatchNorm2d):
+                    m.momentum = 0.0
+    n_all = sum(q.numel() for q in net.parameters())
+    n_tr = sum(q.numel() for q in net.parameters() if q.requires_grad)
+    print('参数: 可训练 %d / 共 %d  (冻结 backbone 前 %d 层)'
+          % (n_tr, n_all, a.freeze_until))
 
     ctc = nn.CTCLoss(blank=len(CHARS) - 1, reduction='mean')
     opt = torch.optim.RMSprop(net.parameters(), lr=a.lr, alpha=0.9, eps=1e-8,
@@ -186,14 +240,19 @@ def main():
     o2, n2 = evaluate(va_ccpd)
     print('微调前基线: 实拍留出 %d/%d=%.1f%% | CCPD验证 %d/%d=%.1f%%'
           % (o1, n1, 100.0 * o1 / max(1, n1), o2, n2, 100.0 * o2 / max(1, n2)))
-    best = (o2 / max(1, n2), o1 / max(1, n1))
+    best = (o1 / max(1, n1)) + (o2 / max(1, n2))
+    best_a = (o1 / max(1, n1), o2 / max(1, n2))
+    if a.no_baseline_bar:
+        # P5.62: 基线本身在均衡 CCPD 上就有 75%+, 那道坎会把"实拍大涨但 CCPD 略降"的好轮次全拦掉。
+        #   这个开关让存盘只看"本轮总分是否新高", 不再要求超过微调前的基线。
+        best = -1.0
     def batches(pool, bs):
         for i in range(0, len(pool) - bs + 1, bs):
             yield pool[i:i + bs]
 
     os.makedirs(os.path.dirname(os.path.abspath(a.out)), exist_ok=True)
     for ep in range(1, a.epochs + 1):
-        pool = list(tr_shoot)
+        pool = list(tr_shoot) * max(1, a.shoot_repeat)
         if a.replay_per_epoch > 0:
             pool += rng.sample(replay_all, min(a.replay_per_epoch, len(replay_all)))
         rng.shuffle(pool)
@@ -235,19 +294,24 @@ def main():
         print('第 %2d/%d 轮  loss=%.3f  %4.1fs | 实拍留出 %d/%d=%.1f%% | CCPD验证 %d/%d=%.1f%%'
               % (ep, a.epochs, sum(losses) / max(1, len(losses)), time.time() - t0,
                  o1, n1, 100 * a1, o2, n2, 100 * a2))
-        # 以"两边都不掉"为目标: 先保证 CCPD 不低于基线 -2%, 再比实拍
-        if a2 >= 0.84 and a1 >= best[1]:
-            best = (a2, a1)
+        # P5.44: 改成"总分(实拍+CCPD)创新高就存", 门槛不达标只告警。
+        #   以前是"CCPD>=0.84 且实拍不退"才存 —— 只要那一轮没同时达标就整轮白跑,
+        #   上一版 15 轮就是这么白跑的(什么都没存下来)。
+        score = a1 + a2
+        if score > best:
+            best = score
+            best_a = (a1, a2)
             torch.save(net.state_dict(), a.out)
-            print('   -> 存盘 (实拍 %.1f%% / CCPD %.1f%%)' % (100 * a1, 100 * a2))
+            print('   -> 存盘 (实拍 %.1f%% / CCPD %.1f%%%s)'
+                  % (100 * a1, 100 * a2,
+                     '' if a2 >= a.min_ccpd else '  <- CCPD 低于门槛 %.2f, 只告警' % a.min_ccpd))
     if os.path.isfile(a.out):
-        print('完成. 已存最好一版: 实拍留出 %.1f%% / CCPD验证 %.1f%% -> %s'
-              % (100 * best[1], 100 * best[0], a.out))
+        print('完成. 已存最好一版(总分 %.3f): 实拍留出 %.1f%% / CCPD验证 %.1f%% -> %s'
+              % (best, 100 * best_a[0], 100 * best_a[1], a.out))
     else:
-        print('完成. 但没有任何一轮同时满足 (CCPD验证 >= 84% 且 实拍留出不低于基线), 没有存盘。')
-        print('      最好一版是第 3 行那个基线: 实拍留出 %.1f%% / CCPD验证 %.1f%%。'
-              % (100 * best[1], 100 * best[0]))
-        print('      这时正确做法是去采 P5.16 模式 2 的模型输入块, 而不是硬训 (见文档第二十八章)。')
+        print('完成. 没有任何一轮总分超过基线 (实拍留出 %.1f%% / CCPD验证 %.1f%%), 没存盘。'
+              % (100 * best_a[0], 100 * best_a[1]))
+        print('      也就是"喂进去的素材没能带来净收益", 不是硬训能解决的 —— 见文档第二十八章。')
 
 
 if __name__ == '__main__':

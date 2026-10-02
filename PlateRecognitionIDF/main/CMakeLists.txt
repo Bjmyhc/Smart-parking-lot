@@ -14,7 +14,9 @@ include(${cmake_dir}/utilities.cmake)
 
 set(embed_files
     ${CMAKE_CURRENT_LIST_DIR}/models/lprnet_s3.espdl
-    ${CMAKE_CURRENT_LIST_DIR}/models/test_input.bin)
+    ${CMAKE_CURRENT_LIST_DIR}/models/test_input.bin
+    ${CMAKE_CURRENT_LIST_DIR}/models/probe_crop.bin
+    ${CMAKE_CURRENT_LIST_DIR}/models/prov_s3.espdl)
 
 idf_component_register(SRCS ${srcs}
                        REQUIRES ${requires}

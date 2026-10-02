@@ -1,0 +1,55 @@
+        int prov_id = -1, prov_id2 = -1, prov_ms = 0;
+        float prov_p = 0.0f, prov_p2 = 0.0f;
+        float prov_u = 0.0f;            // 最终采用的窗口左边界 (u)
+        float prov_u_left = -1.0f;      // "蓝面左边缘"锚点扫描结果 (-1 = 没扫到)
+        float prov_p_legacy = -1.0f;    // 老做法(窗口从框左角 u=0 开始)的置信, 只做对照
+        int   prov_ncand = 0;
+        float prov_cand_u[PROV_CAND_MAX + 2];
+        float prov_cand_p[PROV_CAND_MAX + 2];
+        if (g_prov_model != nullptr && !plate.empty() && box.rot_ok) {
+            // P5.67: 候选窗口 —— [0] 是老做法 (u=0), 其余以"蓝面左边缘"为锚点向两侧展开
+            prov_cand_u[prov_ncand++] = 0.0f;
+            prov_u_left = prov_find_u_left(fb->buf, (int)fb->width, (int)fb->height, box.qx, box.qy);
+            if (prov_u_left >= 0.0f) {
+                for (int j = -PROV_CAND_K; j <= PROV_CAND_K && prov_ncand < PROV_CAND_MAX + 2; j++) {
+                    const float u = prov_u_left + (float)j * PROV_CAND_STEP;
+                    if (u < -0.05f || u + PROV_U_SPAN > 1.05f) continue;   // 窗口整块跑到框外面去了
+                    bool dup = false;
+                    for (int m = 0; m < prov_ncand; m++) {
+                        if (fabsf(u - prov_cand_u[m]) < 0.0030f) { dup = true; break; }
+                    }
+                    if (!dup) prov_cand_u[prov_ncand++] = u;
+                }
+            }
+            float best_p = -1.0f;
+            for (int c = 0; c < prov_ncand; c++) {
+                sample_prov_to_input(fb->buf, (int)fb->width, (int)fb->height, box.qx, box.qy,
+                                     prov_cand_u[c], (int8_t *)g_prov_input->data, g_prov_lut);
+                const int64_t t_prov = esp_timer_get_time();
+                g_prov_model->run();
+                prov_ms += (int)((esp_timer_get_time() - t_prov) / 1000);
+                g_prov_out->assign(g_prov_model->get_outputs().begin()->second);
+                const float *pl = (const float *)g_prov_out->data;
+                int id = 0;
+                for (int c2 = 1; c2 < PROV_CLASS; c2++) if (pl[c2] > pl[id]) id = c2;
+                const float vmax = pl[id];
+                float sum = 0.0f;
+                for (int c2 = 0; c2 < PROV_CLASS; c2++) sum += expf(pl[c2] - vmax);
+                const float p = (sum > 0.0f) ? (1.0f / sum) : 0.0f;      // top1 的 softmax
+                prov_cand_p[c] = p;
+                if (c == 0) prov_p_legacy = p;
+                if (p > best_p) {
+                    best_p = p;
+                    prov_id = id;
+                    prov_id2 = (id == 0) ? 1 : 0;
+                    for (int c2 = 0; c2 < PROV_CLASS; c2++)
+                        if (c2 != id && pl[c2] > pl[prov_id2]) prov_id2 = c2;
+                    prov_p = p;
+                    prov_p2 = (sum > 0.0f) ? expf(pl[prov_id2] - vmax) / sum : 0.0f;
+                    prov_u = prov_cand_u[c];
+                }
+            }
+            // 把"赢了的那扇窗"重新抠一遍进输入张量 —— 这样发回串口的 patch 就是模型真正吃到的那块
+            sample_prov_to_input(fb->buf, (int)fb->width, (int)fb->height, box.qx, box.qy,
+                                 prov_u, (int8_t *)g_prov_input->data, g_prov_lut);
+        }

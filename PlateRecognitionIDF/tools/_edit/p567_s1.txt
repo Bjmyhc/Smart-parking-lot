@@ -1,0 +1,42 @@
+// P5.67: 把"省字复核模型真正吃到的那块 32x64 patch"发回串口 (最近邻放大), 便于肉眼/助手确认。
+//   为什么要它: 复核置信塌下来的时候, 光看文字日志分不清"窗口没对准"和"模型不行";
+//   把 patch 发回来一眼就能看出省字有没有落在窗口里、窗口是不是被背景带偏了。
+static void img_tx_send_prov(int zoom) {
+#if IMG_TX_ENABLE
+    if (g_prov_rgb == nullptr || zoom < 1) return;
+    const int bw = PROV_W * zoom, bh = PROV_H * zoom;
+    static uint8_t *big = nullptr;
+    static uint8_t *jpg = nullptr;
+    if (big == nullptr) {
+        big = (uint8_t *)heap_caps_aligned_calloc(16, 1, (size_t)bw * bh * 3, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        jpg = (uint8_t *)heap_caps_aligned_calloc(16, 1, (size_t)bw * bh * 3 + 4096, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    }
+    if (big == nullptr || jpg == nullptr) {
+        img_tx_note_fail("省字 patch 缓冲分配失败 (PSRAM)");
+        return;
+    }
+    for (int y = 0; y < bh; y++) {
+        const uint8_t *srow = g_prov_rgb + (size_t)(y / zoom) * PROV_W * 3;
+        uint8_t *drow = big + (size_t)y * bw * 3;
+        for (int x = 0; x < bw; x++) {
+            const uint8_t *s = srow + (size_t)(x / zoom) * 3;
+            drow[x * 3 + 0] = s[0];
+            drow[x * 3 + 1] = s[1];
+            drow[x * 3 + 2] = s[2];
+        }
+    }
+    if (!img_tx_enc_ensure(bw, bh, 88)) {
+        img_tx_note_fail("JPEG 编码器打不开 (省字 patch)");
+        return;
+    }
+    int out_len = 0;
+    if (jpeg_enc_process(g_enc, big, bw * bh * 3, jpg, (size_t)bw * bh * 3 + 4096, &out_len) != JPEG_ERR_OK || out_len <= 0) {
+        img_tx_note_fail("JPEG 编码失败 (省字 patch)");
+        return;
+    }
+    img_tx_send_jpeg(jpg, out_len);
+    img_tx_note_ok(out_len);
+#else
+    (void)zoom;
+#endif
+}

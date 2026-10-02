@@ -1,0 +1,38 @@
+        char provbuf[224] = "";
+        if (prov_id >= 0) {
+            // 窗口对照字段: 采用了哪扇窗 / 锚点在哪 / 老做法多自信 / 一共试了几扇 —— 一眼看出这帧是不是靠锚点救回来的
+            char winbuf[80] = "";
+            if (prov_u_left >= 0.0f) {
+                snprintf(winbuf, sizeof(winbuf), " | 窗u%+.3f/锚%+.3f/旧窗%.0f%%/试%d窗",
+                         prov_u, prov_u_left, prov_p_legacy * 100.0f, prov_ncand);
+            }
+            snprintf(provbuf, sizeof(provbuf), " | 省字复核 %s %.0f%% (次选 %s %.0f%%, %dms)%s 主模型首字 %s%s",
+                     PROV_CHARS[prov_id], prov_p * 100.0f, PROV_CHARS[prov_id2], prov_p2 * 100.0f, prov_ms,
+                     prov_used ? " 已采用 *" : " 未过门槛, 保留 *", main_head, winbuf);
+        }
+        if (verbose && prov_id >= 0) {
+            char candbuf[200] = "";
+            for (int c = 0; c < prov_ncand; c++) {
+                char one[28];
+                snprintf(one, sizeof(one), "%su%+.3f:%.0f%%", (c == 0) ? "" : " ",
+                         prov_cand_u[c], prov_cand_p[c] * 100.0f);
+                strncat(candbuf, one, sizeof(candbuf) - strlen(candbuf) - 1);
+            }
+            ESP_LOGI(TAG, "省字复核: 从原图 ROI %dx%d 的四边形里抠省字格 (u 窗宽 %d%%) -> %dx%d | 实读 %s %.0f%% (次选 %s %.0f%%) | 主模型首字 %s | %s | 试点 %d 个, 共 %d ms",
+                     box.x2 - box.x1, box.y2 - box.y1, (int)(PROV_U_SPAN * 100.0f + 0.5f), PROV_W, PROV_H,
+                     PROV_CHARS[prov_id], prov_p * 100.0f,
+                     PROV_CHARS[prov_id2], prov_p2 * 100.0f, main_head,
+                     prov_used ? "已采用复核结果" : "未过 70% 门槛, 保留主模型", prov_ncand, prov_ms);
+            ESP_LOGI(TAG, "省字窗口扫描: 蓝面左边缘锚点 u_left=%+.3f (占总长 %+.1f%%, 相当于窗宽的 %+.0f%%) | 候选(窗宽 %.0f%% 时各自的实测置信): %s | 取 u%+.3f (老做法 u=0 时 %.0f%%)",
+                     prov_u_left, prov_u_left * 100.0f, prov_u_left / PROV_U_SPAN * 100.0f,
+                     PROV_U_SPAN * 100.0f, candbuf, prov_u, prov_p_legacy * 100.0f);
+        }
+        // P5.67: 把省字 patch 发回串口 —— 详细模式每帧都发; 连续模式只在"复核没过门槛"时发 (限流 10s)
+        if (prov_id >= 0) {
+            static int64_t last_prov_dump_us = 0;
+            const int64_t now_dump_us = esp_timer_get_time();
+            if (verbose || (prov_p < PROV_CONF_MIN && now_dump_us - last_prov_dump_us > PROV_DUMP_MIN_GAP_US)) {
+                last_prov_dump_us = now_dump_us;
+                img_tx_send_prov(PROV_DUMP_ZOOM);
+            }
+        }

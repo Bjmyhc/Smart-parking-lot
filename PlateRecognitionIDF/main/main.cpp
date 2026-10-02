@@ -55,11 +55,48 @@ static const char *TAG = "plate";
 // 由 CMake target_add_aligned_binary_data 嵌入到 flash rodata
 extern const uint8_t model_espdl[] asm("_binary_lprnet_s3_espdl_start");
 extern const uint8_t test_input_bin[] asm("_binary_test_input_bin_start");
+// P5.50 自检探针: 用户实拍那一帧的 94x24 模型输入块 (板端自己发回来的), PC 端 float 读作 京Q06666
+extern const uint8_t probe_crop_bin[] asm("_binary_probe_crop_bin_start");
+// P5.66: 省字复核模型 (只看第一个字) —— 直接从原图的四边形抠省字格, 不复用 94x24 那条把省字压成 13x22 的路
+extern const uint8_t prov_espdl[] asm("_binary_prov_s3_espdl_start");
 
 static const int IMG_H = 24;
 static const int IMG_W = 94;
 static const int NUM_CLASS = 68;   // 65 字符 + blank, blank = 67
 static const int TIME_STEPS = 18;
+
+// ===================== P5.66: 省字复核模型 (第二个 espdl) =====================
+// 为什么要它: 主模型吃的是 94x24, 省字那一格只剩 13x22 = 286 像素; 而原图 (640x480) 里
+// 同一个省字有 44x138 = 6072 像素 —— 21 倍的信息是**缩采样那一步扔掉的**, 事后锐化补不回来。
+// 实测证据: 同一张 94x24 裁块, 人眼读「京」, 主模型 93~99% 自信地读「皖」(replay 集 95% 是皖牌)。
+static const int PROV_W = 32;                   // 输入宽
+static const int PROV_H = 64;                   // 输入高
+static const int PROV_CLASS = 31;               // 31 个省字
+static const float PROV_U_SPAN = 1.0f / 7.35f;  // 省字在车牌长边方向占的区间 (u 方向)
+static const float PROV_NORM_MEAN = 127.5f;     // 训练里的 (x/255 - 0.5)/0.25
+static const float PROV_NORM_STD = 63.75f;
+// 置信门槛: PC 端 4 折交叉验证里, 只采纳 >=0.70 的那些, 准确率 ~98%; 不过门槛就保留主模型首字
+static const float PROV_CONF_MIN = 0.70f;
+// ===================== P5.67: 省字窗口的「蓝面锚点 + 多候选取最优」 =====================
+// 根因 (PC 归因实验 tools/p571_prov_robust.py + tools/p572_prov_domain.py, 245 张真实省字 patch):
+//   提亮/泛白/模糊/低分辨率/反光斑/JPEG 压缩/色偏 都打不垮它 (置信中位仍有 76~96%),
+//   唯独"窗口横向偏 20%/40% 个窗宽"能把它从中位 94% 打到 82%/39% (粤 top-1 只剩 9%);
+//   而窗口的**宽窄**(拉伸/压缩)完全不影响 => 要修的是窗口**左边界的位置**, 不是宽度。
+// 板上的对应现象: 同一块牌相邻帧 95% -> 22% -> 95% 乱跳; 且低置信集中在兜底框
+//   (兜底帧 27% 过不了 70% 门槛, 严格框只有 5%) —— 兜底框左边缘松, 而省字窗的左边界原来就是框的左角。
+// 修法: 左边界不再取框的 u=0, 改为沿车牌中线扫出"蓝面真正的左边缘"当锚点, 再在锚点两侧各试 K 扇窗。
+static const int   PROV_SCAN_N    = 160;      // 锚点扫描: 中线上一共采多少点 (只扫 u ∈ [0, PROV_SCAN_UMax])
+static const float PROV_SCAN_UMax = 0.5f;     // 省字一定在左半边, 扫前半段就够
+static const float PROV_CAND_STEP = 0.0068f;  // 相邻候选窗的 u 间距 ≈ 窗宽(13.6%)的 5%
+static const int   PROV_CAND_K    = 2;        // 锚点两侧各试 K 扇 => 搜索半径 ≈ 窗宽的 ±10%
+static const int   PROV_CAND_MAX  = 2 * 2 + 2;  // 候选上限 (含"老做法 u=0"那一扇)
+#define PROV_DUMP_ZOOM        4               // 发回串口时把 patch 放大几倍
+#define PROV_DUMP_MIN_GAP_US  10000000LL      // 连续模式下"复核没过门槛就发 patch"的限流: 10s 一次
+// ⚠ 类别顺序必须与 tools/p565f_train2.py 的 PROV 一致 —— 与主模型 CHARS 的顺序**不同**, 别照抄
+static const char *PROV_CHARS[PROV_CLASS] = {
+    "京", "津", "冀", "晋", "蒙", "辽", "吉", "黑", "沪", "苏", "浙", "皖", "闽", "赣", "鲁", "豫",
+    "鄂", "湘", "粤", "桂", "琼", "渝", "川", "贵", "云", "藏", "陕", "甘", "青", "宁", "新"};
+static uint32_t mem_fnv32(const void *p, size_t n);   // 定义在后面, 先用先声明
 
 // 自动识别节奏 (P5.3: 实时模式)。
 //   实测单次耗时: 丢帧 ~0.3s + 定位 0.12~0.16s + 预处理 ~0.01s + 推理 ~0.40s ≈ 0.8~0.9s
@@ -109,6 +146,8 @@ static const char *CHARS[NUM_CLASS] = {
 #define PCLK_GPIO_NUM   13
 
 #define BOOT_BTN_PIN     0   // GPIO0 = 板载 BOOT 按钮
+#define BOOT_DBLCLICK_MS 400 // P5.35: 单击后等这么久, 期间又来一下 = 双击 (P5.61 起 = 复位图片输出)
+#define BOOT_DEBOUNCE_MS 50  // P5.41: 离上一个被接受的边沿不到这么久 = 触点回弹, 丢掉
 
 // BOOT 按钮用中断锁存 (P5.3): 连续识别时每轮要跑 ~0.9s, 如果只在两轮之间轮询电平,
 // 用户"短按一下"很容易正好落在忙的那 0.9s 里被漏掉 (以前周期 5s、空闲 3.3s, 所以没暴露)。
@@ -117,14 +156,37 @@ static const char *CHARS[NUM_CLASS] = {
 static volatile bool boot_btn_latched = false;
 static volatile int32_t boot_press_ms = 0;       // 按下时刻 (ms, 32 位: ISR 与主循环共享也读不坏)
 static volatile int32_t boot_release_ms = 0;     // 松手时刻 (ms), 0 = 还按着
+// P5.36: 双击不能用"主循环里等 400ms 看有没有第二下"来判 —— 连续识别模式下主循环每轮要忙 ~0.5~1s,
+//   用户两下都在忙的时候按完, 等主循环回来时 ISR 里只剩"最后一次按下", 双击和单击长得一模一样
+//   (实测就是这样: 双击被当成单击, 变成切图片模式)。改成在 ISR 里直接数"这一串一共按了几下":
+//   两下的间隔 <= BOOT_DBLCLICK_MS 就算同一串 —— 主循环再忙也漏不掉。
+static volatile uint8_t boot_burst_n = 0;        // 这一串已经按下的次数
+static volatile int32_t boot_last_press_ms = 0;  // 这一串上一下的时刻 (用来判断"隔太久就另起一串")
+static bool boot_was_down = false;               // P5.41: 上一次接受的边沿之后的电平
+static int32_t boot_last_edge_ms = 0;            // P5.41: 上一个被接受的边沿时刻
+// P5.41: 去抖。机械按钮的触点回弹会在"一次按压"里再产生好几个边沿 —— 现场日志
+//   (f074024f, 2026-09-30) 里用户按三下, ISR 数出 2 下(三击被当成双击, 档位没切)或者 6 下。
+//   两条规则:
+//     ① 电平跟上次接受的一样 => 重复边沿, 直接丢;
+//     ② 离上一个被接受的边沿 < BOOT_DEBOUNCE_MS => 触点抖动, 丢 (并且**不更新** boot_was_down,
+//        所以紧接着那个真正的松开边沿仍然会被接受, 不会把"还按着"这个状态卡住)。
 static void IRAM_ATTR boot_btn_isr(void *arg) {
     (void)arg;
-    if (gpio_get_level((gpio_num_t)BOOT_BTN_PIN) == 0) {   // 按下
-        boot_press_ms = (int32_t)(esp_timer_get_time() / 1000);
+    const int32_t now = (int32_t)(esp_timer_get_time() / 1000);
+    const bool down = (gpio_get_level((gpio_num_t)BOOT_BTN_PIN) == 0);
+    if (down == boot_was_down) return;
+    if (now - boot_last_edge_ms < BOOT_DEBOUNCE_MS) return;
+    boot_was_down = down;
+    boot_last_edge_ms = now;
+    if (down) {                                            // 按下
+        if (now - boot_last_press_ms > BOOT_DBLCLICK_MS) boot_burst_n = 0;   // 隔太久 => 另起一串
+        boot_burst_n = (uint8_t)(boot_burst_n + 1);   // C++20 起 volatile ++ 被弃用, 写成赋值
+        boot_last_press_ms = now;
+        boot_press_ms = now;
         boot_release_ms = 0;
         boot_btn_latched = true;
     } else {                                               // 松手
-        boot_release_ms = (int32_t)(esp_timer_get_time() / 1000);
+        boot_release_ms = now;
     }
 }
 
@@ -248,7 +310,7 @@ static void build_inv_lut(const int8_t *lut) {
     for (int v = 0; v < 256; v++) g_inv_lut[(int)lut[v] + 128] = (uint8_t)v;
 }
 
-static void build_norm_lut(int8_t *lut, int exponent) {
+static void build_lut_ex(int8_t *lut, int exponent, float mean, float std) {
     const float inv_scale = 1.0f / DL_SCALE(exponent);   // exponent=-7 -> 128
     for (int c = 0; c < 3; c++) {
         for (int v = 0; v < 256; v++) {
@@ -258,13 +320,17 @@ static void build_norm_lut(int8_t *lut, int exponent) {
             //   (P4 走的是 round_half_even, 与这里不同; 本工程只跑 S3)
             // ⚠ 不要用 lroundf()/round(): 它们是"半值远离 0", 对 v<=127 会整体差 1。
             //   本模型下 (v-127.5)/128*128 恰好等于 v-127.5, 故结果就是 clamp(v-127)。
-            int q = (int)floorf((v - NORM_MEAN) / NORM_STD * inv_scale + 0.5f);
+            int q = (int)floorf((v - mean) / std * inv_scale + 0.5f);
             if (q > 127) q = 127;
             if (q < -128) q = -128;
             lut[c * 256 + v] = (int8_t)q;
         }
     }
 }
+
+/** P5.66: 省字模型的归一化 LUT (mean 127.5 / std 63.75 = 训练里的 (x/255-0.5)/0.25) */
+static void build_norm_lut(int8_t *lut, int exponent) { build_lut_ex(lut, exponent, NORM_MEAN, NORM_STD); }
+static void build_prov_lut(int8_t *lut, int exponent) { build_lut_ex(lut, exponent, PROV_NORM_MEAN, PROV_NORM_STD); }
 
 // ---- P5.28: 直接读写 GC2145 寄存器 ----
 // 这个驱动的 set_brightness / set_contrast / set_saturation / set_exposure_ctrl /
@@ -293,8 +359,8 @@ static void camera_tune_registers(sensor_t *s) {
         ESP_LOGE(TAG, "GC2145 寄存器读失败 (%d): SCCB 不通, 下面几个值都不可信", tgt);
         return;
     }
-    ESP_LOGI(TAG, "GC2145 寄存器: 曝光目标(页1 0x13)=0x%02x | AEC使能(0xb6)=0x%02x | 自动开关(页0 0x82)=0x%02x",
-             tgt, gc_rd(s, GC_PAGE_AEC, 0xb6) & 0xff, gc_rd(s, 0, 0x82) & 0xff);
+    ESP_LOGI(TAG, "GC2145 寄存器: 曝光目标(页1 0x13)=0x%02x | AEC使能(页0 0xb6)=0x%02x | 自动开关(页0 0x82)=0x%02x",
+             tgt, gc_rd(s, 0, 0xb6) & 0xff, gc_rd(s, 0, 0x82) & 0xff);
     ESP_LOGI(TAG, "GC2145 AEC窗口: X1=0x%02x X2=0x%02x Y1=0x%02x Y2=0x%02x 中心权重(0x0c)=0x%02x",
              gc_rd(s, GC_PAGE_AEC, 0x01) & 0xff, gc_rd(s, GC_PAGE_AEC, 0x02) & 0xff,
              gc_rd(s, GC_PAGE_AEC, 0x03) & 0xff, gc_rd(s, GC_PAGE_AEC, 0x04) & 0xff,
@@ -452,26 +518,140 @@ static bool plate_looks_valid(const std::string &s) {
 #define ROI_GRID_N (ROI_GRID_W * ROI_GRID_H)
 
 static const float ROI_MIN_AREA_RATIO = 0.002f;   // auto_crop_predict.py: area < img_area*0.002 丢弃
-static const float ROI_RATIO_LO = 2.0f;           // auto_crop_predict.py: ratio < 2.0 丢弃
-static const float ROI_RATIO_HI = 6.5f;           // auto_crop_predict.py: ratio > 6.5 丢弃
+// P5.60: 2.0~6.5 -> 2.2~4.2。
+//   真车牌本体(旋转拟合后)长宽比 3.1~3.4, 4.2 已经比它宽 25%, 够宽容了;
+//   而 4.2~6.5 那一档收进来的全是"车牌 + 旁边一条蓝色背景"的连体块 —— 复算显示它对识别没贡献、只有干扰。
+static const float ROI_RATIO_LO = 2.2f;
+static const float ROI_RATIO_HI = 4.2f;
 static const float ROI_RATIO_IDEAL = 3.4f;        // auto_crop_predict.py: 打分基准
 // P5.2 有效填充率下限。有效填充率 = 能摆正 => 旋转矩形填充率(与倾角无关); 否则 => 轴对齐外接框密度。
 // 依据 (2026-09-28 新固件日志, 10 次会话): 真车牌 65%~90% 全对/接近; 散块噪块 35%~54% 全乱。
 // 离线自检 tools/roi_geom_selftest.ps1: 直立 88%, 倾斜 20/25/33 度 85/85/84%。
 // ⚠ 不能拿轴对齐密度一刀切: 倾斜车牌的外接框密度只有 40%~47% (离线 F/G/H), 那样会误杀真车牌。
 static const float ROI_MIN_FILL = 0.60f;
+// P5.46: 兜底档 —— **面积够了就收, 比例和填充一概不看**。
+//   为什么改成这样 (P5.45 的教训): 屏幕反光会把蓝底打散, 连通域拼不出"车牌形状", 严格档的
+//   比例 2.0~6.5 / 填充 >=60% 就会一起把它否掉 —— 而它确实是车牌。
+//   实测 (2026-10-01 的 78 帧日志): 21 个错结果**全部**来自占屏 0.1%~1.3% 的碎块, 形状门槛拦不住它们;
+//   唯一正确的 #82 反而是最大的一块 (占屏 43.7%)。=> 形状当不了裁判。
+// 代价靠"结果闸门"兜: 结果必须先过 plate_looks_valid() (7~8 位, 省字开头) 才算车牌, 否则只打一行疑似误检。
+// 面积底线与严格档相同 (38 格) —— 只放开形状, 不放开"小碎点"。
+// 旋转拟合内部门槛 0.45 -> 0.35: 让被反光打散的斜牌也能走"摆正"路径。
+static const float ROI_FIT_MIN_FILL = 0.35f;
 static const float ROI_TRIM_X = 0.01f;            // auto_crop_predict.py: 左右各去 1%
 static const float ROI_TRIM_Y = 0.03f;            // auto_crop_predict.py: 上下各去 3%
+// P5.49: 亮度下限 V —— 46 -> 120。
+//   现场 (2026-10-01 用户 20 张难帧, 白天拍屏幕): 屏幕那层深蓝底色和车牌蓝的**色相、饱和度都重叠**
+//   (底色 H 200~260° / S 能到 70+; 车牌 H 200~260° / S 60~130), 唯一分得开的是**亮度**:
+//   车牌蓝底的最亮通道约 150~200, 而屏幕底色只有 60~90。原来的 46 等于把整屏底色全放了进来,
+//   于是掩码糊满画面、连通域涨到占屏 52%~90%, 严格档拒不掉、兜底档整个收下 -> 框 = 一整屏。
+//   PC 复算 (tools/locator_replay.py --v-min, 20 张难帧): 只动这一个数 ——
+//     V=46 : 『像车牌的框』0/20,  巨框(占屏>45%) 18/20
+//     V=120: 『像车牌的框』15/20, 巨框 0/20      (饱和度一个字没改)
+//   代价: 很暗的车牌(B 通道掉到 ~100)会被误杀 —— 那时该帧打印"画面里没有一块车牌色"直接跳过,
+//   比"喂一坨整屏背景给模型"好得多。若以后主要用在暗环境, 再考虑改成跟着整帧亮度自适应。
+static const int ROI_MIN_VALUE = 120;
+// P5.60: 蓝牌判据换成"蓝通道明显高于红通道"。
+//   依据 (2026-10-01, 用户新拍的 171 张原始帧: 京Q06666 / 豫FSQ818 / 豫A8F8Q8, 白天屏摄+反光):
+//     只把蓝牌判据从"色相 180~270 + 饱和度>=35"换成 "(b-r)>40 且 b>120", 其余机器一字不动,
+//     端到端整串全对 28/171 -> 96/171 (定位机器、比例/填充门槛、裁剪几何全部没变)。
+//   为什么: 屏摄场景里反光/屏幕底色会把色相和饱和度一起搅乱(同一块牌的不同像素色相能差几十度),
+//     而"蓝比红高多少"几乎不受影响 —— 蓝牌底 b-r 中位约 107, 屏幕泛蓝的底色只有 20~40。
+//   注意 b > ROI_MIN_VALUE 这一半是给绿牌留的: 深绿像素的 b 只有 60~90, 过不了这条, 不会误进蓝牌分支。
+static const int ROI_BLUE_BR_MIN = 40;
+// P5.49: 候选占屏上限。严格档和兜底档都不收超过它的块。
+//   依据同上: 真车牌本体占屏 <=~32%, 被反光/背景污染的块 52%~90%。这一刀从源头掐掉"巨框"。
+static const float ROI_MAX_AREA_PCT = 45.0f;
+// P5.56/P5.58: **占屏下限**, 严格档和兜底档都生效。面积上下限是一对, 放在一起看:
+//   上限 45% 治"整屏背景被收下", 下限治"碎块被当成车牌候选"。
+//   原来的下限只有 38 格(0.2%), 太低 —— 实测两种碎块都能溜过去:
+//     兜底档: 84x16 px(占屏 0.4%、长宽比 5.25)   -> 模型吐出一个孤零零的省字
+//     严格档: 76x16 px(占屏 0.4%、长宽比 4.75)   -> 比例和填充居然都过, 同样吐一个省的
+//   取 2.0%: 能用的距离内真车牌至少占屏 4%(190x76 px, 见文档四十二节 档3 的 92%), 2% 留一倍余量,
+//   既拦掉 0.1%~1.3% 那一带碎块, 又不至于把"稍远但还看得清"的牌误杀。
+static const float ROI_MIN_AREA_PCT = 2.0f;
 
-// P5.13: 采样的"外扩留白"。训练素材里字符是不顶边的(见 data/official_val 的 94x24 图),
-//   而我们的框是"蓝区紧贴边" + 再去 1%/3% 边 => 字符在 94 宽的张量里被拉宽约 14%,
-//   模型会把最后一个字挤掉(京Q06666 -> 京Q0666)。
-//   实测(同一块牌 35 帧, 浮点 ONNX 离线跑):
-//     外扩 0%  -> 2/35 正确(其中 30 帧都少最后一个 6)
-//     外扩 4%  -> 10/35
-//     外扩 8%  -> 28/35   <= 取这个
-//     外扩 10% -> 18/35, 12% -> 0/35(开始把画面里的东西也框进来, 多认字)
-static const float ROI_CROP_PAD = 0.08f;
+// 采样时的"外扩留白"。训练素材里字符不顶边(见 data/official_val 的 94x24 图),
+//   而我们的框是"蓝区紧贴边"再去 1%/3% 边 => 不补一点留白, 最后一个字会被挤掉。
+//
+// P5.13 的老结论(同一块牌 35 帧, 浮点模型离线跑): 对称外扩 0% -> 2/35 正确(30 帧少最后一个 6),
+//   4% -> 10/35, 8% -> 28/35(当初取这个), 10% -> 18/35, 12% -> 0/35。
+//
+// P5.32 修正: 那个 8% 是**对称**的, 而左右两端并不对称 —— 左边多出来的那点内容会**多认一个省份字**。
+//   板上日志的铁证 (46 帧实拍, 京Q06666): 17 帧输出 "沪京Q06666"/"浙京Q06666"(多一个字),
+//   而且 CTC 时间步全是 _沪京_Q__0_6_6_6_6__ —— 第一个字被拆成了 沪(第1步) + 京(第2步);
+//   只有当它连着输出 京京 时才会被 CTC 折叠成正确的 京 (见帧 #80 _京京_Q__D_6_6_6_6__)。
+//   机理: 长边两端各外扩 8% ≈ 94 px 输入里 7.5 px, 再加框本身比蓝面宽 2~4 px, 左边共约 10 px
+//         ≈ 正好一个字符格 —— 第 1 个时间步整格压在"牌子外面那点东西"上。
+//   PC 复算 (65 帧实拍, 浮点模型, 只动长边两端外扩):
+//     左 7% / 右 7% (=旧值) -> 正确  0~3,  多字  8~18     <= 就是日志里那个毛病
+//     左 4% / 右 7%         -> 正确 10~14, 多字  2~6
+//     左 0% / 右 4%         -> 正确 29~30, 多字  0~1      <= 取这个
+//     上下外扩 0/3/5% 对结果几乎没影响(29/28/30), 所以短边维持原样。
+//   为什么右边要留 4% 而左边收到 0: 右边不留白会切掉最后一个字(就是 P5.13 那 30/35 帧的毛病),
+//   左边不留白则正好把"牌子外面那点东西"挤出去。
+//   净外扩 = 本值 - ROI_TRIM_X(先按 1% 收过边), 所以右 0.05-0.01=4%。
+//
+// P5.38 (2026-09-30) 把左端从净 0% 改成净 +2% —— 回来一看, P5.32 的"左端收到 0"收过头了。
+//   证据: 串口助手存下来的 165 张真实 94x24 模型输入(4 块牌), 浮点模型离线重跑:
+//     基线 (净左 0% / 右 4%)     京Q 45%  粤T 57%  豫J 85%  豫A  75%   合计  89/165 = 53.9%
+//     左端再 +1%                 京Q 54%  粤T 60%  豫J 92%  豫A  88%   合计 100/165 = 60.6%
+//     左端再 +2%  (本次采用)     京Q 67%  粤T 48%  豫J 92%  豫A 100%   合计 105/165 = 63.6%
+//     左端再 +3% / +4%           京Q 70%  粤T 48%  豫J 92%  豫A 100%   合计 108/165 = 65.5%
+//     左端再 +5%                 合计  86/165 = 52.1%   (再大就开始崩)
+//   奇偶分半复核(每半 82~83 张): 基线 57% / 51% -> +2~4% 两半都是 63~66% / 65%,
+//     不是单批巧合。代价: 粤T666FP 那块在 +2% 以上会掉(57% -> 48%), 其余三块都明显涨。
+//   为什么: 改之前左右不对称(左净 0 / 右净 4), 字符整体偏在 94px 的左边;
+//     离线单独测"把内容在 94px 里整体右移" 0px -> 53.9%, +2~3px -> 67.3%, 左移一律崩。
+// P5.39: 左端留白改成运行时可切 (BOOT 三击), **默认回到 P5.37 的老值(净 0%)**。
+//   P5.38 曾经直接把它定成 0.03f(=净 +2%) —— 离线在 165 张真实 94x24 上它是涨的
+//   (53.9% -> 63.6%, 奇偶分半也复现), 但真机上用户反馈"京Q 反而更糟"。两边对不上, 就不猜了:
+//   默认保守(净 0% = P5.37 行为), 想试 +2% 就现场按三下 BOOT 切过去, 串口会打当前生效值。
+// P5.40: "取样几何档" —— BOOT 三击循环。左右留白越大, 内容在 94px 里越小、四周的余量越多。
+static const float ROI_PAD_U_L_OFF = 0.01f;   // 净 0%  (P5.30 起的老值, P5.37 的行为)
+static const float ROI_PAD_U_L_ON  = 0.03f;   // 净 +2% (P5.38 试过的值)
+static const float ROI_PAD_U_L_IN  = -0.03f;  // 净 -4% (P5.43 新: 往框里收, 治定位框比真车牌宽)
+static const float ROI_PAD_U_R_OFF = 0.05f;   // 长边右端 净 4% (P5.32 起的老值)
+static const float ROI_PAD_U_R_ON  = 0.08f;   // 长边右端 净 7% (P5.13/P5.21 老几何)
+static const float k_pad_profiles[4][2] = {
+    {ROI_PAD_U_L_OFF, ROI_PAD_U_R_OFF},   // 档0 左净 0%  / 右净 4%  (P5.32~P5.39 老几何)
+    {ROI_PAD_U_L_ON,  ROI_PAD_U_R_OFF},   // 档1 左净 +2% / 右净 4%  (P5.38: 真机 330~420px 83%)
+    {ROI_PAD_U_L_ON,  ROI_PAD_U_R_ON},    // 档2 左净 +2% / 右净 +7%  <- P5.61 默认
+    {ROI_PAD_U_L_IN,  ROI_PAD_U_R_ON},    // 档3 左净 -4% / 右净 +7%
+};
+// P5.42: 默认档改成 **档3**(左右各净 +7%)。四份真机日志按"档 x 画面里的车牌宽度"合并
+//   (只数 京Q06666 这块牌, 结论见 三十九 节):
+//     档0  124 帧 22 对 = 18%    (有量的那一段 330~420px: 114 帧 13 对 = 11%)
+//     档1   40 帧 32 对 = 80%    (330~420px: 30 帧 25 对 = 83%)
+//     档2   53 帧 26 对 = 49%    (<250px: 33 帧 13 对 = 39%)
+//     档3   27 帧 23 对 = 85%    (<250px: 12 帧 **11 对 = 92%**; 330~420px: 13 帧 10 对 = 77%)
+//   关键在最后一行: 牌小到 190x76 px(只占屏 4%)时, 档3 还能 12 帧对 11 帧 —— 这正是用户要的
+//   "恰当距离内都能识别"。档1 在 330~420px 与档3 打平(83% vs 77%, 样本都小), 但它在 <330px
+//   那两段**一帧数据都没有**; 而档3 的 3 个错法全是"两端各多一个字"(京R京Q06666L 之类) ——
+//   (那原本是"长边收边"该管的 —— 但 P5.61 复算证明收边在切省字, 已整段删除, 见文档第四十五节。三击仍可现场切回任何一档。)
+// P5.43: 默认档 3 -> 2, 并把 档2/档3 换成 左右不对称(左小右大) 的组合。
+//   起因(2026-09-30 用户日志): 档3(左右各 +7%)把 左边凭空多认一个省字 放回来了 ——
+//   61 帧结果里 38 帧带一个多出来的省字(浙 34 / 闽 4 / 沪 1), 置信 93~100%, 京Q06666 一帧没全对。
+//   机理就是 P5.32 那条(三十四节): 长边左端外扩过多 -> 第一个时间步压在牌子外面 -> CTC 多吐一个字。
+//   结论: 左边要 小 (防多字), 右边要 大 (防手持抖动把末尾字符切出窗)。
+// P5.61: 左边留白 净 0% -> 净 +2% (档2 的左端从 ROI_PAD_U_L_OFF 换成 ROI_PAD_U_L_ON)。
+//   171 帧原始帧复算(长边收边已删): 左 +1% 128/171 -> 左 +3% **138/171 = 81%** -> 左 +5% 117/171;
+//   而左 -1% 只有 68/171。左端**必须**留白, 3% 附近是个清晰的峰 —— 与 P5.38 的结论同向。
+#define PAD_DEFAULT_PROFILE 2
+static int g_pad_profile = PAD_DEFAULT_PROFILE;
+static float g_pad_u_l = k_pad_profiles[PAD_DEFAULT_PROFILE][0];
+static float g_pad_u_r = k_pad_profiles[PAD_DEFAULT_PROFILE][1];
+// P5.61: 0.08 -> 0.12 (净 5% -> 净 11%)。同一批复算: V 0.05 -> 134/171, 0.08 -> 138/171,
+//   0.12 -> **142/171 = 84%**, 0.15/0.18/0.22 -> 140/139/141 —— 0.12~0.22 是一条平顶,
+//   取 0.12(实测最好); 上下多留一点对"牌顶被反光吃掉"也更宽容。
+static const float ROI_PAD_V   = 0.12f;
+static void pad_apply_profile(int k) {
+    if (k < 0) k = 0;
+    if (k > 3) k = 3;
+    g_pad_profile = k;
+    g_pad_u_l = k_pad_profiles[k][0];
+    g_pad_u_r = k_pad_profiles[k][1];
+}
 
 #define ROI_MAX_SLOTS 32      // 连通域上限 (原实现就是 32)
 #define ROI_CELL_NEED ((ROI_GRID_STEP * ROI_GRID_STEP + 3) / 4)   // 一格内 >=25% 像素是车牌色才算数
@@ -496,6 +676,101 @@ typedef struct {
     const char *rot_why;  // P5.24: 拟合失败的具体原因 ("旋转长宽比越界" 等), 供日志/自动诊断用
 } roi_box_t;
 
+/** P5.29/P5.31: 用"这张图自己的主色"重算一遍蓝面框 —— 只打日志, 不参与裁剪, 零风险。
+ *  动机: 现在的蓝面判定是一条**写死的门槛** (色相 180~270 且 S>=35)。屏幕上泛蓝的背景和白边
+ *  刚好越过这条死线, 于是被当成牌面一起框进裁剪块; 在 94 px 宽的模型输入里, 左边多出几个像素的
+ *  亮内容, 模型就会多认一个汉字 —— 日志里的 沪京Q06666 / 辽京Q06666 就是这么来的。
+ *  这里换成**活门槛**: 统计 (B-G, G-R) 二维直方图, 最大的一坨就是牌底色; 再取"颜色离它够近"的
+ *  像素的外接框。跟 auto_crop_predict.py 的 find_plate_quad 相比, 只把固定的 HSV 门槛换成跟着
+ *  这张图走的主色, 后面的形态学/打分/摆正一个字不改。
+ *
+ *  P5.31 两处修正 (P5.29 那版在板上永远打"没有明显的主色蓝, 跳过"):
+ *   1) 统计范围从**整帧**收到**选中的框以内**。实测整帧里约 29% 的像素都偏蓝 (屏幕底色/反光),
+ *      在整帧上求外接框等于没框, 差值全是假的; 只有框内那一小块的主色才是牌底。
+ *   2) 峰值从**单格**计数改成 **3x3 邻域求和**。实测单格中位只占 3.0% (颜色被噪声摊到邻近好几格),
+ *      永远过不了 n/20=5% 的门槛; 3x3 之后框内中位 17.9%, 门槛才有意义。
+ *  离线对照 (66 帧实拍, 套在参考框上): 框内浓度中位 17.9% (7.3~28.3%), 左/右各可收 3.6% ≈
+ *  94 px 输入里 3.4 px —— 正好对上"左边多 3~4 px 亮内容就多认一个汉字"的实验结论。*/
+#define DBIN_SHIFT  3
+#define DBIN_N      (256 >> DBIN_SHIFT)        // 32 档
+static void roi_probe_dominant_blue(const uint8_t *rgb565be, int w, int h, const roi_box_t *box) {
+    int x1 = box->x1, y1 = box->y1, x2 = box->x2, y2 = box->y2;
+    if (x1 < 0) x1 = 0;                        // 车牌贴边时外接框会是负的, 不夹住切片就翻车
+    if (y1 < 0) y1 = 0;
+    if (x2 > w) x2 = w;
+    if (y2 > h) y2 = h;
+    const int bw = x2 - x1, bh = y2 - y1;
+    if (bw < 8 || bh < 4) { ESP_LOGW(TAG, "主色诊断: 框太小 (%dx%d), 跳过", bw, bh); return; }
+
+    static uint16_t hist[DBIN_N * DBIN_N];     // 2 KB
+    memset(hist, 0, sizeof(hist));
+    long n = 0;
+    for (int y = y1; y < y2; y += 2) {          // 隔行隔列: 与 PC 对照实验同样的采样密度
+        const uint8_t *row = rgb565be + (size_t)y * w * 2;
+        for (int x = x1; x < x2; x += 2) {
+            const uint8_t b0 = row[x * 2], b1 = row[x * 2 + 1];
+            const int r = b0 & 0xF8;
+            const int g = (((b0 & 0x07) << 5) | ((b1 & 0xE0) >> 3)) & 0xFF;
+            const int b = (b1 & 0x1F) << 3;
+            const int bg = b - g, gr = g - r;
+            if (bg <= 0 || gr < 0) continue;    // 不够蓝的、偏红的都不进统计
+            int i = bg >> DBIN_SHIFT; if (i >= DBIN_N) i = DBIN_N - 1;
+            int j = gr >> DBIN_SHIFT; if (j >= DBIN_N) j = DBIN_N - 1;
+            hist[i * DBIN_N + j]++;
+            n++;
+        }
+    }
+    if (n < 100) { ESP_LOGW(TAG, "主色诊断: 框内偏蓝像素太少 (%ld), 跳过", n); return; }
+
+    long bc = 0; int bi = 0, bj = 0;            // P5.31: 峰值取 3x3 邻域求和, 不是单格
+    for (int i = 2; i < DBIN_N; i++) {          // i<2 => B-G<16, 不可能够蓝
+        for (int j = 0; j < DBIN_N; j++) {
+            long s = 0;
+            for (int di = -1; di <= 1; di++) {
+                const int ii = i + di; if (ii < 0 || ii >= DBIN_N) continue;
+                for (int dj = -1; dj <= 1; dj++) {
+                    const int jj = j + dj; if (jj < 0 || jj >= DBIN_N) continue;
+                    s += hist[ii * DBIN_N + jj];
+                }
+            }
+            if (s > bc) { bc = s; bi = i; bj = j; }
+        }
+    }
+    const float conc = 100.0f * (float)bc / (float)n;
+    if (bc < n / 20) {                          // 板上实测框内中位 17.9%, 5% 已是很松的门槛
+        ESP_LOGW(TAG, "主色诊断: 框内没有明显的主色蓝 (3x3 最大只占 %.1f%%), 跳过", conc);
+        return;
+    }
+    const int bg0 = bi << DBIN_SHIFT, gr0 = bj << DBIN_SHIFT;
+    int fx0 = bw, fy0 = bh, fx1 = -1, fy1 = -1; // 坐标都相对框左上角
+    long hit = 0;
+    for (int y = y1; y < y2; y += 2) {
+        const uint8_t *row = rgb565be + (size_t)y * w * 2;
+        for (int x = x1; x < x2; x += 2) {
+            const uint8_t b0 = row[x * 2], b1 = row[x * 2 + 1];
+            const int r = b0 & 0xF8;
+            const int g = (((b0 & 0x07) << 5) | ((b1 & 0xE0) >> 3)) & 0xFF;
+            const int b = (b1 & 0x1F) << 3;
+            const int bg = b - g, gr = g - r;
+            if (bg < bg0 - 8 || bg > bg0 + 8) continue;   // 离主色 +-1 档以内
+            if (gr < gr0 - 8 || gr > gr0 + 8) continue;
+            const int lx = x - x1, ly = y - y1;
+            if (lx < fx0) fx0 = lx;
+            if (lx > fx1) fx1 = lx;
+            if (ly < fy0) fy0 = ly;
+            if (ly > fy1) fy1 = ly;
+            hit++;
+        }
+    }
+    if (fx1 < 0) { ESP_LOGW(TAG, "主色诊断: 主色像素外接框为空"); return; }
+
+    const int dl = fx0, dr = (bw - 1) - fx1, dt = fy0, db = (bh - 1) - fy1;
+    ESP_LOGI(TAG, "主色诊断: 牌底色 B-G≈%d G-R≈%d | 3x3 浓度 %.1f%% | 主色框 %dx%d 在框内偏移 (%d,%d) | 命中 %ld/%ld",
+             bg0 + 4, gr0 + 4, conc, fx1 - fx0 + 1, fy1 - fy0 + 1, fx0, fy0, hit, n);
+    ESP_LOGI(TAG, "主色诊断: 死门槛框 %dx%d | 差值 左%d 右%d 上%d 下%d px (占宽 %.1f%% / %.1f%%) | 折算 94x24 输入 = 左 %.1f 右 %.1f px",
+             bw, bh, dl, dr, dt, db, 100.0f * (float)dl / (float)bw, 100.0f * (float)dr / (float)bw,
+             94.0f * (float)dl / (float)bw, 94.0f * (float)dr / (float)bw);
+}
 // ==================== P5.12: 串口图像输出 (给「BY串口助手」实时预览) ====================
 // 协议 (与 BY串口助手/serial_img_tool.py 的「二进制帧」模式逐字节对齐):
 //     "$IMG,<len>\r\n" + JPEG 二进制(恰好 len 字节) + CRC32(大端 4 字节) + "$END\r\n"
@@ -531,9 +806,22 @@ typedef struct {
 //   1 = 预览图 + ROI 绿框 (专门用来看"框套得准不准")
 //   2 = 模型输入块 (94x24) —— 就是模型真正吃到的那张小图, 逐像素一致, 直接当训练素材
 static volatile int g_img_mode = 0;
+
+// P5.31: 详细模式开关 (长按 BOOT 切换)。原来长按只是"详细一帧", 想连看几帧就得反复长按 ——
+//   而"主色框 vs 死门槛框差几个像素"这种结论, 恰恰要连着好几帧才看得出稳不稳。
+//   现在长按 = 开关: 开着的每一帧都走详细, 再长按一次关掉。
+//   代价: 每帧多约 100 行日志 (候选表 + 覆盖率剖面), 921600 下约 90 ms。掩码那 60 行仍受 ROI_MASK_BUDGET 限制。
+static volatile bool g_verbose_mode = false;
+// P5.34/P5.59: "长边收边"(按实测蓝色边界把取样框左端收窄) —— **P5.61 已整段删除**。
+//   定论: 171 张原始帧按固件真流程复算, 收左端 76/171 = 44%, 不收 128/171 = 75%,
+//   而且"收左端对"的 76 帧完全落在"不收对"的 128 帧里面 —— 0 帧有帮助、52 帧帮倒忙。
+//   根因: P5.60 换了 b-r 判据之后定位框本来就贴着车牌, 蓝带量出来的"左端那一段不是蓝"其实就是
+//   **省字自己**(省字笔画太密, 一行 9 个采样点里蓝点常常不到 4 个), 再按它收 = 把省字切掉,
+//   真机表现就是 京 -> 皖/粤/沪 乱跳、或者整串少一个字。详见文档第四十五节。
 static uint8_t g_crop_u8[IMG_W * IMG_H * 3] __attribute__((aligned(16)));  // 模式 2: 输入张量反量化回来的 RGB (JPEG 源序)。必须 16 字节对齐 —— esp_new_jpeg v0.6 起在 S3 上会检查编码器输入缓冲的对齐
 static uint8_t *g_tx_rgb = nullptr;              // RGB888 (16 字节对齐), PSRAM
 static uint8_t *g_tx_jpg = nullptr;              // JPEG 输出缓冲, PSRAM
+static uint8_t *g_prov_rgb = nullptr;            // P5.67: 省字 patch 的原色 RGB (PROV_W*PROV_H*3), 详细模式/低置信时发回串口
 // P5.17: 硬件 JPEG 编码器只有一份 —— 以前预览图 (320x240) 和裁剪块 (94x24) 各开了一个句柄,
 //   两个句柄抢同一份硬件: 用另一个尺寸编过之后, 再切回旧句柄编码就卡死在 jpeg_enc_process()
 //   里出不来了 (表现: 按 BOOT 切完模式后毫无反应, 必须重启)。现在只留一个句柄,
@@ -800,9 +1088,52 @@ static void img_tx_send_crop(void) {
     img_tx_note_ok(out_len);
 #endif
 }
+// P5.67: 把"省字复核模型真正吃到的那块 32x64 patch"发回串口 (最近邻放大), 便于肉眼/助手确认。
+//   为什么要它: 复核置信塌下来的时候, 光看文字日志分不清"窗口没对准"和"模型不行";
+//   把 patch 发回来一眼就能看出省字有没有落在窗口里、窗口是不是被背景带偏了。
+static void img_tx_send_prov(int zoom) {
+#if IMG_TX_ENABLE
+    if (g_prov_rgb == nullptr || zoom < 1) return;
+    const int bw = PROV_W * zoom, bh = PROV_H * zoom;
+    static uint8_t *big = nullptr;
+    static uint8_t *jpg = nullptr;
+    if (big == nullptr) {
+        big = (uint8_t *)heap_caps_aligned_calloc(16, 1, (size_t)bw * bh * 3, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        jpg = (uint8_t *)heap_caps_aligned_calloc(16, 1, (size_t)bw * bh * 3 + 4096, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    }
+    if (big == nullptr || jpg == nullptr) {
+        img_tx_note_fail("省字 patch 缓冲分配失败 (PSRAM)");
+        return;
+    }
+    for (int y = 0; y < bh; y++) {
+        const uint8_t *srow = g_prov_rgb + (size_t)(y / zoom) * PROV_W * 3;
+        uint8_t *drow = big + (size_t)y * bw * 3;
+        for (int x = 0; x < bw; x++) {
+            const uint8_t *s = srow + (size_t)(x / zoom) * 3;
+            drow[x * 3 + 0] = s[0];
+            drow[x * 3 + 1] = s[1];
+            drow[x * 3 + 2] = s[2];
+        }
+    }
+    if (!img_tx_enc_ensure(bw, bh, 88)) {
+        img_tx_note_fail("JPEG 编码器打不开 (省字 patch)");
+        return;
+    }
+    int out_len = 0;
+    if (jpeg_enc_process(g_enc, big, bw * bh * 3, jpg, (size_t)bw * bh * 3 + 4096, &out_len) != JPEG_ERR_OK || out_len <= 0) {
+        img_tx_note_fail("JPEG 编码失败 (省字 patch)");
+        return;
+    }
+    img_tx_send_jpeg(jpg, out_len);
+    img_tx_note_ok(out_len);
+#else
+    (void)zoom;
+#endif
+}
 
 // P5.12: 精简日志 —— roi_locate 定位失败时把原因记在这里, 由 recognize_once 合成一行打印
 static const char *g_roi_note = "(未知原因)";
+static bool g_roi_fallback = false;   // P5.46: 本帧是不是靠"兜底档"(面积够大就收)才挑到框
 static int g_frame_no = 0;
 
 /** 是否是车牌颜色: 蓝/绿车牌的色相窗口 + 饱和度/亮度下限
@@ -821,7 +1152,10 @@ static int g_frame_no = 0;
 static inline bool roi_is_plate_color(int r, int g, int b) {
     const int v = (r > g) ? ((r > b) ? r : b) : ((g > b) ? g : b);
     const int m = (r < g) ? ((r < b) ? r : b) : ((g < b) ? g : b);
-    if (v < 46) return false;                  // V >= 46
+    if (v < ROI_MIN_VALUE) return false;       // P5.49: 亮度下限 46 -> 120 (原来是 V >= 46)
+    // P5.60: 蓝牌先走这条 —— 只有比较和减法, 没有除法也没有色相, 所以既更稳也更快
+    //   (旧判据要算 s = 255*delta/v 和整数色相, 那是"定位 156 ms"里的主要开销)。
+    if ((b - r) > ROI_BLUE_BR_MIN && b > ROI_MIN_VALUE) return true;
     const int delta = v - m;
     if (delta == 0) return false;
     // P5.27 性能: 先做一个"不用除法"的饱和度粗筛。s = 255*delta/v < 35 等价于 255*delta < 35*v,
@@ -839,7 +1173,9 @@ static inline bool roi_is_plate_color(int r, int g, int b) {
     } else {
         deg = 60 * (r - g) / delta + 240;
     }
-    if (deg >= 180 && deg <= 270) return s >= 35;   // 蓝牌 (P5.17: 由 [200,248]+S43 放宽)
+    // P5.60: 蓝牌已经在上面按 (b-r) 判过了, 走到这里说明这个像素"蓝得不明显" —— 不要。
+    //   (旧规则 = 色相 180~270 且 s>=35, 屏摄时会把反光/屏幕泛蓝一起放进来。)
+    if (deg >= 180 && deg <= 270) return false;
     if (deg >= 70 && deg <= 170) return s >= 43;    // 绿牌 (新能源), 未动
     return false;
 }
@@ -961,7 +1297,7 @@ static bool roi_fit_rotated(const uint8_t *cell, const uint8_t *bin, int16_t *pa
     fit->uw = (float)uw;
     fit->vh = (float)vh;
     if (ratio < 1.2 || ratio > 8.0) { fit->why = "旋转长宽比越界 (要 1.2~8.0)"; return false; }
-    if (fill < 0.45) { fit->why = "旋转矩形填充不足 (<45%)"; return false; }   // 散块/被背景撑大 -> 不值得摆正, 让调用方用轴对齐
+    if (fill < ROI_FIT_MIN_FILL) { fit->why = "旋转矩形填充不足 (<35%)"; return false; }   // P5.46: 0.45 -> 0.35; 被反光打散的斜牌也能走摆正路径 (严格档选框时仍按 60% 填充筛)
     // 去边: 与轴对齐分支同一套比例 (左右 1% / 上下 3%), 在 u/v 上就是收缩区间
     const double um0 = umin + uw * ROI_TRIM_X, um1 = umax - uw * ROI_TRIM_X;
     const double vm0 = vmin + vh * ROI_TRIM_Y, vm1 = vmax - vh * ROI_TRIM_Y;
@@ -1179,31 +1515,72 @@ static bool roi_locate(const uint8_t *rgb565be, int w, int h, roi_box_t *box, bo
         }
     }
 
-    // ---- 4) 按根节点归并外接框, 再用原脚本的 score 挑最好的 ----
-    roi_slot_t slots[ROI_MAX_SLOTS];
-    int nslot = 0;
+    // ---- 4) 按根节点归并外接框, 取面积最大的 ROI_MAX_SLOTS 个当候选, 再用原脚本的 score 挑最好的 ----
+    // P5.33: 候选表不再"先到先得", 改成"按连通域面积取前 32 名"。
+    //   背景 (2026-09-30, 27 帧实拍 豫A1890P): 24 帧的连通域数都撞到 32 的上限, 而"车牌色格"里
+    //   一大半是画面各处的零散蓝点 —— 先到先得会把先扫到的小噪点塞满候选表(按扫描顺序, 也就是
+    //   画面左上角优先), 真正的车牌反而进不来, 表现成"有车牌色但没找到合格的矩形"(27 帧里 11 帧)。
+    //   连通域越大越可能是车牌, 所以按面积留前 32 名。
+    //   连通域总数 <= 32 时, 候选集合与排列顺序都和旧实现逐位一致 => 本来就认对的帧不受影响。
+    static int16_t root_ord[ROI_GRID_N];    // 根节点 -> 首次出现的先后 (19200*2B, 大数组放静态区)
+    static int16_t root_area[ROI_GRID_N];   // 根节点 -> 连通域格数
+    int nroot = 0;
+    memset(root_ord, 0xFF, sizeof(root_ord));    // -1 = 这个根还没出现过
+    memset(root_area, 0, sizeof(root_area));
     for (int y = 0; y < ROI_GRID_H; y++) {
         for (int x = 0; x < ROI_GRID_W; x++) {
             const int i = y * ROI_GRID_W + x;
             if (!bin[i]) continue;
             const int root = roi_find_root(parent, i);
-            int s = -1;
-            for (int k = 0; k < nslot; k++) {
-                if (slots[k].root == root) { s = k; break; }
+            if (root_ord[root] < 0) root_ord[root] = (int16_t)nroot++;
+            root_area[root]++;
+        }
+    }
+    int sel_root[ROI_MAX_SLOTS], sel_area[ROI_MAX_SLOTS];
+    int nslot = 0;
+    if (nroot <= ROI_MAX_SLOTS) {
+        for (int r = 0; r < ROI_GRID_N; r++) {          // 全部装得下: 保持旧的"首次出现"顺序
+            if (root_ord[r] < 0) continue;
+            sel_root[root_ord[r]] = r;
+            sel_area[root_ord[r]] = root_area[r];
+        }
+        nslot = nroot;
+    } else {
+        for (int r = 0; r < ROI_GRID_N; r++) {          // 面积降序插入; 满了就把最小的挤出去
+            if (root_ord[r] < 0) continue;
+            const int area = root_area[r];
+            if (nslot >= ROI_MAX_SLOTS && area <= sel_area[nslot - 1]) continue;
+            int p = (nslot < ROI_MAX_SLOTS) ? nslot : ROI_MAX_SLOTS - 1;
+            while (p > 0 && sel_area[p - 1] < area) {
+                sel_area[p] = sel_area[p - 1];
+                sel_root[p] = sel_root[p - 1];
+                p--;
             }
-            if (s < 0) {
-                if (nslot >= ROI_MAX_SLOTS) continue;
-                s = nslot++;
-                slots[s].root = root;
-                slots[s].x1 = slots[s].x2 = x;
-                slots[s].y1 = slots[s].y2 = y;
-                slots[s].area = 0;
-            }
-            if (x < slots[s].x1) slots[s].x1 = x;
-            if (x > slots[s].x2) slots[s].x2 = x;
-            if (y < slots[s].y1) slots[s].y1 = y;
-            if (y > slots[s].y2) slots[s].y2 = y;
-            slots[s].area++;
+            sel_area[p] = area;
+            sel_root[p] = r;
+            if (nslot < ROI_MAX_SLOTS) nslot++;
+        }
+    }
+    roi_slot_t slots[ROI_MAX_SLOTS];
+    memset(root_ord, 0xFF, sizeof(root_ord));           // 复用成 "根 -> 候选下标"
+    for (int k = 0; k < nslot; k++) {
+        root_ord[sel_root[k]] = (int16_t)k;
+        slots[k].root = sel_root[k];
+        slots[k].x1 = ROI_GRID_W; slots[k].y1 = ROI_GRID_H;
+        slots[k].x2 = -1;         slots[k].y2 = -1;
+        slots[k].area = 0;
+    }
+    for (int y = 0; y < ROI_GRID_H; y++) {              // 第二趟: 只算这 nslot 个的外接框
+        for (int x = 0; x < ROI_GRID_W; x++) {
+            const int i = y * ROI_GRID_W + x;
+            if (!bin[i]) continue;
+            const int k = root_ord[roi_find_root(parent, i)];
+            if (k < 0) continue;
+            if (x < slots[k].x1) slots[k].x1 = x;
+            if (x > slots[k].x2) slots[k].x2 = x;
+            if (y < slots[k].y1) slots[k].y1 = y;
+            if (y > slots[k].y2) slots[k].y2 = y;
+            slots[k].area++;
         }
     }
 
@@ -1216,33 +1593,47 @@ static bool roi_locate(const uint8_t *rgb565be, int w, int h, roi_box_t *box, bo
     // 密度 = 连通域格数 / 外接框格数: 真车牌是一整块蓝底(白字挖掉一点), 接近 1; 散块很低。
     float c_ratio[ROI_MAX_SLOTS], c_axis_ratio[ROI_MAX_SLOTS];
     float c_dens[ROI_MAX_SLOTS], c_denseff[ROI_MAX_SLOTS], c_score[ROI_MAX_SLOTS];
-    bool c_ok[ROI_MAX_SLOTS], c_okr[ROI_MAX_SLOTS];
+    float c_area_pct[ROI_MAX_SLOTS];   // P5.56: 每个候选的占屏 %, 兜底档的占屏下限要用它
+    bool c_ok[ROI_MAX_SLOTS], c_okr[ROI_MAX_SLOTS], c_capped[ROI_MAX_SLOTS];   // P5.49: 被占屏上限一刀切掉的
     const char *c_why[ROI_MAX_SLOTS];   // P5.22: 每个候选"为什么通过/被淘汰" (详细模式打出来)
     static roi_fit_t c_fit[ROI_MAX_SLOTS];   // 每个候选的旋转拟合结果 (大数组放静态区)
     for (int k = 0; k < ROI_MAX_SLOTS; k++) {
         c_ratio[k] = c_axis_ratio[k] = c_dens[k] = c_denseff[k] = c_score[k] = 0.0f;
-        c_ok[k] = c_okr[k] = false;
+        c_area_pct[k] = 0.0f;
+        c_ok[k] = c_okr[k] = c_capped[k] = false;
         c_why[k] = "未评估";
         c_fit[k].ok = false;
     }
     for (int k = 0; k < nslot; k++) {
-        if (slots[k].area < min_cells) { c_why[k] = "连通域太小"; continue; }
+        // P5.45: 面积/比例/填充**无条件全算出来** —— 原来"连通域太小"就 continue 了, 这样松档
+        //   拿不到小连通域的比例/填充, 松档等于白设。判定本身仍是下面这三道严格门槛。
         const float bw = (float)(slots[k].x2 - slots[k].x1 + 1);
         const float bh = (float)(slots[k].y2 - slots[k].y1 + 1);
         c_axis_ratio[k] = bw / bh;
         roi_fit_rotated(cell, bin, parent, &slots[k], w, h, &c_fit[k]);
         const float ratio = c_fit[k].ok ? c_fit[k].ratio : c_axis_ratio[k];
         c_ratio[k] = ratio;
+        c_dens[k] = (float)slots[k].area / (bw * bh);
+        // 有效填充率: 摆正得了就用旋转矩形的填充率 (不随倾角掉), 否则退回轴对齐外接框密度
+        c_denseff[k] = c_fit[k].ok ? c_fit[k].fill : c_dens[k];
+        c_score[k] = (float)slots[k].area / (1.0f + fabsf(ratio - ROI_RATIO_IDEAL));
+        // P5.49: 占屏上限。屏幕反光/背景与车牌连成一片时, 连通域会涨到占屏 50%~90%(真车牌本体 <=~32%),
+        //   这时严格档的比例/填充本来就会把它否掉, 但兜底档"只看面积"会把它整个收下 -> 框=一整屏。
+        //   所以在源头一刀切: 超上限的候选, 严格档和兜底档一律不要, 该帧就按"没找到"处理。
+        const float area_pct_k = c_fit[k].ok
+                                 ? (100.0f * c_fit[k].uw * c_fit[k].vh / (float)ROI_GRID_N)
+                                 : (100.0f * bw * bh / (float)ROI_GRID_N);
+        c_area_pct[k] = area_pct_k;   // P5.56: 存下来给兜底档用
+        if (area_pct_k > ROI_MAX_AREA_PCT) { c_capped[k] = true; c_why[k] = "占屏过大(疑似反光/背景连成一片)"; continue; }
+        // P5.58: 占屏下限, 严格档也拦 —— 见 ROI_MIN_AREA_PCT 的说明
+        if (area_pct_k < ROI_MIN_AREA_PCT) { c_why[k] = "占屏太小(不可能是车牌)"; continue; }
+        if (slots[k].area < min_cells) { c_why[k] = "连通域太小"; continue; }
         if (ratio < ROI_RATIO_LO || ratio > ROI_RATIO_HI) {
             // 倾斜的牌照最常死在这一条: 旋转拟合没成功 -> 退回轴对齐外接框 -> 外接框被倾斜撑胖 -> 比例不过
             c_why[k] = c_fit[k].ok ? "旋转宽高比越界" : "宽高比越界(拟合失败, 退回轴对齐)";
             continue;
         }
         c_okr[k] = true;
-        c_dens[k] = (float)slots[k].area / (bw * bh);
-        // 有效填充率: 摆正得了就用旋转矩形的填充率 (不随倾角掉), 否则退回轴对齐外接框密度
-        c_denseff[k] = c_fit[k].ok ? c_fit[k].fill : c_dens[k];
-        c_score[k] = (float)slots[k].area / (1.0f + fabsf(ratio - ROI_RATIO_IDEAL));
         if (c_denseff[k] < ROI_MIN_FILL) { dens_rej++; c_why[k] = "有效填充不足"; continue; }   // 太稀 => 不是车牌, 宁可不猜
         c_ok[k] = true;
         c_why[k] = "通过";
@@ -1271,16 +1662,44 @@ static bool roi_locate(const uint8_t *rgb565be, int w, int h, roi_box_t *box, bo
                          c_axis_ratio[k], c_dens[k] * 100.0f, c_score[k], c_why[k]);
             }
         }
-        ESP_LOGI(TAG, "候选小结: 列出 %d 个 / 连通域共 %d 个; 门槛 = 面积>=%d格 比例%.1f~%.1f 有效填充>=%.0f%%",
-                 shown, nslot, min_cells, ROI_RATIO_LO, ROI_RATIO_HI, ROI_MIN_FILL * 100.0f);
+        ESP_LOGI(TAG, "候选小结: 列出 %d 个 / 候选表 %d 个 (全画面车牌色连通域 %d 个%s); 门槛 = 面积>=%d格 比例%.1f~%.1f 有效填充>=%.0f%%",
+                 shown, nslot, nroot, (nroot > ROI_MAX_SLOTS) ? ", 已按面积挤掉更小的" : "",
+                 min_cells, ROI_RATIO_LO, ROI_RATIO_HI, ROI_MIN_FILL * 100.0f);
     }
     int best_k = -1;
     for (int k = 0; k < nslot; k++) {
         if (!c_ok[k]) continue;
         if (best_k < 0 || c_score[k] > c_score[best_k]) best_k = k;
     }
+    // ---- P5.46: 严格档一个合格候选都没有 -> 兜底档: 面积够大就收, 比例/填充一概不看 ----
+    //   为什么: 屏幕反光把蓝底打散后, 连通域不是"车牌形状", 严格档的比例/填充会把它一起否掉,
+    //   而它确实是车牌。形状当不了裁判 —— 改由模型 + 车牌语法当裁判 (见 recognize_once 的结果闸门)。
+    bool fallback_pass = false;
+    if (best_k < 0) {
+        float best2 = -1.0f;
+        int fb_too_small = 0;
+        for (int k = 0; k < nslot; k++) {
+            if (slots[k].area < min_cells) continue;   // 只留"面积够大"这一条底线(与严格档同数), 不放开小碎点
+            if (c_capped[k]) continue;                 // P5.49: 占屏过大的一律不收 —— 否则"兜底"会把整屏背景收下来
+            if (c_area_pct[k] < ROI_MIN_AREA_PCT) { fb_too_small++; continue; }   // P5.56: 占屏太小也不收
+            if (c_score[k] > best2) { best2 = c_score[k]; best_k = k; }
+        }
+        if (best_k < 0 && fb_too_small > 0) {
+            ESP_LOGW(TAG, "兜底档也放弃: %d 个候选占屏 < %.1f%% (太小, 认不准, 宁可不报)", fb_too_small, ROI_MIN_AREA_PCT);
+        }
+        fallback_pass = (best_k >= 0);
+        if (fallback_pass) {
+            ESP_LOGW(TAG, "严格门槛挑不出候选 -> 兜底收下 候选%d (色格%d 比例%.2f 填充%.0f%%; 形状不看) [兜底]",
+                     best_k, slots[best_k].area, c_ratio[best_k], c_denseff[best_k] * 100.0f);
+        }
+    }
+    g_roi_fallback = fallback_pass;
+    if (verbose && fallback_pass) {
+        ESP_LOGW(TAG, "本帧走兜底档: 面积>=%d格 且 占屏>=%.1f%%, 比例/填充**不看** (严格档是 比例%.1f~%.1f 填充>=%.0f%%)",
+                 min_cells, ROI_MIN_AREA_PCT, ROI_RATIO_LO, ROI_RATIO_HI, ROI_MIN_FILL * 100.0f);
+    }
     // P5.24: 最佳与第二名的得分差距 —— 差距很小说明"这一帧选得勉强", 一旦选错, 后面再准也没用。
-    if (verbose && best_k >= 0) {
+    if (verbose && best_k >= 0 && !fallback_pass) {   // P5.45: 走松档时不比第二名(c_ok 全是 false, 比了会误报)
         int k2 = -1;
         for (int k = 0; k < nslot; k++) {
             if (!c_ok[k] || k == best_k) continue;
@@ -1301,7 +1720,30 @@ static bool roi_locate(const uint8_t *rgb565be, int w, int h, roi_box_t *box, bo
                  ROI_MIN_FILL * 100.0f, dens_rej);
     }
     if (best_k < 0) {
-        g_roi_note = "有车牌色, 但没有一块像车牌的长方形 —— 太小 / 太斜 / 被反光洗白";
+        // P5.45: 把"最接近门槛的那个候选"直接写进跳过原因 —— 差在面积、比例还是填充, 一行就看见,
+        //   下次调门槛不用再翻候选表 (实测这一列才是"要不要再放松"的唯一依据)。
+        int miss_k = -1;
+        int capped_n = 0;   // P5.49: 被占屏上限切掉的块数 (只用于日志)
+        for (int k = 0; k < nslot; k++) {
+            if (c_ok[k]) continue;
+            if (c_capped[k]) { capped_n++; continue; }   // P5.49: 被占屏上限切掉的不算"最接近"
+            if (miss_k < 0 || slots[k].area > slots[miss_k].area) miss_k = k;
+        }
+        static char miss_note[256];
+        if (miss_k < 0 && capped_n > 0) {
+            // P5.49: 有车牌色、也有连通域, 只是每一块都太大 —— 和"太散"是两回事, 必须分开报
+            snprintf(miss_note, sizeof(miss_note),
+                     "有车牌色, 但每一块都太大(占屏 >%.0f%%) —— 像是反光/背景与车牌连成一片: %d 块被占屏上限切掉",
+                     ROI_MAX_AREA_PCT, capped_n);
+        } else if (miss_k < 0) {
+            snprintf(miss_note, sizeof(miss_note), "有车牌色, 但一个车牌色连通域都没有 —— 太散 (车牌色格 %d 个)", color_cells);
+        } else {
+            snprintf(miss_note, sizeof(miss_note),
+                     "有车牌色, 但没有一块像车牌的长方形 —— 最接近的候选: 色格%d 比例%.2f 填充%.0f%% | 淘汰于[%s] | 门槛 色格>=%d 比例%.1f~%.1f 填充>=%.0f%%",
+                     slots[miss_k].area, c_ratio[miss_k], c_denseff[miss_k] * 100.0f, c_why[miss_k],
+                     min_cells, ROI_RATIO_LO, ROI_RATIO_HI, ROI_MIN_FILL * 100.0f);
+        }
+        g_roi_note = miss_note;
         if (verbose) {
             ESP_LOGW(TAG, "有车牌色但没找到合格的矩形 (车牌色格数 %d/%d, 其中填充不足淘汰 %d 个) —— 可能太小/倾斜, 或蓝色被反光洗白",
                      color_cells, ROI_GRID_N, dens_rej);
@@ -1310,34 +1752,55 @@ static bool roi_locate(const uint8_t *rgb565be, int w, int h, roi_box_t *box, bo
         return false;
     }
 
-    // ---- 4.5) 贴到画面边缘的框一律拒绝 ----
-    // 连通域顶到画面边界 => 车牌有一截在画面外, 裁出来的图必然缺字。
-    // 实测 (2026-09-28 连续模式 105 轮): 贴边的 25 轮里只有 1 轮侥幸读对, 其余全是乱码;
-    // 同样大小/比例但不贴边的那些轮次大部分能读对。所以宁可"不出结果", 也不要沉默地出乱码。
+    // ---- 4.5) 贴到画面边缘的框 (P5.48) ----
+    // 历史: P5.30~P5.46 = "贴边一律拒绝" (实测 2026-09-28: 贴边的 25 轮里只有 1 轮读对);
+    //       P5.47 = "先换一个不贴边的替补, 没有才拒绝"。
+    // P5.48 从现场日志 (2026-10-01 白天, 屏幕反光) 拿到两条新证据:
+    //   1) 得分最高的候选贴边, 是因为**车牌和反光/背景连成了一片**, 不是车牌真出画面;
+    //      P5.47 的替补往往更烂 (实测换成 色格300 比例15.86 的一条细缝), 换了更糟。
+    //   2) 唯一读对的两帧 (#133 542x212 占屏38.6% / #140) 都是"框比车牌大一圈"也照样读对,
+    //      说明模型吃得下带背景的框。
+    // 所以: **兜底档贴边照用** (形状本来就不看), 结果交给"结果闸门"判;
+    //       严格档(形状像车牌)贴边仍旧"先换替补, 没有才拒绝" —— 那种才是真被画面切了。
     {
-        const roi_slot_t *bs = &slots[best_k];
-        const bool clip_l = (bs->x1 == 0);
-        const bool clip_r = ((bs->x2 + 1) * ROI_GRID_STEP >= w);
-        const bool clip_t = (bs->y1 == 0);
-        const bool clip_b = ((bs->y2 + 1) * ROI_GRID_STEP >= h);
-        if (clip_l || clip_r || clip_t || clip_b) {
+        const bool touch_l = (slots[best_k].x1 == 0);
+        const bool touch_r = ((slots[best_k].x2 + 1) * ROI_GRID_STEP >= w);
+        const bool touch_t = (slots[best_k].y1 == 0);
+        const bool touch_b = ((slots[best_k].y2 + 1) * ROI_GRID_STEP >= h);
+        if (touch_l || touch_r || touch_t || touch_b) {
             char edges[16] = "";
-            if (clip_l) strcat(edges, "左");
-            if (clip_r) strcat(edges, "右");
-            if (clip_t) strcat(edges, "上");
-            if (clip_b) strcat(edges, "下");
-            static char note[192];   // 中文按字节算, 80 字节不够 (GCC format-truncation 会直接报错)
-            snprintf(note, sizeof(note), "车牌贴到画面%s边缘被切掉了 —— 把它完整移进画面, 四周留一成余量", edges);
-            g_roi_note = note;
-            if (verbose) {
-                ESP_LOGW(TAG, "选中的框贴到画面%s边缘 (x[%d,%d) y[%d,%d) 比例 %.2f 有效填充 %.0f%%) -> 车牌被画面切掉, 拒绝出结果",
-                         edges, bs->x1 * ROI_GRID_STEP, (bs->x2 + 1) * ROI_GRID_STEP,
-                         bs->y1 * ROI_GRID_STEP, (bs->y2 + 1) * ROI_GRID_STEP,
-                         c_ratio[best_k], c_denseff[best_k] * 100.0f);
-                static int edge_mask_left = 5;   // 掩码很贵, 只在前几次拒绝时打
-                if (edge_mask_left > 0) { edge_mask_left--; roi_dump_mask(cell, ROI_CELL_NEED, nullptr); }
+            if (touch_l) strcat(edges, "左");
+            if (touch_r) strcat(edges, "右");
+            if (touch_t) strcat(edges, "上");
+            if (touch_b) strcat(edges, "下");
+            if (fallback_pass) {
+                ESP_LOGW(TAG, "兜底档: 候选贴到画面%s边缘也照用 (形似反光/背景与车牌连成一片; 老固件会整帧丢掉) —— 结果交给闸门判",
+                         edges);
+            } else {
+                int alt = -1;
+                float alt_score = -1.0f;
+                for (int k = 0; k < nslot; k++) {
+                    if (k == best_k) continue;
+                    if (!c_ok[k]) continue;   // 严格档的替补必须也是"形状像车牌"的合格候选
+                    if (slots[k].x1 == 0) continue;
+                    if ((slots[k].x2 + 1) * ROI_GRID_STEP >= w) continue;
+                    if (slots[k].y1 == 0) continue;
+                    if ((slots[k].y2 + 1) * ROI_GRID_STEP >= h) continue;
+                    if (c_score[k] > alt_score) { alt_score = c_score[k]; alt = k; }
+                }
+                if (alt >= 0) {
+                    ESP_LOGW(TAG, "选中的候选%d 贴到画面边缘 -> 改选不贴边的候选%d (色格%d 比例%.2f 填充%.0f%%)",
+                             best_k, alt, slots[alt].area, c_ratio[alt], c_denseff[alt] * 100.0f);
+                    best_k = alt;
+                } else {
+                    // P5.60: 原来这里是"整帧丢掉, 让用户把车牌移进画面"。
+                    //   依据 (171 张原始帧复算): 判据修好之后, 贴边的那 9 帧里有 6 帧其实是**对的** ——
+                    //   整帧丢掉是纯亏, 而且现场没法次次都把牌摆在画面中间。
+                    //   真被画面切掉一半的那种, 后面的结果闸门(7~8 位 + 省字开头)仍会把乱码挡掉。
+                    ESP_LOGW(TAG, "选中的框贴到画面%s边缘, 没有不贴边的替补 -> 照用 (老固件在这里整帧丢掉; 结果交给闸门判)",
+                             edges);
+                }
             }
-            return false;
         }
     }
 
@@ -1498,6 +1961,9 @@ static void sample_rgb565_bilinear(const uint8_t *frame, int w, int h, float fx,
 #define ROI_VTRIM_UN 9          // 每行沿 u 取 9 点
 #define ROI_VTRIM_MAX 0.25f     // 单端最多收 25%; 超过就认为"边界找错了", 这一端不收
 #define ROI_VTRIM_MIN_KEEP 0.60f// 两端收完至少留 60% 高度, 否则整块不收
+// P5.61: 这里原来还有 `ROI_UTRIM_LEFT_MAX` / `ROI_UTRIM_BAND_MIN` 两个常数, 配合同期的 roi_probe_utrim()
+//   做"长边收边"(只收左端)。**已整段删除** —— 复算证明它 0 帧有帮助、52 帧帮倒忙(切省字),
+//   根因见文档第四十五节。下面保留的只有"短边收边"(P5.9 起的 ROI_VTRIM_*), 那个是有效的。
 
 // P5.10 裁剪块光度归一化 —— 在量化成 int8 之前, 把"屏摄/欠曝导致的发白"拉回来。
 // 为什么需要: 百度 OCR 拿到的是整张原始 JPEG, 端侧模型拿到的是我们裁出来的 94x24 int8 小块,
@@ -1515,6 +1981,17 @@ static void sample_rgb565_bilinear(const uint8_t *frame, int w, int h, float fx,
 #define CROP_NORM_TARGET_SPREAD 200.0f   // 期望亮度跨度(p95-p5); 越大拉得越狠
 #define CROP_NORM_S_MAX 3.0f             // 放大倍数上限
 #define CROP_NORM_MIN_SPREAD 12          // 跨度小于它就别动(纯色块/噪声, 拉它没意义)
+
+// P5.60: 真正施加的增强 —— 整数饱和度倍数, 定点 8 位小数 (512 = x2.00)。
+//   为什么把 P5.10 的"按亮度跨度拉伸"换掉 (2026-10-01, 用户新拍 171 张原始帧, 端到端复算):
+//     原图裁(什么都不加)      93/171 (54%)
+//     + 跨度拉伸(P5.10 做法)   80/171 (47%)   <- 在这批本身就拍得不差的屏摄图上, 它会拉过头
+//     + 饱和度 x2.0           114/171 (67%)  <- 现在这个
+//   标定: k 在 1.4~2.6 之间是平台(63%~67%), 取 2.0 居中, 不敏感。
+//   位置: 在"缩放到 94x24 之后"做。离线验证过它与"整帧先增强再裁"结果完全一致(都是 114/171),
+//     但整帧是 30 万像素、这里只有 2256 像素 —— 便宜一百倍以上, 所以不做整帧那一趟。
+#define CROP_SAT_K256 512
+#define CROP_SAT_GAIN ((float)CROP_SAT_K256 / 256.0f)
 
 static uint8_t g_crop_rgb[IMG_W * IMG_H * 3];   // 裁剪块(摆正+面积平均后)暂存: B G R 交错
 static int g_luma_hist[256];
@@ -1565,14 +2042,17 @@ static void crop_photometric_norm(int8_t *dst, const int8_t *lut, float *out_s) 
     const float mb = (float)sb / (float)NP, mg = (float)sg / (float)NP, mr = (float)sr / (float)NP;
     for (int i = 0; i < NP; i++) {
         int b = g_crop_rgb[i * 3 + 0], g = g_crop_rgb[i * 3 + 1], r = g_crop_rgb[i * 3 + 2];
-        if (s > 1.0f) {
-            b = (int)(mb + (float)(b - (int)mb) * s + ((b > mb) ? 0.5f : -0.5f));
-            g = (int)(mg + (float)(g - (int)mg) * s + ((g > mg) ? 0.5f : -0.5f));
-            r = (int)(mr + (float)(r - (int)mr) * s + ((r > mr) ? 0.5f : -0.5f));
-            if (b < 0) b = 0; else if (b > 255) b = 255;
-            if (g < 0) g = 0; else if (g > 255) g = 255;
-            if (r < 0) r = 0; else if (r > 255) r = 255;
-        }
+        // P5.60: 整数饱和度增强 —— 以"最亮通道"为原点, 把另外两个通道往外推, 色相不动:
+        //     v = max(b,g,r);   out_c = v + ((c - v) * CROP_SAT_K256 >> 8)
+        //   只有 3 次乘加 + 算术右移 + clamp, 没有除法/浮点/分支, 也不再需要三通道均值。
+        //   (右移对负数是"向 -inf 取整", 与这里 int 的语义一致, 不需要额外补偿。)
+        const int v = (b > g) ? ((b > r) ? b : r) : ((g > r) ? g : r);
+        b = v + (((b - v) * CROP_SAT_K256) >> 8);
+        g = v + (((g - v) * CROP_SAT_K256) >> 8);
+        r = v + (((r - v) * CROP_SAT_K256) >> 8);
+        if (b < 0) b = 0; else if (b > 255) b = 255;
+        if (g < 0) g = 0; else if (g > 255) g = 255;
+        if (r < 0) r = 0; else if (r > 255) r = 255;
         int8_t *o = dst + (size_t)i * 3;
         o[0] = lut[b];
         o[1] = lut[256 + g];
@@ -1626,15 +2106,20 @@ static void quad_eval(const float *qx, const float *qy, float u, float v, float 
 
 static void sample_quad_to_input(const uint8_t *frame, int w, int h,
                                  const float *qx, const float *qy,
+                                 float u_lo, float u_hi,      // P5.61: 固定 [0,1] (长边收边已删, 形参保留)
                                  float v_lo, float v_hi,      // P5.9: 短边方向的取样区间 (收边后)
                                  int8_t *dst, const int8_t *lut,
                                  int *out_nx, int *out_ny, float *out_norm_s) {
-    // P5.13: u/v 都往外多取 ROI_CROP_PAD —— quad_eval 是双线性外插, 等于把四边形按同心放大
+    // P5.13/P5.32: u/v 都往外多取一点留白 —— quad_eval 是双线性外插, 等于把四边形按同心放大。
+    // P5.32: 长边两端可以不一样; P5.40 起左右都由 g_pad_u_l / g_pad_u_r 运行时可切(见 k_pad_profiles)。
+    // P5.61: u 恒为 [0,1] (长边收边已删), 所以 span_u_raw 恒为 1。
     const float span_v = v_hi - v_lo;
-    const float u_base = -ROI_CROP_PAD;
-    const float v_base = v_lo - ROI_CROP_PAD * span_v;
-    const float du = (1.0f + 2.0f * ROI_CROP_PAD) / (float)IMG_W;
-    const float dv = (span_v * (1.0f + 2.0f * ROI_CROP_PAD)) / (float)IMG_H;
+    const float span_u_raw = u_hi - u_lo;
+    const float span_u = span_u_raw * (1.0f + g_pad_u_l + g_pad_u_r);
+    const float u_base = u_lo - g_pad_u_l * span_u_raw;
+    const float v_base = v_lo - ROI_PAD_V * span_v;
+    const float du = span_u / (float)IMG_W;
+    const float dv = (span_v * (1.0f + 2.0f * ROI_PAD_V)) / (float)IMG_H;
     int sum_nx = 0, sum_ny = 0, ncell = 0;
     for (int y = 0; y < IMG_H; y++) {
         const float v0 = v_base + (float)y * dv;
@@ -1647,10 +2132,12 @@ static void sample_quad_to_input(const uint8_t *frame, int w, int h,
             quad_eval(qx, qy, u0, v0 + dv, &cx, &cy);       // 左下角
             const float ex = bx - ax, ey = by - ay;         // 宽向矢量(单位: 源像素)
             const float fx = cx - ax, fy = cy - ay;         // 高向矢量(单位: 源像素)
-            // P5.13: 采样区间外扩了, 每个输出像素覆盖的源面积也等比变大, 不补这一下就欠采样(走样)
-            const float scale_pad = 1.0f + 2.0f * ROI_CROP_PAD;
-            const float len_x = sqrtf(ex * ex + ey * ey) * scale_pad;   // = 一个输出像素覆盖多少个源像素
-            const float len_y = sqrtf(fx * fx + fy * fy) * scale_pad;
+            // P5.13: 采样区间外扩了, 每个输出像素覆盖的源面积也等比变大, 不补这一下就欠采样(走样).
+            // P5.32: 长边两端的留白不再对称, 所以两个方向的倍率也要分开算。
+            const float scale_pad_u = span_u;
+            const float scale_pad_v = 1.0f + 2.0f * ROI_PAD_V;
+            const float len_x = sqrtf(ex * ex + ey * ey) * scale_pad_u;   // = 一个输出像素覆盖多少个源像素
+            const float len_y = sqrtf(fx * fx + fy * fy) * scale_pad_v;
             int nx = (int)(len_x + 0.5f);
             int ny = (int)(len_y + 0.5f);
             if (nx < 1) nx = 1; else if (nx > SS_MAX) nx = SS_MAX;
@@ -1685,6 +2172,104 @@ static void sample_quad_to_input(const uint8_t *frame, int w, int h,
     if (out_ny) *out_ny = ncell > 0 ? (sum_ny + ncell / 2) / ncell : 1;
     crop_photometric_norm(dst, lut, out_norm_s);   // P5.10: 对比度/饱和度归一化 -> int8
 }
+
+/**
+ * P5.67: 找"省字窗口该从哪开始" —— 沿车牌中线扫出蓝面真正的左边缘, 返回它的 u 值。
+ *   为什么不信框的 u=0 边: 兜底框的左边缘可能把一圈背景(反光/泛蓝)一起框进来, 于是整扇省字窗被右推;
+ *   PC 归因实验里"窗右推 20%~40% 个窗宽"正是唯一能把省字置信从中位 94% 打到 39% 的劣化。
+ *   三条中线各扫一遍取中位数 —— 省字笔画密, 单条线可能整条压在白字上扫不到车牌色。
+ *   返回 < 0 = 三条线都没扫到车牌色 (调用方退回老做法 u=0)。
+ */
+static float prov_find_u_left(const uint8_t *frame, int w, int h, const float *qx, const float *qy) {
+    float uu[3] = {0.0f, 0.0f, 0.0f};
+    int n = 0;
+    for (int k = 0; k < 3; k++) {
+        const float v = 0.30f + 0.20f * (float)k;      // 三条中线: v = 0.30 / 0.50 / 0.70
+        for (int i = 0; i <= PROV_SCAN_N; i++) {
+            const float u = (float)i / (float)PROV_SCAN_N * PROV_SCAN_UMax;
+            float sx, sy;
+            quad_eval(qx, qy, u, v, &sx, &sy);
+            int b, g, r;
+            sample_rgb565_bilinear(frame, w, h, sx, sy, &b, &g, &r);
+            if (roi_is_plate_color(r, g, b)) { uu[n++] = u; break; }
+        }
+    }
+    if (n == 0) return -1.0f;
+    if (n == 1) return uu[0];
+    if (n == 2) return 0.5f * (uu[0] + uu[1]);
+    if (uu[1] < uu[0]) { const float t = uu[0]; uu[0] = uu[1]; uu[1] = t; }
+    if (uu[2] < uu[0]) { const float t = uu[0]; uu[0] = uu[2]; uu[2] = t; }
+    if (uu[2] < uu[1]) { const float t = uu[1]; uu[1] = uu[2]; uu[2] = t; }
+    return uu[1];                                       // 三个数取中位数
+}
+/**
+ * P5.66: 从车牌四边形里抠出「省字那一格」-> 32x64 的省字模型输入 (RGB 序, 用省字 LUT 量化)。
+ *   u 方向取 [0, 1/7.35] —— 省字在整牌长边方向占的那一段 (与训练/PC 复算逐参数一致);
+ *   v 方向取满 [0,1] —— 省字高度就是车牌高度;
+ *   每个输出像素按它在源图上的足迹做 nx*ny 次双线性取样再平均 (同 sample_quad_to_input, 不这样会欠采样走样);
+ *   **不经过 crop_photometric_norm** —— 那个饱和度 x2 是给 94x24 主模型调出来的, 省字模型的
+ *   训练素材是原色, 加进去就是域不匹配.
+ */
+static void sample_prov_to_input(const uint8_t *frame, int w, int h,
+                                 const float *qx, const float *qy, float u_base,
+                                 int8_t *dst, const int8_t *lut) {
+    const float du = PROV_U_SPAN / (float)PROV_W;
+    const float dv = 1.0f / (float)PROV_H;
+    for (int y = 0; y < PROV_H; y++) {
+        const float v0 = (float)y * dv;
+        for (int x = 0; x < PROV_W; x++) {
+            // P5.67: u_base = 这扇窗口的左边界 (由蓝面锚点/候选决定), 老做法就是 0
+            const float u0 = u_base + (float)x * du;
+            float ax, ay, bx, by, cx, cy;
+            quad_eval(qx, qy, u0, v0, &ax, &ay);
+            quad_eval(qx, qy, u0 + du, v0, &bx, &by);
+            quad_eval(qx, qy, u0, v0 + dv, &cx, &cy);
+            const float ex = bx - ax, ey = by - ay;
+            const float fx = cx - ax, fy = cy - ay;
+            int nx = (int)(sqrtf(ex * ex + ey * ey) + 0.5f);
+            int ny = (int)(sqrtf(fx * fx + fy * fy) + 0.5f);
+            if (nx < 1) nx = 1; else if (nx > SS_MAX) nx = SS_MAX;
+            if (ny < 1) ny = 1; else if (ny > SS_MAX) ny = SS_MAX;
+            float acc[3] = {0, 0, 0};
+            for (int j = 0; j < ny; j++) {
+                const float vv = v0 + (j + 0.5f) * dv / (float)ny;
+                for (int i = 0; i < nx; i++) {
+                    const float uu = u0 + (i + 0.5f) * du / (float)nx;
+                    float sx, sy;
+                    quad_eval(qx, qy, uu, vv, &sx, &sy);
+                    int b, g, r;
+                    sample_rgb565_bilinear(frame, w, h, sx, sy, &b, &g, &r);
+                    acc[0] += (float)b; acc[1] += (float)g; acc[2] += (float)r;
+                }
+            }
+            const float inv = 1.0f / (float)(nx * ny);
+            int bb = (int)(acc[0] * inv + 0.5f);
+            int gg = (int)(acc[1] * inv + 0.5f);
+            int rr = (int)(acc[2] * inv + 0.5f);
+            if (bb > 255) bb = 255; else if (bb < 0) bb = 0;
+            if (gg > 255) gg = 255; else if (gg < 0) gg = 0;
+            if (rr > 255) rr = 255; else if (rr < 0) rr = 0;
+            // P5.67: 顺手把这块 patch 的原色抄一份 —— 详细模式(或复核没过门槛时)会把它发回串口
+            if (g_prov_rgb != nullptr) {
+                uint8_t *pd = g_prov_rgb + ((size_t)y * PROV_W + x) * 3;
+                pd[0] = (uint8_t)rr;
+                pd[1] = (uint8_t)gg;
+                pd[2] = (uint8_t)bb;
+            }
+            // 通道序 R,G,B —— 与训练时的 im[:,:,::-1] (BGR->RGB) 一致; 三个通道的 LUT 相同
+            int8_t *o = dst + ((size_t)y * PROV_W + x) * 3;
+            o[0] = lut[rr];
+            o[1] = lut[gg];
+            o[2] = lut[bb];
+        }
+    }
+}
+
+// P5.66: 省字复核模型句柄 (app_main 里建; g_prov_model == nullptr 表示没启用, 整条支路跳过)
+static dl::Model *g_prov_model = nullptr;
+static dl::TensorBase *g_prov_input = nullptr;
+static dl::TensorBase *g_prov_out = nullptr;   // float 反量化输出 [1,31]
+static int8_t *g_prov_lut = nullptr;
 
 /**
  * P5.6: 沿"选中的四边形"自己的高/宽方向, 量一遍车牌色覆盖率 —— 用来回答"框到底套得准不准"。
@@ -1784,6 +2369,10 @@ static void roi_trim_short_axis(const uint8_t *fbuf, int w, int h, const float *
     *v_hi = hi;
 }
 
+// P5.61: 这里原来是 roi_probe_utrim() —— 沿长边(u)方向量"蓝色带"并把取样框左端收窄。
+//   **整个函数已删除**: 复算证明它把省字切掉(收左端 44% vs 不收 75%, 且 0 帧有帮助)。
+//   现在取样框就是定位框原样 + g_pad_u_l/g_pad_u_r 留白。详见文档第四十五节。
+
 /**
  * 一次完整识别: 取帧 -> 预处理 -> 推理 -> 解码 -> 串口打印
  * 返回 true 表示这一次真的跑完了推理
@@ -1853,11 +2442,12 @@ static bool recognize_once(dl::Model *model,
                                 dl::image::DL_IMAGE_PIX_TYPE_RGB888_QINT8};
         const uint32_t caps = DL_IMAGE_CAP_RGB565_BIG_ENDIAN | DL_IMAGE_CAP_RGB_SWAP;
         // crop_area 语义 = {x1, y1, x2, y2}: 一次完成 裁剪 + 双线性缩放 + 通道序 + 归一化量化
-        // P5.13: 与旋转路径一致, 轴对齐回退也要外扩留白(并夹回画面内)
-        const int padx = (int)((float)(box.x2 - box.x1) * ROI_CROP_PAD);
-        const int pady = (int)((float)(box.y2 - box.y1) * ROI_CROP_PAD);
-        int ax1 = box.x1 - padx, ay1 = box.y1 - pady;
-        int ax2 = box.x2 + padx, ay2 = box.y2 + pady;
+        // P5.13/P5.32: 与旋转路径一致, 轴对齐回退也要外扩留白(并夹回画面内); 长边两端同样不对称。
+        const int padl = (int)((float)(box.x2 - box.x1) * g_pad_u_l);
+        const int padr = (int)((float)(box.x2 - box.x1) * g_pad_u_r);
+        const int pady = (int)((float)(box.y2 - box.y1) * ROI_PAD_V);
+        int ax1 = box.x1 - padl, ay1 = box.y1 - pady;
+        int ax2 = box.x2 + padr, ay2 = box.y2 + pady;
         if (ax1 < 0) ax1 = 0;
         if (ay1 < 0) ay1 = 0;
         if (ax2 > (int)fb->width) ax2 = (int)fb->width;
@@ -1881,7 +2471,7 @@ static bool recognize_once(dl::Model *model,
                          box.qx[2], box.qy[2], box.qx[3], box.qy[3]);
             }
             sample_quad_to_input(fb->buf, (int)fb->width, (int)fb->height, box.qx, box.qy,
-                                 v_lo, v_hi,
+                                 0.0f, 1.0f, v_lo, v_hi,
                                  (int8_t *)model_input->data, norm_lut, &ss_nx, &ss_ny, &norm_s);
         } else {
             if (verbose) ESP_LOGW(TAG, "旋转拟合不可用 -> 退回轴对齐裁剪 (框宽高比 %.2f)", box.ratio);
@@ -1934,6 +2524,8 @@ static bool recognize_once(dl::Model *model,
                      scale_x, scale_y);
             log_input_stats(model_input);
             if (box.rot_ok) {   // P5.6: 把"框套得准不准"量出来
+                roi_probe_dominant_blue(fb->buf, (int)fb->width, (int)fb->height, &box);   // P5.29: 只打日志
+
                 roi_probe_profile(fb->buf, (int)fb->width, (int)fb->height, box.qx, box.qy, v_lo, v_hi);
             }
         }
@@ -1946,23 +2538,42 @@ static bool recognize_once(dl::Model *model,
         output_float->assign(model->get_outputs().begin()->second);
         decode_report_t rep;   // P5.24: 顺带算出每一步的置信度 (不改变解码结果)
         std::string plate = greedy_decode_impl((const float *)output_float->data, &rep);
-
-        // P5.13: 蓝牌永远是 7 位(省 + 字母 + 5 位)。外扩 8% 之后, 偶尔会从画面外沿的暗边上
+        // P5.13: 蓝牌永远是 7 位(省 + 字母 + 5 位)。外扩之后偶尔会从画面外沿的暗边上
         //   再"读"出一个字母挂在尾巴上 (实测 京Q06666 -> 京Q06666L / 京Q06666U, 21 帧里 12 帧)。
         //   蓝底时(裁剪块 B > G)把多出来的那个尾字符削掉; 绿牌是 8 位, 不动。
-        //   10 字节 = 1 个汉字(3) + 7 个 ASCII, 正好是"多了一位"的情形。
-        if (plate.size() == 10 && cm_b > cm_g) {
-            if (verbose) ESP_LOGW(TAG, "语法修正: %s -> 去掉尾巴上多出的一位 (蓝牌应为 7 位)", plate.c_str());
-            plate.pop_back();
+        //
+        // P5.38: 原来这里判的是"字节数 == 10" —— 会误伤: 两个汉字 + 4 个 ASCII 也是 10 字节。
+        //   现场 (2026-09-30 日志) 就撞上了: 豫FS8鄂8 -> 削成 豫FS8鄂, FSS鄂S -> 削成 FSS鄂,
+        //   43 帧里 5 帧被这么砍成 5 个字, 越修越离谱。现在改成**按字符数**判:
+        //   只有"1 个汉字 + 7 个 ASCII"(共 8 个字) 才认定是尾巴上多读了一个 ASCII, 削掉它。
+        {
+            int n_cjk = 0, n_ascii = 0;
+            for (size_t i = 0; i < plate.size();) {
+                const unsigned char c = (unsigned char)plate[i];
+                if (c < 0x80) { n_ascii++; i += 1; }
+                else if ((c & 0xE0) == 0xC0) { n_cjk++; i += 2; }
+                else if ((c & 0xF0) == 0xE0) { n_cjk++; i += 3; }
+                else { n_cjk++; i += 4; }
+            }
+            if (n_cjk == 1 && n_ascii == 7 && cm_b > cm_g) {
+                if (verbose) ESP_LOGW(TAG, "语法修正: %s -> 去掉尾巴上多出的一位 (蓝牌应为 7 位)", plate.c_str());
+                plate.pop_back();          // 多出来的那一字节必在末尾, 削 1 字节 = 削 1 个 ASCII 字符
+            }
         }
 
         // P5.5: 把"这块牌实际被多少个源像素平均出来"打出来 —— 采样数 <1 说明牌太小(信息本就不够),
         // 而不是模型不行; 这个数字和 RESULT 一起看, 才能分清"欠采样"和"认字不行"。
         // P5.12: 连续模式把一帧压成"一行指标 + 一行结果"; 其余诊断只在按 BOOT 时打
+        // P5.46: [兜底] 标记 —— 这一帧是靠"面积够大就收"的兜底档挑到框的 (正常帧不会出现)
+        char rlx[48] = "";
+        if (!box.rot_ok) strcat(rlx, " 轴对齐");
+        if (g_roi_fallback) strcat(rlx, " [兜底]");
         if (ss_nx > 0) {
-            ESP_LOGI(TAG, "#%d ROI %dx%d 占屏%.1f%%%s 收边[%.0f%%,%.0f%%] | 定位%lld 预处理%lld 推理%lld ms | 平均%dx%d 归一x%.2f | B%d G%d R%d",
+            // P5.61: 这里原来还打 [蓝带[左%~右%] 多吃[左%,右%]] —— 它是"长边收边"的量尺,
+            //   收边删掉之后这个字段没有任何消费者, 一并去掉 (顺便省掉每帧 24x9 次采样)。
+            ESP_LOGI(TAG, "#%d ROI %dx%d 占屏%.1f%%%s 上下[%.0f%%,%.0f%%] | 定位%lld 预处理%lld 推理%lld ms | 平均%dx%d 归一x%.2f | B%d G%d R%d",
                      fn, box.x2 - box.x1, box.y2 - box.y1, box.area_pct,
-                     box.rot_ok ? "" : " 轴对齐",
+                     rlx,
                      v_lo * 100.0f, v_hi * 100.0f,
                      (long long)roi_ms, (long long)pre_ms, (long long)inf_ms,
                      ss_nx, ss_ny, norm_s, cm_b, cm_g, cm_r);
@@ -1970,16 +2581,144 @@ static bool recognize_once(dl::Model *model,
         } else {
             ESP_LOGI(TAG, "#%d ROI %dx%d 占屏%.1f%%%s | 定位%lld 预处理%lld 推理%lld ms",
                      fn, box.x2 - box.x1, box.y2 - box.y1, box.area_pct,
-                     box.rot_ok ? "" : " 轴对齐",
+                     rlx,
                      (long long)roi_ms, (long long)pre_ms, (long long)inf_ms);
         }
         // P5.24: 结果后面直接跟置信度 —— 连续模式(每帧 2 行)也能一眼看出"这次是模型有把握还是瞎猜"
+        // P5.46: **结果闸门** —— 模型说了什么不再直接当车牌上报。
+        //   为什么必须加: 2026-10-01 那份 78 帧日志里 21 个错结果**全部**格式不合法
+        //   (皖1 / 浙JTT / 粤11191 / 粤J191粤T ...), 唯一合法的 #82 就是对的。
+        //   所以"格式合法"这条比几何门槛更能挡误检, 而且它是**事后**判的, 不会拦掉真车牌。
+        // ---- P5.66: 省字复核 (第二个模型, 只看第一个字) ----
+        //   只在"主模型确实读出了东西 + 四边形可用"时才跑; 连车牌都没读出来就不必花这 30ms。
+        std::string plate_main = plate;   // 主模型原读 (日志里要对照)
+        char main_head[8] = "?";
+        if (!plate_main.empty()) {
+            const unsigned char c0 = (unsigned char)plate_main[0];
+            size_t hl = 1;
+            if ((c0 & 0xF0) == 0xE0) hl = 3;
+            else if ((c0 & 0xE0) == 0xC0) hl = 2;
+            else if ((c0 & 0xF8) == 0xF0) hl = 4;
+            if (hl > plate_main.size()) hl = plate_main.size();
+            memcpy(main_head, plate_main.data(), hl);
+            main_head[hl] = '\0';
+        }
+        int prov_id = -1, prov_id2 = -1, prov_ms = 0;
+        float prov_p = 0.0f, prov_p2 = 0.0f;
+        float prov_u = 0.0f;            // 最终采用的窗口左边界 (u)
+        float prov_u_left = -1.0f;      // "蓝面左边缘"锚点扫描结果 (-1 = 没扫到)
+        float prov_p_legacy = -1.0f;    // 老做法(窗口从框左角 u=0 开始)的置信, 只做对照
+        int   prov_ncand = 0;
+        float prov_cand_u[PROV_CAND_MAX + 2];
+        float prov_cand_p[PROV_CAND_MAX + 2];
+        if (g_prov_model != nullptr && !plate.empty() && box.rot_ok) {
+            // P5.67: 候选窗口 —— [0] 是老做法 (u=0), 其余以"蓝面左边缘"为锚点向两侧展开
+            prov_cand_u[prov_ncand++] = 0.0f;
+            prov_u_left = prov_find_u_left(fb->buf, (int)fb->width, (int)fb->height, box.qx, box.qy);
+            if (prov_u_left >= 0.0f) {
+                for (int j = -PROV_CAND_K; j <= PROV_CAND_K && prov_ncand < PROV_CAND_MAX + 2; j++) {
+                    const float u = prov_u_left + (float)j * PROV_CAND_STEP;
+                    if (u < -0.05f || u + PROV_U_SPAN > 1.05f) continue;   // 窗口整块跑到框外面去了
+                    bool dup = false;
+                    for (int m = 0; m < prov_ncand; m++) {
+                        if (fabsf(u - prov_cand_u[m]) < 0.0030f) { dup = true; break; }
+                    }
+                    if (!dup) prov_cand_u[prov_ncand++] = u;
+                }
+            }
+            float best_p = -1.0f;
+            for (int c = 0; c < prov_ncand; c++) {
+                sample_prov_to_input(fb->buf, (int)fb->width, (int)fb->height, box.qx, box.qy,
+                                     prov_cand_u[c], (int8_t *)g_prov_input->data, g_prov_lut);
+                const int64_t t_prov = esp_timer_get_time();
+                g_prov_model->run();
+                prov_ms += (int)((esp_timer_get_time() - t_prov) / 1000);
+                g_prov_out->assign(g_prov_model->get_outputs().begin()->second);
+                const float *pl = (const float *)g_prov_out->data;
+                int id = 0;
+                for (int c2 = 1; c2 < PROV_CLASS; c2++) if (pl[c2] > pl[id]) id = c2;
+                const float vmax = pl[id];
+                float sum = 0.0f;
+                for (int c2 = 0; c2 < PROV_CLASS; c2++) sum += expf(pl[c2] - vmax);
+                const float p = (sum > 0.0f) ? (1.0f / sum) : 0.0f;      // top1 的 softmax
+                prov_cand_p[c] = p;
+                if (c == 0) prov_p_legacy = p;
+                if (p > best_p) {
+                    best_p = p;
+                    prov_id = id;
+                    prov_id2 = (id == 0) ? 1 : 0;
+                    for (int c2 = 0; c2 < PROV_CLASS; c2++)
+                        if (c2 != id && pl[c2] > pl[prov_id2]) prov_id2 = c2;
+                    prov_p = p;
+                    prov_p2 = (sum > 0.0f) ? expf(pl[prov_id2] - vmax) / sum : 0.0f;
+                    prov_u = prov_cand_u[c];
+                }
+            }
+            // 把"赢了的那扇窗"重新抠一遍进输入张量 —— 这样发回串口的 patch 就是模型真正吃到的那块
+            sample_prov_to_input(fb->buf, (int)fb->width, (int)fb->height, box.qx, box.qy,
+                                 prov_u, (int8_t *)g_prov_input->data, g_prov_lut);
+        }
+        // 融合: 省字以复核模型为准; 把握不足就**不动**主模型的读法 (宁可不说, 别改错)
+        bool prov_used = false;
+        if (prov_id >= 0 && prov_p >= PROV_CONF_MIN) {
+            const unsigned char c0 = (unsigned char)plate[0];
+            size_t hl = 1;
+            if ((c0 & 0xF0) == 0xE0) hl = 3;
+            else if ((c0 & 0xE0) == 0xC0) hl = 2;
+            else if ((c0 & 0xF8) == 0xF0) hl = 4;
+            if (hl > plate.size()) hl = plate.size();
+            plate = std::string(PROV_CHARS[prov_id]) + plate.substr(hl);
+            prov_used = true;
+        }
+        char provbuf[224] = "";
+        if (prov_id >= 0) {
+            // 窗口对照字段: 采用了哪扇窗 / 锚点在哪 / 老做法多自信 / 一共试了几扇 —— 一眼看出这帧是不是靠锚点救回来的
+            char winbuf[80] = "";
+            if (prov_u_left >= 0.0f) {
+                snprintf(winbuf, sizeof(winbuf), " | 窗u%+.3f/锚%+.3f/旧窗%.0f%%/试%d窗",
+                         prov_u, prov_u_left, prov_p_legacy * 100.0f, prov_ncand);
+            }
+            snprintf(provbuf, sizeof(provbuf), " | 省字复核 %s %.0f%% (次选 %s %.0f%%, %dms)%s 主模型首字 %s%s",
+                     PROV_CHARS[prov_id], prov_p * 100.0f, PROV_CHARS[prov_id2], prov_p2 * 100.0f, prov_ms,
+                     prov_used ? " 已采用 *" : " 未过门槛, 保留 *", main_head, winbuf);
+        }
+        if (verbose && prov_id >= 0) {
+            char candbuf[200] = "";
+            for (int c = 0; c < prov_ncand; c++) {
+                char one[28];
+                snprintf(one, sizeof(one), "%su%+.3f:%.0f%%", (c == 0) ? "" : " ",
+                         prov_cand_u[c], prov_cand_p[c] * 100.0f);
+                strncat(candbuf, one, sizeof(candbuf) - strlen(candbuf) - 1);
+            }
+            ESP_LOGI(TAG, "省字复核: 从原图 ROI %dx%d 的四边形里抠省字格 (u 窗宽 %d%%) -> %dx%d | 实读 %s %.0f%% (次选 %s %.0f%%) | 主模型首字 %s | %s | 试点 %d 个, 共 %d ms",
+                     box.x2 - box.x1, box.y2 - box.y1, (int)(PROV_U_SPAN * 100.0f + 0.5f), PROV_W, PROV_H,
+                     PROV_CHARS[prov_id], prov_p * 100.0f,
+                     PROV_CHARS[prov_id2], prov_p2 * 100.0f, main_head,
+                     prov_used ? "已采用复核结果" : "未过 70% 门槛, 保留主模型", prov_ncand, prov_ms);
+            ESP_LOGI(TAG, "省字窗口扫描: 蓝面左边缘锚点 u_left=%+.3f (占总长 %+.1f%%, 相当于窗宽的 %+.0f%%) | 候选(窗宽 %.0f%% 时各自的实测置信): %s | 取 u%+.3f (老做法 u=0 时 %.0f%%)",
+                     prov_u_left, prov_u_left * 100.0f, prov_u_left / PROV_U_SPAN * 100.0f,
+                     PROV_U_SPAN * 100.0f, candbuf, prov_u, prov_p_legacy * 100.0f);
+        }
+        // P5.67: 把省字 patch 发回串口 —— 详细模式每帧都发; 连续模式只在"复核没过门槛"时发 (限流 10s)
+        if (prov_id >= 0) {
+            static int64_t last_prov_dump_us = 0;
+            const int64_t now_dump_us = esp_timer_get_time();
+            if (verbose || (prov_p < PROV_CONF_MIN && now_dump_us - last_prov_dump_us > PROV_DUMP_MIN_GAP_US)) {
+                last_prov_dump_us = now_dump_us;
+                img_tx_send_prov(PROV_DUMP_ZOOM);
+            }
+        }
+
+        const bool fmt_ok = (!plate.empty()) && plate_looks_valid(plate);
         if (plate.empty()) {
-            ESP_LOGW(TAG, "#%d >>> RESULT: (未识别到车牌) | 置信 %.0f%%",
-                     fn, rep.mean_top1 * 100.0f);
+            ESP_LOGW(TAG, "#%d >>> RESULT: (未识别到车牌) | 置信 %.0f%%%s",
+                     fn, rep.mean_top1 * 100.0f, provbuf);
+        } else if (fmt_ok) {
+            ESP_LOGI(TAG, "#%d >>> RESULT: %s | 置信 %.0f%% (最弱步 %.0f%%)%s", fn, plate.c_str(),
+                     rep.mean_top1 * 100.0f, rep.min_top1 * 100.0f, provbuf);
         } else {
-            ESP_LOGI(TAG, "#%d >>> RESULT: %s | 置信 %.0f%% (最弱步 %.0f%%)", fn, plate.c_str(),
-                     rep.mean_top1 * 100.0f, rep.min_top1 * 100.0f);
+            ESP_LOGW(TAG, "#%d >>> 疑似误检, 不作为车牌上报: %s | 置信 %.0f%% (格式不合法: 应为 7~8 位, 省字开头)%s",
+                     fn, plate.c_str(), rep.mean_top1 * 100.0f, provbuf);
         }
 
         // P5.24: 详细模式把"模型到底有多确定 + 这块图本身行不行"摊开 ——
@@ -1998,10 +2737,10 @@ static bool recognize_once(dl::Model *model,
             ESP_LOGI(TAG, "时间步(18 步, _=空白): %s", rep.seq.c_str());
             ESP_LOGI(TAG, "每步 top1(次选)%%: %s", rep.steps.c_str());
             if (g_crop_q.valid) {
-                ESP_LOGI(TAG, "裁剪块质量: 亮度 p5=%d p95=%d 跨度=%d | 过曝 %d%% 死黑 %d%% | 锐度 %.1f | 均值 B%d G%d R%d | 对比度归一 x%.2f",
+                ESP_LOGI(TAG, "裁剪块质量: 亮度 p5=%d p95=%d 跨度=%d | 过曝 %d%% 死黑 %d%% | 锐度 %.1f | 均值 B%d G%d R%d | 饱和度 x%.2f",
                          g_crop_q.p_lo, g_crop_q.p_hi, g_crop_q.spread, g_crop_q.over_pct,
                          g_crop_q.dark_pct, g_crop_q.sharp, g_crop_q.mb, g_crop_q.mg, g_crop_q.mr,
-                         g_crop_q.norm_s);
+                         CROP_SAT_GAIN);
                 if (g_crop_q.sharp < 5.0f) {
                     ESP_LOGW(TAG, "   锐度偏低 (<5) => 这块图本身是糊的, 认错很正常 (先解决对焦/手抖/距离, 再谈模型)");
                 }
@@ -2033,7 +2772,7 @@ static bool recognize_once(dl::Model *model,
             mask_result_budget--;
             ESP_LOGW(TAG, "结果不像车牌, 补打一次掩码 (本机还剩 %d 次)", mask_result_budget);
             // P5.26: 这里原来还重打一遍缩略图和覆盖率剖面 —— 前者是死代码, 后者在预处理那一趟
-            //   已经打过完全相同的一份 (同样的框、同样的收边区间), 纯属重复。
+            //   已经打过完全相同的一份 (同样的框), 纯属重复。
             roi_dump_mask(roi_cell_snap, ROI_CELL_NEED, &box);
         }
 
@@ -2072,10 +2811,10 @@ static bool recognize_once(dl::Model *model,
                                  box.density * 100.0f);
                     }
                     if (g_crop_q.valid) {
-                        ESP_LOGI(TAG, "#%d 质量: 亮度跨度 %d (p5=%d p95=%d) | 过曝 %d%% 死黑 %d%% | 锐度 %.1f | 均值 B%d G%d R%d | 对比度归一 x%.2f",
+                        ESP_LOGI(TAG, "#%d 质量: 亮度跨度 %d (p5=%d p95=%d) | 过曝 %d%% 死黑 %d%% | 锐度 %.1f | 均值 B%d G%d R%d | 饱和度 x%.2f",
                                  fn, g_crop_q.spread, g_crop_q.p_lo, g_crop_q.p_hi, g_crop_q.over_pct,
                                  g_crop_q.dark_pct, g_crop_q.sharp, g_crop_q.mb, g_crop_q.mg, g_crop_q.mr,
-                                 g_crop_q.norm_s);
+                                 CROP_SAT_GAIN);
                     } else {
                         ESP_LOGI(TAG, "#%d 质量: n/a (轴对齐回退, 这一帧没走光度归一化)", fn);
                     }
@@ -2133,9 +2872,103 @@ static void run_embedded_selfcheck(dl::Model *model,
     delete input_tensor;
 }
 
+/** 简版 FNV-1a: 只回答"这块内存有没有被改过" */
+static uint32_t mem_fnv32(const void *p, size_t n) {
+    const uint8_t *b = (const uint8_t *)p;
+    uint32_t h = 2166136261u;
+    for (size_t i = 0; i < n; i++) { h ^= b[i]; h *= 16777619u; }
+    return h;
+}
+
+static void log_input_tensor(const char *when, dl::TensorBase *t) {
+    ESP_LOGW(TAG, "输入张量[%s]: data=%p shape=%s dtype=%s exp=%d", when, t->data,
+             dl::vector_to_string(t->shape).c_str(), t->get_dtype_string(), t->exponent);
+}
+
+/** P5.50 自检探针: 一张内嵌的 float32 裸张量走"assign 量化 -> run -> CTC 解码"。
+ *  P5.51: 顺带校验输入缓冲在 run() 前后有没有被覆盖 (esp-dl 会把输入显存还给池子)。 */
+static void run_probe_selfcheck(dl::Model *model,
+                                dl::TensorBase *model_input,
+                                dl::TensorBase *output_float,
+                                const uint8_t *blob,
+                                const char *label) {
+    dl::TensorBase *input_tensor = new dl::TensorBase(
+        {1, IMG_H, IMG_W, 3}, (const void *)blob, 0, dl::DATA_TYPE_FLOAT);
+    model_input->assign(input_tensor);   // 内部完成 float -> int8 量化
+    log_input_tensor(label, model_input);
+    const size_t nb = (size_t)IMG_W * IMG_H * 3;
+    const uint32_t ck0 = mem_fnv32(model_input->data, nb);
+    int64_t t = esp_timer_get_time();
+    model->run();
+    const uint32_t ck1 = mem_fnv32(model_input->data, nb);
+    output_float->assign(model->get_outputs().begin()->second);
+    std::string plate = greedy_decode((const float *)output_float->data);
+    ESP_LOGW(TAG, ">>> 自检 [%s] -> %s   (%lld ms) | 输入校验 %08X -> %08X %s", label, plate.c_str(),
+             (long long)((esp_timer_get_time() - t) / 1000), (unsigned)ck0, (unsigned)ck1,
+             (ck0 == ck1) ? "(run 没动过输入)" : "*** run 之后输入被覆盖了 ***");
+    delete input_tensor;
+}
+
+/** P5.51: 复现实时链路 —— 不走 assign(), 直接把 int8 写进 model_input->data
+ *  (和 sample_quad_to_input 干的事一样)。若这条是坏的、上面那条是好的,
+ *  说明问题出在"往哪块内存写 / 那块内存 run() 期间归谁"。 */
+static void run_probe_direct_int8(dl::Model *model,
+                                  dl::TensorBase *model_input,
+                                  dl::TensorBase *output_float,
+                                  const uint8_t *blob,
+                                  const char *label) {
+    const float *f = (const float *)blob;
+    const size_t nb = (size_t)IMG_W * IMG_H * 3;
+    int8_t *d = (int8_t *)model_input->data;
+    for (size_t i = 0; i < nb; i++) {
+        int v = (int)floorf(f[i] * 128.0f + 0.5f);
+        if (v > 127) v = 127;
+        if (v < -128) v = -128;
+        d[i] = (int8_t)v;
+    }
+    log_input_tensor(label, model_input);
+    const uint32_t ck0 = mem_fnv32(d, nb);
+    int64_t t = esp_timer_get_time();
+    model->run();
+    const uint32_t ck1 = mem_fnv32(d, nb);
+    output_float->assign(model->get_outputs().begin()->second);
+    std::string plate = greedy_decode((const float *)output_float->data);
+    ESP_LOGW(TAG, ">>> 直写int8自检 [%s] -> %s   (%lld ms) | 输入校验 %08X -> %08X %s", label, plate.c_str(),
+             (long long)((esp_timer_get_time() - t) / 1000), (unsigned)ck0, (unsigned)ck1,
+             (ck0 == ck1) ? "(run 没动过输入)" : "*** run 之后输入被覆盖了 ***");
+}
+
 extern "C" void app_main(void) {
-    ESP_LOGI(TAG, "=== LPRNet on ESP32-S3 —— 固件 P5.28 ===");
-    ESP_LOGI(TAG, "    构建时间: %s %s —— 开机看到 P5.28 才说明烧进去的是新固件", __DATE__, __TIME__);
+    ESP_LOGI(TAG, "=== LPRNet on ESP32-S3 —— 固件 P5.66 ===");
+    ESP_LOGI(TAG, "    构建时间: %s %s —— 开机看到 P5.66 才说明烧进去的是新固件", __DATE__, __TIME__);
+    ESP_LOGI(TAG, "    P5.66: **加第二个模型专治省字** —— 主模型吃 94x24, 省字只剩 13x22 像素 (原图里有 44x138); 于是另训一个 31 类省字分类器, 直接从原图四边形抠省字格 (32x64) 喂它");
+    ESP_LOGI(TAG, "           为什么原来读不对: replay 微调集 760/800 是皖牌 -> 模型学会「省字看不清就报皖」; 实测同一张裁块人眼读京、模型 93~99%% 读皖");
+    ESP_LOGI(TAG, "           新模型 PC 端 4 折交叉验证 (245 张真实省字, 每张都由没见过它的模型评): top-1 94.7%%, 复核置信 >=%.0f%% 的那些 97.2%% (覆盖 89%%); 低于门槛就保留主模型首字", PROV_CONF_MIN * 100.0f);
+    ESP_LOGI(TAG, "    P5.61: 长边收边整段删除 + 左留白 净0%%->净+2%% + 上下留白 净5%%->净11%%");
+    ESP_LOGI(TAG, "    P5.60: **蓝牌判据换成 (b-r)>40 且 b>120; 比例窗 2.0~6.5 -> 2.2~4.2; 严格档贴边也照用; 裁剪块的[按亮度跨度拉伸]换成[整数饱和度 x2.0]**");
+    ESP_LOGI(TAG, "           依据: 用户新拍 171 张原始帧(京Q06666/豫FSQ818/豫A8F8Q8), PC 端到端复算 整串全对 28/171 -> 114/171");
+    ESP_LOGI(TAG, "           拆开看: 只换蓝牌判据 28->96 | 再换裁剪增强 +12 | 贴边不再整帧丢 +6 | 比例窗 +1");
+    ESP_LOGI(TAG, "    P5.36~P5.59: 长边收边(按实测蓝色边界把取样框左端收窄) —— **P5.61 已整段删除**(0 帧有帮助 / 52 帧帮倒忙)");
+    ESP_LOGI(TAG, "    P5.40: 取样几何(长边左右留白)做成 4 档, 三击 BOOT 循环切: 档0 左净0%%/右净4%% -> 档1 左+2%%/右4%% -> 档2 左0%%/右+7%% -> 档3 左-4%%/右+7%%");
+    ESP_LOGI(TAG, "    P5.42: 曾把默认改档3(左右各 +7%%) —— 已回退, 见下");
+    ESP_LOGI(TAG, "    P5.43: **默认档 3 -> 2 (左净0%% / 右净+7%%)** —— 档3 的左右各+7%% 会把[左边凭空多认一个省字]放回来: 61 帧里 38 帧带多余省字, 京Q06666 一帧没全对");
+    ESP_LOGI(TAG, "    P5.44: **换模型** —— 用你的实拍素材微调 + mse 校准。留出33张 int8 39.4%% -> 75.8%%(翻倍); 代价: 皖牌验证集 83.5%% -> 69.0%%");
+    ESP_LOGI(TAG, "           想回退: 烧 p544alt(P5.44-alt, 只换校准) 或 p543(P5.43, 原样)");
+    ESP_LOGI(TAG, "    P5.46: **形状不再当裁判** —— 严格档挑不出候选时, 兜底档『面积够大就收, 比例/填充一概不看』(治屏幕反光把蓝底打散), 日志打[兜底]");
+    ESP_LOGI(TAG, "    P5.47: **贴边不再一票否决** —— 得分最高的候选贴到画面边缘时, 先在同一档里换一个不贴边的候选; 真没有替补才拒绝");
+    ESP_LOGI(TAG, "    P5.48: **兜底档贴边照用** —— 兜底档的候选贴到画面边缘时不再换替补(实测会换成 色格300 比例15.86 的细缝, 更糟), 直接用, 结果交给闸门判");
+    ESP_LOGI(TAG, "           严格档(形状像车牌)贴边仍旧 先换替补/没有就拒绝; 依据: 读对的 #133(542x212 占屏38.6%%) 就是框比车牌大一圈也照读");
+    ESP_LOGI(TAG, "           为什么: 反光会把蓝掩码漏到画面边缘, 于是得分最高的那块是贴边杂块, 而车牌完整地在画面中间 —— 那时整帧丢掉是白丢");
+    ESP_LOGI(TAG, "           代价靠『结果闸门』兜底: 结果必须先过车牌语法(7~8位, 省字开头)才当 RESULT 上报, 否则只打一行『疑似误检』(旧固件是把乱码也当结果报)");
+    ESP_LOGI(TAG, "    P5.49: **亮度下限 46 -> 120** —— 屏幕那层深蓝底色和车牌蓝的色相/饱和度都重叠, 唯一分得开的是亮度(车牌蓝底最亮通道约150~200, 屏幕底色只有60~90)");
+    ESP_LOGI(TAG, "           依据(2026-10-01 用户 20 张难帧, PC 复算): 只把 V 从 46 抬到 120, 『像车牌的框』0/20 -> 15/20, 巨框(占屏>45%%) 18/20 -> 0/20; 饱和度一个字没改");
+    ESP_LOGI(TAG, "           代价: 很暗的车牌(B 通道掉到 ~100)会被误杀 -> 该帧打印『画面里没有一块车牌色』直接跳过, 不会出巨框");
+    ESP_LOGI(TAG, "    P5.57(已在 P5.59 删掉): **拆掉每帧诊断 + 影子对照** —— 曾每帧多裁 2 块(蓝带两端收 / 只收左端)各跑一次模型, 只打一行 `影子:` 日志; 结论拿到后连影子一起去掉, 换回速度");
+    ESP_LOGI(TAG, "    P5.59(P5.61 已整段删除): 长边收边曾定案\"只收左端\" —— 复算证明它 0 帧有帮助/52 帧帮倒忙, 代码已删; 详见文档第四十五节");
+    ESP_LOGI(TAG, "    P5.56/P5.58: **占屏下限 %.1f%%** —— 上下限成对: 45%% 治整屏背景, %.1f%% 治碎块。原来底线只有 0.2%%, 84x16 / 76x16 px 这种横条两条路都能溜过去(比例+填充居然都合格), 喂给模型必吐乱码", ROI_MIN_AREA_PCT, ROI_MIN_AREA_PCT);
+    ESP_LOGI(TAG, "    P5.49: **候选加 %.0f%% 占屏上限** —— 严格档和兜底档都不收超上限的块(实测真车牌本体 <=32%%, 被反光污染的块 52%%~90%%); 淘汰时日志打『占屏过大(疑似反光/背景连成一片)』", ROI_MAX_AREA_PCT);
+    ESP_LOGI(TAG, "    P5.41: BOOT 的 ISR 加了去抖(50ms) —— 上一轮三击被数成 2 下(档位没切)或 6 下, 就是触点回弹");
+    ESP_LOGI(TAG, "    BOOT: 单击(<1s)=切图片模式 | 双击=复位图片输出 | 三击=循环切取样几何档 | 长按(>=2s)=详细模式开关");
     ESP_LOGI(TAG, "    连续模式: 每帧 2 行(#n 指标行 + #n RESULT, 结果带置信度); 结果可疑时自动补打一行诊断");
     ESP_LOGI(TAG, "    完整诊断(掩码+候选表+覆盖率剖面): 长按 BOOT >=2s 走一轮; 自动诊断开关 = main.cpp 的 AUTO_DIAG_ON_SUSPECT");
     ESP_LOGI(TAG, "    串口图片: $IMG,<len> + JPEG + CRC32(大端4B) + $END  -> BY串口助手选「二进制帧」, 波特率 %d", CONFIG_ESP_CONSOLE_UART_BAUDRATE);
@@ -2174,6 +3007,48 @@ extern "C" void app_main(void) {
     dl::TensorBase *output_float =
         new dl::TensorBase(model_output->shape, nullptr, 0, dl::DATA_TYPE_FLOAT);
 
+    // ---- P5.66: 第二个模型 —— 省字复核 (输入 32x64, 从原图四边形抠省字, 不走 94x24) ----
+    {
+        const int64_t tp = esp_timer_get_time();
+        g_prov_model = new dl::Model((const char *)prov_espdl, fbs::MODEL_LOCATION_IN_FLASH_RODATA);
+        g_prov_input = g_prov_model->get_inputs().begin()->second;
+        dl::TensorBase *prov_output = g_prov_model->get_outputs().begin()->second;
+        ESP_LOGI(TAG, "省字模型 loaded in %.1f ms | input %s %s exp=%d | output %s %s exp=%d",
+                 (esp_timer_get_time() - tp) / 1000.0f,
+                 dl::vector_to_string(g_prov_input->shape).c_str(), g_prov_input->get_dtype_string(),
+                 g_prov_input->exponent, dl::vector_to_string(prov_output->shape).c_str(),
+                 prov_output->get_dtype_string(), prov_output->exponent);
+        if (g_prov_input->shape.size() != 4 || g_prov_input->shape[1] != PROV_H ||
+            g_prov_input->shape[2] != PROV_W || g_prov_input->shape[3] != 3) {
+            ESP_LOGE(TAG, "省字模型输入形状不是 [1,%d,%d,3] (NHWC), 而是 %s —— 关掉这条支路",
+                     PROV_H, PROV_W, dl::vector_to_string(g_prov_input->shape).c_str());
+            g_prov_model = nullptr;
+        } else if (prov_output->shape.size() != 2 || prov_output->shape[1] != PROV_CLASS) {
+            ESP_LOGE(TAG, "省字模型输出形状不是 [1,%d], 而是 %s —— 关掉这条支路",
+                     PROV_CLASS, dl::vector_to_string(prov_output->shape).c_str());
+            g_prov_model = nullptr;
+        } else {
+            g_prov_lut = (int8_t *)malloc(3 * 256);
+            // P5.67: 发图用的 patch 原色缓冲 (PSRAM); 分不到只是不发那张诊断图, 不影响复核本身
+            g_prov_rgb = (uint8_t *)heap_caps_aligned_calloc(16, 1, (size_t)PROV_W * PROV_H * 3,
+                                                            MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+            build_prov_lut(g_prov_lut, g_prov_input->exponent);
+            g_prov_out = new dl::TensorBase(prov_output->shape, nullptr, 0, dl::DATA_TYPE_FLOAT);
+            ESP_LOGI(TAG, "省字 LUT: lut[0]=%d lut[128]=%d lut[255]=%d (mean %.1f std %.1f) | 采纳门槛 %.0f%%",
+                     g_prov_lut[0], g_prov_lut[128], g_prov_lut[255],
+                     PROV_NORM_MEAN, PROV_NORM_STD, PROV_CONF_MIN * 100.0f);
+        }
+    }
+
+    // P5.50: 开机无条件跑一次内嵌样张自检 (原来只在「摄像头起不来」时才跑)。
+    //   两张图: 老样张当回归基线; 探针是 PC 端 float 读作 京Q06666 的那一帧裁块。
+    //   板端若也读出 京Q06666 -> 推理链路没问题, 问题在取样/发图; 板端若读出 京Q粤 -> 推理本身有问题。
+    run_probe_selfcheck(model, model_input, output_float, test_input_bin, "旧样张 沪AMS087");
+    run_probe_selfcheck(model, model_input, output_float, probe_crop_bin, "探针 板端发回的裁块");
+    // P5.51: 同一条数据, 换成"和实时链路一模一样的直写 int8"再跑一次
+    run_probe_direct_int8(model, model_input, output_float, probe_crop_bin, "探针/直写int8");
+    run_probe_direct_int8(model, model_input, output_float, test_input_bin, "旧样张/直写int8");
+
     // ---- 3. BOOT 按钮 (GPIO0, 低电平按下) ----
     gpio_config_t io = {};
     io.pin_bit_mask = 1ULL << BOOT_BTN_PIN;
@@ -2195,14 +3070,18 @@ extern "C" void app_main(void) {
     if (camera_ok) {
         camera_discard_frames(CAM_WARMUP_FRAMES, CAM_WARMUP_DELAY_MS);   // 等 AE/AGC 稳定, 否则头几帧偏暗
         ESP_LOGI(TAG, "摄像头就绪: VGA RGB565, XCLK 20MHz, fb_count=2");
+        // P5.52: 开机自检时探针读对, 摄像头一起来就变错 -> 说明是运行时内存/环境被搅了, 不是数据问题
+        run_probe_selfcheck(model, model_input, output_float, probe_crop_bin, "探针/摄像头已开第1次");
+        run_probe_selfcheck(model, model_input, output_float, probe_crop_bin, "探针/摄像头已开第2次");
         if (AUTO_PERIOD_MS > 0) {
             ESP_LOGI(TAG, "触发方式: 开机 1 次 + 每 %u ms 自动 1 次 + 短按 BOOT 立即拍一帧",
                      (unsigned)AUTO_PERIOD_MS);
-            ESP_LOGI(TAG, "说明: 周期 %u ms => 背靠背连续识别, 精简模式(每帧 2 行); 短按(<1s)BOOT = 循环切换图片输出(当前 %d), 长按(>=2s)BOOT = 详细模式(掩码+候选表)",
-                     (unsigned)AUTO_PERIOD_MS, g_img_mode);
+            ESP_LOGI(TAG, "说明: 周期 %u ms => 背靠背连续识别, 精简模式; BOOT 单击(<1s)=切图片输出(当前 %d), 双击=复位图片输出, 三击=取样几何档%d(左净 %+.0f%% 右净 %+.0f%%), 长按(>=2s)=详细模式开关",
+                     (unsigned)AUTO_PERIOD_MS, g_img_mode, g_pad_profile,
+                     (g_pad_u_l - ROI_TRIM_X) * 100.0f, (g_pad_u_r - ROI_TRIM_X) * 100.0f);
         } else {
-            ESP_LOGI(TAG, "触发方式: 开机 1 次 + 短按(<1s)BOOT 切图片模式并拍一帧 + 长按(>=2s)BOOT 出详细模式");
-            ESP_LOGI(TAG, "图片输出模式: 0=干净预览 1=预览+绿框 2=模型输入块94x24(训练素材)");
+            ESP_LOGI(TAG, "触发方式: 开机 1 次 + 单击(<1s)BOOT 切图片模式并拍一帧 + 双击复位图片输出 + 三击循环切取样几何档 + 长按(>=2s)切详细模式开关");
+            ESP_LOGI(TAG, "图片输出模式: 0=干净预览 1=预览+绿框(=模型实际取样框) 2=模型输入块94x24(训练素材)");
         }
     } else {
         ESP_LOGE(TAG, "摄像头不可用, 先跑一次内嵌样张自检; 之后每 5s 重试摄像头");
@@ -2216,21 +3095,90 @@ extern "C" void app_main(void) {
         TickType_t now = xTaskGetTickCount();
 
         if (camera_ok) {
-            // P5.15: 短按(<1s) = 循环切换图片输出模式; 长按(>=2s) = 详细模式识别一次。
-            //        中间 1~2s 留空档: 想按短按但手抖按久了、想按长按但没按够, 都当作没按, 免得误触。
+            // P5.15: 单击(<1s) = 循环切换图片输出模式; 长按(>=2s) = 详细模式开关 (P5.31 起改成开关, 不再是"一帧")。
+                    // P5.35/P5.61: 双击 = 复位图片输出 (原来是 1~2s 中按, 太容易误触 —— 用户实测反馈)。
+            //        中间 1~2s 退回"空档": 想单击但手抖按久了、想长按但没按够, 都当作没按。
             // 以中断锁存为主; 万一 ISR 装不上, 电平轮询这条老路仍然兜底 (那条路量不出时长, 一律当短按)。
             const bool btn_down = (boot_btn_latched || gpio_get_level((gpio_num_t)BOOT_BTN_PIN) == 0);
             if (btn_down) {
                 boot_btn_latched = false;
                 const int32_t press_ms = boot_press_ms;
-                const int32_t end_ms = (boot_release_ms != 0) ? boot_release_ms
-                                       : (int32_t)(esp_timer_get_time() / 1000);
-                const int32_t dur_ms = end_ms - press_ms;
+                // P5.30: 原来这里是"看一眼就走" —— 主循环每轮要跑一整次识别 (~1s), 等它转回来问按键时,
+                //   按键才按了 0~1s, 于是永远判成短按 (旧日志里一次 "BOOT 长按" 都没有)。
+                //   改成当场等: 一直等到松手; 或者等到够 2s 就直接判长按(不松手也有反馈), 手感才对。
+                int32_t dur_ms = 0;
+                if (press_ms != 0) {
+                    if (boot_release_ms != 0) {
+                        dur_ms = boot_release_ms - press_ms;       // 松手边沿已经记到了, 直接用最准
+                    } else {
+                        while (true) {
+                            dur_ms = (int32_t)(esp_timer_get_time() / 1000) - press_ms;
+                            if (dur_ms >= 2000) break;                                 // 够 2s: 判长按
+                            if (gpio_get_level((gpio_num_t)BOOT_BTN_PIN) != 0) break;   // 松手了: 按真实时长判
+                            vTaskDelay(pdMS_TO_TICKS(10));
+                        }
+                    }
+                }
                 const bool long_press = (press_ms != 0) && (dur_ms >= 2000);
                 const bool short_press = (press_ms == 0) || (dur_ms < 1000);   // press_ms==0 = 轮询兜底, 量不出时长, 一律当短按
+                    // P5.35: 单击要等一下再执行 —— 看 BOOT_DBLCLICK_MS 内还有没有第二下, 有就是双击(=复位图片输出), 没有才是单击。
+                //   代价: 单击切图片模式会晚 400ms 才拍那一帧; 换来的是不会再把"手抖按了两下"误判成两次切模式。
+                // P5.36: 先看 ISR 数出来的"这一串按了几下" —— 设备忙的时候两下早就都按完了, 只有这个数靠得住。
+                //   在这里就把账结掉(而不是等收尾), 免得这一串的计数污染下一次; 之后窗口里再来的那一下由 latched 兜住。
+                // P5.39: 要认三击, 就得把窗口期等完再一次性清账 —— 否则第一下读到的永远是 burst_n=1,
+                //   后两下发生在窗口期里, 只能看出"至少两下", 分不出两下还是三下。
+                bool multi = (boot_burst_n >= 2);
+                if (!multi && short_press && press_ms != 0) {
+                    const int64_t dl = (int64_t)(esp_timer_get_time() / 1000) + BOOT_DBLCLICK_MS;
+                    while ((int64_t)(esp_timer_get_time() / 1000) < dl) {
+                        if (boot_btn_latched || gpio_get_level((gpio_num_t)BOOT_BTN_PIN) == 0) { multi = true; break; }
+                        vTaskDelay(pdMS_TO_TICKS(10));
+                    }
+                    if (multi) {
+                        // 等这一串彻底松手(用户可能还在按第三下); 顺手把按下/松手记账清掉, 免得又被当成单击
+                        while (gpio_get_level((gpio_num_t)BOOT_BTN_PIN) == 0) vTaskDelay(pdMS_TO_TICKS(10));
+                        boot_press_ms = 0;
+                        boot_release_ms = 0;
+                        boot_btn_latched = false;
+                    }
+                }
+                const uint8_t burst_n = boot_burst_n;   // 窗口期过完再读, 三下都在里面
+                boot_burst_n = 0;
+                const bool triple_click = (burst_n >= 3);
+                const bool dbl_click = (burst_n == 2);
+                ESP_LOGI(TAG, "BOOT 手势: 这一串按了 %u 下, 最后一下时长 %d ms -> %s", (unsigned)burst_n, (int)dur_ms,
+                         triple_click ? "三击" : (dbl_click ? "双击" : (long_press ? "长按" : (short_press ? "单击" : "空档"))));
                 if (long_press) {
+                    g_verbose_mode = !g_verbose_mode;   // P5.31: 长按 = 详细模式开关
                     img_tx_reset("BOOT 长按");   // P5.20: 顺手复位图片输出 —— 卡住时按一下就能救回来
-                    recognize_once(model, model_input, output_float, norm_lut, "BOOT 长按(详细)", true);
+                    ESP_LOGW(TAG, "详细模式: %s —— 之后每一帧%s完整诊断, 再长按一次切换",
+                             g_verbose_mode ? "开" : "关", g_verbose_mode ? "都带" : "都不带");
+                    recognize_once(model, model_input, output_float, norm_lut,
+                                   g_verbose_mode ? "BOOT 长按(详细开)" : "BOOT 长按(详细关)", g_verbose_mode);
+                } else if (dbl_click) {
+                    // P5.61: 双击原来 = "长边收边"开关, 收边已整段删除; 现在改成 **图片输出全复位 + 打一张发图统计** ——
+                    //   串口图卡住时双击一下就能救回来, 而且不改图片模式 (不会因为救卡而多刷几帧)。
+                    // ⚠ 这一支必须排在 short_press 前面: dbl_click 为真时 short_press 必然也为真,
+                    //   放在后面编译器会判定"永远走不到"而整块删掉 (第一次写反就是这么踩的)。
+                    img_tx_reset("BOOT 双击");
+                    ESP_LOGW(TAG, "发图统计: 累计成功 %u 帧 / %u KB; 连续失败 %u 次 (最后原因: %s)",
+                             (unsigned)g_tx_ok, (unsigned)(g_tx_bytes / 1024), (unsigned)g_tx_fail,
+                             g_tx_fail_why ? g_tx_fail_why : "-");
+                    recognize_once(model, model_input, output_float, norm_lut, "BOOT 双击(图片输出复位)", true);
+                } else if (triple_click) {
+                    // P5.40: 三击 = 循环切"取样几何档" 0 -> 1 -> 2 -> 3 -> 0 (四档定义见 k_pad_profiles)。
+                    //   ⚠ 这一支必须排在 short_press 前面 (三击时 short_press 必然也为真), 否则被整块删掉。
+                    static const char *profile_name[4] = {
+                        "档0 左净0%/右净4% (P5.32~P5.39 老几何)",
+                        "档1 左净+2%/右净4% (P5.38, 真机330~420px 83%)",
+                        "档2 左净0%/右净+7% (P5.43 默认)",
+                        "档3 左净-4%/右净+7% (往框里收)"};
+                    pad_apply_profile((g_pad_profile + 1) & 3);
+                    ESP_LOGW(TAG, "取样几何 -> %s: 左端留白净 %+.0f%%, 右端净 %+.0f%% (再按三下切下一档)",
+                             profile_name[g_pad_profile],
+                             (g_pad_u_l - ROI_TRIM_X) * 100.0f, (g_pad_u_r - ROI_TRIM_X) * 100.0f);
+                    img_tx_reset("BOOT 三击");
+                    recognize_once(model, model_input, output_float, norm_lut, "BOOT 三击(切取样几何档)", true);
                 } else if (short_press) {
                     img_tx_reset("BOOT 短按");   // P5.20: 同理, 不用再重启单片机
                     g_img_mode = (g_img_mode + 1) % 3;
@@ -2241,7 +3189,7 @@ extern "C" void app_main(void) {
                     ESP_LOGW(TAG, "图片输出: %s", mode_name[g_img_mode]);
                     recognize_once(model, model_input, output_float, norm_lut, "BOOT 短按(切图片模式)", false);
                 } else {
-                    ESP_LOGW(TAG, "按键 %d ms 落在 1~2s 空档里, 当作没按 (短按<1s 切图片模式, 长按>=2s 详细模式)", (int)dur_ms);
+                    ESP_LOGW(TAG, "按键 %d ms 落在 1~2s 空档里, 当作没按 (单击<1s=切图片模式, 双击=复位图片输出, 三击=循环切取样几何档, 长按>=2s=详细模式开关)", (int)dur_ms);
                 }
                 boot_press_ms = 0;
                 boot_release_ms = 0;
@@ -2251,9 +3199,10 @@ extern "C" void app_main(void) {
                 boot_btn_latched = false;   // 松手过程中的抖动边沿一并清掉
                 next_auto = xTaskGetTickCount() + pdMS_TO_TICKS(AUTO_PERIOD_MS);
             } else if (AUTO_PERIOD_MS > 0 && now >= next_auto) {
-                const bool first = (next_auto == 0);   // 开机头一次用详细模式, 之后走精简
+                const bool first = (next_auto == 0);        // 开机头一次用详细模式
+                const bool vb = first || g_verbose_mode;    // P5.31: 详细模式开着就一直详细
                 recognize_once(model, model_input, output_float, norm_lut,
-                               first ? "开机" : "定时(连续)", first);
+                               first ? "开机" : (g_verbose_mode ? "定时(连续/详细开)" : "定时(连续)"), vb);
                 next_auto = now + pdMS_TO_TICKS(AUTO_PERIOD_MS);
             }
         } else if (now >= next_cam_retry) {
