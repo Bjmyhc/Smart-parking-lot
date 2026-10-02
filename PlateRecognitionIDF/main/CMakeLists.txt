@@ -1,7 +1,7 @@
-set(srcs main.cpp)
+set(srcs main.cpp node_link.c)
 # esp-dl: 端侧推理框架; esp32-camera: 仓库内本地组件 (PlateRecognitionIDF/components/esp32-camera),
 # 相机参数与 PlateRecognition/PlateRecognition.ino 的 vCameraInit() 逐行一致
-set(requires esp-dl esp32-camera esp_jpeg)
+set(requires esp-dl esp32-camera esp_jpeg esp_driver_uart)
 
 idf_build_get_property(component_targets __COMPONENT_TARGETS)
 if ("___idf_espressif__esp-dl" IN_LIST component_targets)

@@ -29,6 +29,7 @@
  *      该 flag 的含义是「按大端宏解析」, 不是「数据是小端」, 名字反直觉, 一律以宏定义为准。
  */
 #include <cmath>
+#include <cstdarg>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -50,7 +51,52 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
+#include "node_link.h"   // P5.68: 摄像头 -> 节点单片机 链路 (现在用电脑串口助手当"假节点")
+
 static const char *TAG = "plate";
+
+/*
+ * P5.76: 不带 "I (123) plate:" 前缀的直出 —— 结果块和开机那几行走这里, 和 $PLATE 一样干净。
+ *   直接写 stdout (和控制台同一个口), 末尾自己补 '\n' (控制台 VFS 会转成 CRLF, 别再写 '\r')。
+ */
+static void plain_out(const char *fmt, ...)
+{
+    char buf[192];
+    va_list ap;
+    va_start(ap, fmt);
+    int n = vsnprintf(buf, sizeof(buf) - 2, fmt, ap);
+    va_end(ap);
+    if (n < 0) return;
+    if ((size_t)n > sizeof(buf) - 2) n = (int)(sizeof(buf) - 2);
+    buf[n++] = '\n';
+    fwrite(buf, 1, (size_t)n, stdout);
+    fflush(stdout);
+}
+
+/* P5.76: 一次识别的"结果块" —— 简单模式(默认)下这就是全部日志 */
+static void print_plate_block(const char *plate, float conf_pct, int frame, int x1, int y1, int x2, int y2)
+{
+    plain_out("========================================");
+    plain_out("车牌号码: %s", plate);
+    plain_out("车牌颜色: blue");
+    plain_out("置信度:   %.2f%%", conf_pct);
+    plain_out("帧号:     %d", frame);
+    plain_out("车牌位置: (%d,%d) -> (%d,%d)", x1, y1, x2, y2);
+    plain_out("========================================");
+}
+
+/* P5.77: 一次识别的"未识别块" —— 被点名拍的那一帧(AT+RUN)没出结果时必打。
+ *   简单模式下一个字都没有的话, 根本分不清"没定位到 / 模型没认出 / 取帧失败";
+ *   连续模式(每 200ms 一帧)不打, 否则刷屏。 */
+static void print_fail_block(const char *reason, int frame)
+{
+    plain_out("========================================");
+    plain_out("车牌号码: - (未识别)");
+    plain_out("原因:     %s", (reason && *reason) ? reason : "(未知原因)");
+    if (frame > 0) plain_out("帧号:     %d", frame);
+    else           plain_out("帧号:     -");
+    plain_out("========================================");
+}
 
 // 由 CMake target_add_aligned_binary_data 嵌入到 flash rodata
 extern const uint8_t model_espdl[] asm("_binary_lprnet_s3_espdl_start");
@@ -801,17 +847,55 @@ static void roi_probe_dominant_blue(const uint8_t *rgb565be, int w, int h, const
 #define IMG_TX_CROP_JPG_MAX  (IMG_W * IMG_H * 3 + 4096)
 
 
-// P5.15/P5.16: 图片输出模式 —— 短按 BOOT 循环切换。默认 0。
-//   0 = 干净预览图 (320x240, 采数据/日常看画面)
-//   1 = 预览图 + ROI 绿框 (专门用来看"框套得准不准")
-//   2 = 模型输入块 (94x24) —— 就是模型真正吃到的那张小图, 逐像素一致, 直接当训练素材
+// P5.15/P5.16: 图片输出模式 —— 短按 BOOT 循环切换。
+// P5.74: 档位重排, 0 改成"关", 另外三档顺延 (BOOT 短按的循环顺序 = 关->预览->绿框->输入块->关):
+//   0 = 关 (不发图) —— **默认档**, 也是接真节点用的档: 节点只要文本, 一张 320x240 JPEG 十几 KB, 会把链路塞满
+//   1 = 干净预览图 (320x240, 采数据/日常看画面)
+//   2 = 预览图 + ROI 绿框 (专门用来看"框套得准不准")
+//   3 = 模型输入块 (94x24) —— 就是模型真正吃到的那张小图, 逐像素一致, 直接当训练素材
+// P5.68: 图片永远走**控制台口** (esp_rom_output_tx_one_char -> UART0/USB), 跟链路宏没关系 ——
+//   所以它压根不占节点那条线。
+// P5.74: 图片档位不再跟控制权挂钩 —— 电脑口在**两种模式**下都能设 AT+IMG (图片只走电脑那条口, 不占节点线),
+//   所以正常模式下也能一边跑节点一边看画面。开机默认 0(关); 档位非 0 时每条 $PLATE 尾巴上带
+//   ",img=<档位>" 当提醒, 免得"图还开着"只能靠自己记得。
+//   want = 用户设的(AT+IMG / BOOT 短按 改的都是它), 生效 = 当前真正用的; 现在两者恒等,
+//   留着两个变量只是为了以后要做"临时覆盖"时有地方下手。
+static volatile int g_img_mode_want = 0;
 static volatile int g_img_mode = 0;
+
+/* P5.74: 生效档 = 用户设的档(跟控制权无关); 顺手把档位告诉链路层, 好让 $PLATE 带上 img= 提醒 */
+static void img_mode_apply(void) {
+    g_img_mode = g_img_mode_want;
+    node_link_set_img_hint(g_img_mode);
+}
 
 // P5.31: 详细模式开关 (长按 BOOT 切换)。原来长按只是"详细一帧", 想连看几帧就得反复长按 ——
 //   而"主色框 vs 死门槛框差几个像素"这种结论, 恰恰要连着好几帧才看得出稳不稳。
 //   现在长按 = 开关: 开着的每一帧都走详细, 再长按一次关掉。
 //   代价: 每帧多约 100 行日志 (候选表 + 覆盖率剖面), 921600 下约 90 ms。掩码那 60 行仍受 ROI_MASK_BUDGET 限制。
 static volatile bool g_verbose_mode = false;
+
+/*
+ * P5.76: 日志两档 —— 简单模式(默认)把 ESP_LOG 整个关掉, 只留结果块 + 开机两行;
+ *   详细模式(AT+LOG=1 / 长按 BOOT)把 plate 放开, 全套诊断回来。
+ *   nodelink 那几行(镜像/权限/控制权)算链路诊断, 简单模式只留警告。
+ *   注意 sdkconfig: CONFIG_LOG_DEFAULT_LEVEL=NONE 且 MAXIMUM=INFO —— 开机那堆(boot/esp_psram/
+ *   cpu_start)在编译期就静音了, 但运行时还能靠这里把日志重新打开。
+ */
+static void apply_log_levels(void)
+{
+    if (g_verbose_mode) {
+        esp_log_level_set("*", ESP_LOG_INFO);
+    } else {
+        esp_log_level_set("*", ESP_LOG_NONE);
+        esp_log_level_set("nodelink", ESP_LOG_WARN);
+    }
+}
+
+// P5.68: 节点侧触发 (AT+RUN) 与"只听触发"(AT+TRIG=1) —— 这两件事要碰模型句柄/摄像头状态,
+//   那些都是 app_main 的局部量, 所以命令只置标记, 真正干活放在主循环里。
+static volatile bool g_run_request = false;    // AT+RUN: 请主循环立刻拍一帧
+static volatile bool g_trigger_only = true;     // 默认「只听触发」: 定时自动识别关着, 发 AT+TRIG=0 才恢复连续
 // P5.34/P5.59: "长边收边"(按实测蓝色边界把取样框左端收窄) —— **P5.61 已整段删除**。
 //   定论: 171 张原始帧按固件真流程复算, 收左端 76/171 = 44%, 不收 128/171 = 75%,
 //   而且"收左端对"的 76 帧完全落在"不收对"的 128 帧里面 —— 0 帧有帮助、52 帧帮倒忙。
@@ -1064,7 +1148,7 @@ static void img_tx_send(const uint8_t *rgb565be, int w, int h, const roi_box_t *
 #endif
 }
 
-/** 模式 2: 把"模型输入块"发出去。图只有 94x24, 但它是训练素材的正品 —— 和推理输入逐像素一致 */
+/** 模式 3: 把"模型输入块"发出去。图只有 94x24, 但它是训练素材的正品 —— 和推理输入逐像素一致 */
 static void img_tx_send_crop(void) {
 #if IMG_TX_ENABLE
     if (!img_tx_enc_ensure(IMG_W, IMG_H, 90)) {   // 训练素材, 压得轻一点 (q90)
@@ -1093,6 +1177,9 @@ static void img_tx_send_crop(void) {
 //   把 patch 发回来一眼就能看出省字有没有落在窗口里、窗口是不是被背景带偏了。
 static void img_tx_send_prov(int zoom) {
 #if IMG_TX_ENABLE
+    // P5.74: 发图统一只看图片输出档 (0=关就一张都不发); 不再跟控制权挂钩。
+    //   这条是唯一绕过 g_img_mode 判断的发图路(省字复核 patch), 闸门在这儿补上。
+    if (g_img_mode == 0) return;
     if (g_prov_rgb == nullptr || zoom < 1) return;
     const int bw = PROV_W * zoom, bh = PROV_H * zoom;
     static uint8_t *big = nullptr;
@@ -2384,8 +2471,13 @@ static bool recognize_once(dl::Model *model,
                            dl::TensorBase *output_float,
                            int8_t *norm_lut,
                            const char *trigger,
-                           bool verbose) {
+                           bool verbose,
+                           bool must_report) {
     const int fn = ++g_frame_no;   // P5.12: 帧号 —— 之后每行日志都带 #n, 便于对照
+    // P5.77: must_report = 这一帧是"被点名拍的"(AT+RUN) —— 没出结果时收尾必打一条人话原因。
+    bool        reported_ok = false;
+    const char *fail_reason = NULL;
+    char        fail_buf[192];
     g_crop_q.valid = 0;            // P5.24: 本帧的裁剪块质量由预处理那一趟填; 先清掉, 免得日志报上一帧的数字
     if (verbose) ESP_LOGI(TAG, "------------ 会话: %s (帧 #%d) ------------", trigger, fn);
 
@@ -2394,6 +2486,7 @@ static bool recognize_once(dl::Model *model,
     camera_fb_t *fb = esp_camera_fb_get();
     if (fb == NULL) {
         ESP_LOGE(TAG, "拍照失败");
+        if (must_report) print_fail_block("取帧失败 —— 摄像头没回帧 (线松/供电不足/驱动异常)", fn);
         return false;
     }
 
@@ -2403,6 +2496,7 @@ static bool recognize_once(dl::Model *model,
     do {
         if (fb->format != PIXFORMAT_RGB565) {
             ESP_LOGE(TAG, "帧格式不是 RGB565: %d", (int)fb->format);
+            fail_reason = "帧格式不是 RGB565 (摄像头配置被改坏了)";
             break;
         }
         // esp-dl 假设数据是紧凑的 (无行填充), 不成立就必须报错而不是将错就错
@@ -2410,6 +2504,7 @@ static bool recognize_once(dl::Model *model,
         if (fb->len != expect) {
             ESP_LOGE(TAG, "帧长度异常: len=%u 期望=%u (存在行填充?)",
                      (unsigned)fb->len, (unsigned)expect);
+            fail_reason = "帧长度异常 (存在行填充)";
             break;
         }
 
@@ -2423,6 +2518,7 @@ static bool recognize_once(dl::Model *model,
         if (!has_roi) {
             // P5.12: 一行说清"为什么跳过"; 掩码/整帧均值/候选表那些细节按 BOOT 才打
             ESP_LOGW(TAG, "#%d 跳过推理: %s (定位 %lld ms)", fn, g_roi_note, (long long)roi_ms);
+            fail_reason = g_roi_note;
             break;
         }
         // 宽高比对照: 训练裁剪就是"车牌四角摆正图", 真实车牌本体约 3.1~3.4
@@ -2480,9 +2576,9 @@ static bool recognize_once(dl::Model *model,
         }
         int64_t pre_ms = (esp_timer_get_time() - t_pre) / 1000;
 
-        // P5.16: 模式 2 就把"模型真正吃到的那块图"存下来。必须在这里做 —— run() 之后
+        // P5.16/P5.74: 生效档 3 就把"模型真正吃到的那块图"存下来。必须在这里做 —— run() 之后
         // 这块显存会被复用 (见下面那段警告), 那时候读到的已经是别的张量了。
-        if (g_img_mode == 2) {
+        if (g_img_mode == 3) {
             const int8_t *cp = (const int8_t *)model_input->data;
             const size_t np = (size_t)IMG_W * IMG_H;
             for (size_t i = 0; i < np; i++) {
@@ -2713,13 +2809,29 @@ static bool recognize_once(dl::Model *model,
         if (plate.empty()) {
             ESP_LOGW(TAG, "#%d >>> RESULT: (未识别到车牌) | 置信 %.0f%%%s",
                      fn, rep.mean_top1 * 100.0f, provbuf);
+            fail_reason = "模型认为这块图里没有车牌 (18 步全空白) —— 框可能套歪, 或字形太糊";
         } else if (fmt_ok) {
             ESP_LOGI(TAG, "#%d >>> RESULT: %s | 置信 %.0f%% (最弱步 %.0f%%)%s", fn, plate.c_str(),
                      rep.mean_top1 * 100.0f, rep.min_top1 * 100.0f, provbuf);
+            reported_ok = true;
         } else {
             ESP_LOGW(TAG, "#%d >>> 疑似误检, 不作为车牌上报: %s | 置信 %.0f%% (格式不合法: 应为 7~8 位, 省字开头)%s",
                      fn, plate.c_str(), rep.mean_top1 * 100.0f, provbuf);
+            snprintf(fail_buf, sizeof(fail_buf),
+                     "模型认出的字符 \"%s\" 不合法 (应为 7~8 位, 省字开头)", plate.c_str());
+            fail_reason = fail_buf;
         }
+
+        // P5.76: 认出来就补一个"结果块" —— 简单模式(默认)下这就是全部日志, 详细模式里它当收尾摘要。
+        //   其余一律静默: 没认出的帧 / 跳过推理的帧 / 各种警告, 简单模式一个字都不打。
+        if (fmt_ok) {
+            print_plate_block(plate.c_str(), rep.mean_top1 * 100.0f, fn, box.x1, box.y1, box.x2, box.y2);
+        }
+
+        // P5.68: 结果出来就推给"节点链路" —— 口径和日志的 RESULT 一致: 只有语法合法的车牌才推;
+        //   每帧都发一行 $PLATE; 跳过推理 / 疑似误检的帧由 recognize_frame() 兜底补一行(车牌字段 -),
+        //   保证"跑了一帧就一定有一行", 节点不会干等超时。
+        node_link_report_plate(plate.c_str(), fmt_ok, (int)(rep.mean_top1 * 100.0f + 0.5f), fn);
 
         // P5.24: 详细模式把"模型到底有多确定 + 这块图本身行不行"摊开 ——
         //   这是分清"图不行(该改定位/预处理)"和"模型不行(只能靠素材微调)"的关键证据。
@@ -2825,12 +2937,15 @@ static bool recognize_once(dl::Model *model,
         ok = true;
     } while (0);
 
+    // P5.77: 被点名拍的那一帧(AT+RUN)没出结果 -> 必打一条原因 (连续模式不打, 免得刷屏)
+    if (must_report && !reported_ok) print_fail_block(fail_reason, fn);
+
     // P5.12: 不管有没有定位到车牌, 都把这一帧(缩一半)编码成 JPEG 发给串口助手预览。
     // 没定位到也发 —— 正好让你看见"相机到底看见了什么", 比看文字直观。
     // P5.14: 绿框只在详细模式(开机/按 BOOT)那一帧画 —— 那帧是专门用来看"框套得准不准"的;
     //        定时连续帧不画框, 因为那些才是要采下来当训练素材的图 (画上去还得再擦一遍, 擦不干净)。
-    if (g_img_mode == 2) {
-        // 模式 2 发的是"喂给模型的那张小图": 这一帧没跑到推理(没定位到车牌)就没有东西可发。
+    if (g_img_mode == 3) {
+        // 模式 3 发的是"喂给模型的那张小图": 这一帧没跑到推理(没定位到车牌)就没有东西可发。
         // 说一句, 免得以为图片输出坏了 —— 限制 5 s 一次, 不刷屏。
         if (ok) {
             img_tx_send_crop();
@@ -2839,13 +2954,14 @@ static bool recognize_once(dl::Model *model,
             const int64_t now_us = esp_timer_get_time();
             if (now_us - last_hint_us > 5000000) {
                 last_hint_us = now_us;
-                ESP_LOGW(TAG, "模式 2: 这一帧没定位到车牌, 没有 94x24 输入块可发 (只发有牌的那几帧)");
+                ESP_LOGW(TAG, "模式 3: 这一帧没定位到车牌, 没有 94x24 输入块可发 (只发有牌的那几帧)");
             }
         }
-    } else {
+    } else if (g_img_mode == 1 || g_img_mode == 2) {
         img_tx_send(fb->buf, (int)fb->width, (int)fb->height,
-                   (has_roi && g_img_mode == 1) ? &box : nullptr);
+                   (has_roi && g_img_mode == 2) ? &box : nullptr);
     }
+    // 模式 0 = 关: 一个字都不发 —— 默认 / 接真节点 / 嫌刷屏时用这档
 
     esp_camera_fb_return(fb);
     return ok;
@@ -2938,9 +3054,115 @@ static void run_probe_direct_int8(dl::Model *model,
              (ck0 == ck1) ? "(run 没动过输入)" : "*** run 之后输入被覆盖了 ***");
 }
 
+/**
+ * P5.68: 包一层 recognize_once —— 保证「跑了一帧就一定给节点一行 $PLATE」。
+ *   为什么: recognize_once 在「跳过推理」(画面里没定位到车牌)那条路是直接 return false 的,
+ *   一行 $PLATE 都不会出; 节点那边就分不清「这帧没认出来」和「链路/摄像头死了」, 只能干等超时。
+ *   这里拿上行计数对一下: 没出就补一行空结果(车牌字段 -, 置信度 0)。
+ */
+static bool recognize_frame(dl::Model *model,
+                            dl::TensorBase *model_input,
+                            dl::TensorBase *output_float,
+                            int8_t *norm_lut,
+                            const char *trigger,
+                            bool verbose,
+                            bool must_report) {
+    const uint32_t before = node_link_uplink_count();
+    const bool ok = recognize_once(model, model_input, output_float, norm_lut, trigger, verbose, must_report);
+    if (node_link_uplink_count() == before) node_link_report_plate("", false, 0, g_frame_no);
+    return ok;
+}
+
+/**
+ * P5.68: 节点链路的外挂 AT 命令 —— 只有 main.cpp 知道的东西(详细模式/图片模式/取样几何档)放这里。
+ * P5.74: 回复规范: 设置回 OK / 失败回 ERR:<原因>; 查询只回 +XXX:<值>; 命令后加 ? 看取值含义。
+ *   以后再加调试命令只往这个函数加分枝, node_link.c 一个字都不用改。
+ *   没处理的命令把 resp 留空 (node_link 会回 ERR)。
+ */
+static void nl_extra_cmd(const char *verb, const char *arg, char *resp, size_t resp_sz) {
+    if (strcmp(verb, "LOG") == 0) {
+        if (!arg) {
+            snprintf(resp, resp_sz, "+LOG:%d", g_verbose_mode ? 1 : 0);
+        } else if (*arg == '0' || *arg == '1') {
+            g_verbose_mode = (*arg == '1');
+            apply_log_levels();          // P5.76: 日志档位立刻跟着切
+            snprintf(resp, resp_sz, "OK");
+        } else {
+            snprintf(resp, resp_sz, "ERR:用法 AT+LOG=0|1 (发 AT+LOG? 看每个值的含义)");
+        }
+    } else if (strcmp(verb, "IMG") == 0) {
+        if (!arg) {
+            // P5.74: 查询只回纯值, 不带任何解释 (要看每档含义发 AT+IMG?)
+            snprintf(resp, resp_sz, "+IMG:%d", g_img_mode_want);
+        } else {
+            const int m = atoi(arg);
+            if (*arg == '\0' || m < 0 || m > 3) {
+                snprintf(resp, resp_sz, "ERR:用法 AT+IMG=0..3 (发 AT+IMG? 看每个值的含义)");
+            } else {
+                g_img_mode_want = m;
+                img_mode_apply();        // P5.74: 立刻生效(跟控制权无关); 顺手把 img= 提醒同步给链路层
+                snprintf(resp, resp_sz, "OK");
+            }
+        }
+    } else if (strcmp(verb, "RUN") == 0) {
+        // P5.74: 这里回 OK 只是"受理了"—— node_link 会把它吞掉并记下是谁问的;
+        //   真正拍照在主循环里做(模型句柄是 app_main 的局部量), 跑完直接发那帧的 $PLATE 行当回复
+        g_run_request = true;
+        snprintf(resp, resp_sz, "OK");
+    } else if (strcmp(verb, "TRIG") == 0) {
+        if (!arg) {
+            snprintf(resp, resp_sz, "+TRIG:%d", g_trigger_only ? 1 : 0);
+        } else if (*arg == '0' || *arg == '1') {
+            g_trigger_only = (*arg == '1');
+            snprintf(resp, resp_sz, "OK");
+        } else {
+            snprintf(resp, resp_sz, "ERR:用法 AT+TRIG=0|1 (发 AT+TRIG? 看每个值的含义)");
+        }
+    } else if (strcmp(verb, "PAD") == 0) {
+        if (!arg) {
+            snprintf(resp, resp_sz, "+PAD:%d", g_pad_profile);
+        } else {
+            const int k = atoi(arg);
+            if (*arg == '\0' || k < 0 || k > 3) {
+                snprintf(resp, resp_sz, "ERR:用法 AT+PAD=0..3 (发 AT+PAD? 看每个值的含义)");
+            } else {
+                pad_apply_profile(k);
+                snprintf(resp, resp_sz, "OK");
+            }
+        }
+    } else if (strcmp(verb, "INFO") == 0) {
+        // P5.78: AT+INFO 第二行的 +CFG 半行 —— LOG/IMG/TRIG/PAD 只有主固件知道, 这里补齐 (PLATE 由 node_link 自己接)
+        snprintf(resp, resp_sz, "LOG=%d,IMG=%d,TRIG=%d,PAD=%d",
+                 g_verbose_mode ? 1 : 0, g_img_mode_want, g_trigger_only ? 1 : 0, g_pad_profile);
+    }
+    // P5.74: HELP / AT+XXX? 不再走这里 —— 完整命令表和取值含义都在 node_link.c (多行, 回调只有一行装不下)
+}
+
 extern "C" void app_main(void) {
-    ESP_LOGI(TAG, "=== LPRNet on ESP32-S3 —— 固件 P5.66 ===");
-    ESP_LOGI(TAG, "    构建时间: %s %s —— 开机看到 P5.66 才说明烧进去的是新固件", __DATE__, __TIME__);
+    apply_log_levels();   // P5.76: 第一件事就定档 —— 简单模式(默认)之后 ESP_LOG 一个字都不出
+    if (!g_verbose_mode) {
+        plain_out("=== LPRNet on ESP32-S3 —— 固件 P5.79 (简单日志: 只打结果块/未识别原因; 想看详细就发 AT+LOG=1 或长按 BOOT) ===");
+    }
+    ESP_LOGI(TAG, "=== LPRNet on ESP32-S3 —— 固件 P5.79 ===");
+    ESP_LOGI(TAG, "    构建时间: %s %s —— 开机看到 P5.79 才说明烧进去的是新固件", __DATE__, __TIME__);
+    ESP_LOGI(TAG, "    P5.76: **日志两档** —— 简单(默认)只打一个结果块(车牌号码/颜色/置信度/帧号/位置); 详细(AT+LOG=1 或长按 BOOT)才有 ROI 行/候选表/掩码/警告");
+    ESP_LOGI(TAG, "    P5.77: **同一帧不再打两遍** —— 每帧自动上行的 $PLATE 只走真节点口, 电脑口只看结果块(AT+TEST/AT+PUSH 例外, 那是人主动要看线上格式); **没拍出来也给原因** —— 被 AT+RUN 点名的那一帧没出结果时补一个\"未识别\"块(车牌号码 - + 一行原因 + 帧号), 连续模式不打");
+    ESP_LOGI(TAG, "    P5.78: **AT+INFO 一眼看全** —— 第1行 +INFO 是版本/时长/统计, 第2行 +CFG 把每条带取值的命令当前值列一遍: LOG/IMG/TRIG/PAD/PLATE");
+    ESP_LOGI(TAG, "    P5.79: **只读命令不看控制权** —— AT+HELP / AT+INFO / AT+XXX? 任何口、任何模式都能发 (AT+CTRL 和电脑口的 AT+IMG 照旧放行)");
+    ESP_LOGI(TAG, "    P5.75: AT+HELP 命令表前后各加一行 \"-----\" 分隔; 删掉 AT+MIRROR 命令 —— 镜像没有要关掉的场景, 一直开着");
+    ESP_LOGI(TAG, "    P5.74: IMG 档位重排: 0=关(默认) 1=干净预览 2=预览+绿框 3=模型输入块94x24");
+    ESP_LOGI(TAG, "    P5.74: AT+RUN 不回 OK、也不另发一行 —— 它的回复就是那一帧的 $PLATE,<车牌>,<置信度>,<帧号>");
+    ESP_LOGI(TAG, "    P5.74: 图片档位不再跟控制权挂钩 —— **电脑口在正常模式下也能设 AT+IMG**; 档位非 0 时每条 $PLATE 尾巴带 img=<档位> 当提醒");
+    ESP_LOGI(TAG, "    P5.74: **AT 回复规范统一** —— 设置类回 OK(失败 ERR:<原因>); 查询类只回 +XXX:<当前值>, 不带多余解释; 新增 AT+XXX? 看该命令每个取值的含义");
+    ESP_LOGI(TAG, "    P5.74: AT+PLATE? 改名 AT+PLATE (? 现在专用于\"看含义\"); AT+IMG/AT+TRIG/AT+LOG 查询只回纯值");
+    ESP_LOGI(TAG, "    P5.73: **切换控制权只回 OK** —— AT+CTRL 设置成功就是一行 OK, 不再打印任何日志(链路层那行重复的和主固件那行副作用提示都删了)");
+    ESP_LOGI(TAG, "    P5.71: **命令回复规范化** —— 带 = 的设置命令成功一律回 OK(原来回的是值), 不带 = 的查询才回当前值; 图片档位不再暴露内部的[生效/设置]两个数");
+    ESP_LOGI(TAG, "    P5.70: **镜像** —— 节点口的对话(收到的命令 + 发出的 $PLATE/回复)抄一份到电脑口, 调试时看得见; 接真节点(UART1)自动开 (P5.75 起删掉 AT+MIRROR 开关, 一直开着)");
+    ESP_LOGI(TAG, "    P5.69: **控制权模式** —— 一个开关 AT+CTRL 决定「谁能发命令」: 正常模式(上电默认)节点是主人/电脑只读, 调试模式电脑是主人/节点只读");
+    ESP_LOGI(TAG, "           电脑要发命令先解锁: AT+CTRL=PC (图片输出不跟控制权挂钩, 电脑口在两种模式下都能设 AT+IMG)");
+    ESP_LOGI(TAG, "    P5.69: AT+MODE 改名 AT+TRIG=<0|1> (1=只听 AT+RUN, 默认); BOOT 按键改成只换设置, 不再顺手拍一帧");
+    ESP_LOGI(TAG, "    P5.68: **摄像头接回节点** —— 识别结果不再只打日志, 还以 $PLATE,<车牌>,<置信度>,<帧号> 送给节点; 部署时节点检测到车 -> 发 AT+RUN -> 收 $PLATE");
+    ESP_LOGW(TAG, "默认工作模式: **只听触发** —— 开机不会自动拍照; 发 AT+RUN 拍一帧, 发 AT+TRIG=0 恢复连续自动识别");
     ESP_LOGI(TAG, "    P5.66: **加第二个模型专治省字** —— 主模型吃 94x24, 省字只剩 13x22 像素 (原图里有 44x138); 于是另训一个 31 类省字分类器, 直接从原图四边形抠省字格 (32x64) 喂它");
     ESP_LOGI(TAG, "           为什么原来读不对: replay 微调集 760/800 是皖牌 -> 模型学会「省字看不清就报皖」; 实测同一张裁块人眼读京、模型 93~99%% 读皖");
     ESP_LOGI(TAG, "           新模型 PC 端 4 折交叉验证 (245 张真实省字, 每张都由没见过它的模型评): top-1 94.7%%, 复核置信 >=%.0f%% 的那些 97.2%% (覆盖 89%%); 低于门槛就保留主模型首字", PROV_CONF_MIN * 100.0f);
@@ -2969,9 +3191,11 @@ extern "C" void app_main(void) {
     ESP_LOGI(TAG, "    P5.49: **候选加 %.0f%% 占屏上限** —— 严格档和兜底档都不收超上限的块(实测真车牌本体 <=32%%, 被反光污染的块 52%%~90%%); 淘汰时日志打『占屏过大(疑似反光/背景连成一片)』", ROI_MAX_AREA_PCT);
     ESP_LOGI(TAG, "    P5.41: BOOT 的 ISR 加了去抖(50ms) —— 上一轮三击被数成 2 下(档位没切)或 6 下, 就是触点回弹");
     ESP_LOGI(TAG, "    BOOT: 单击(<1s)=切图片模式 | 双击=复位图片输出 | 三击=循环切取样几何档 | 长按(>=2s)=详细模式开关");
+    ESP_LOGI(TAG, "          P5.69 起按键只换设置, 不再顺手拍一帧 —— 想立刻看效果: 切 AT+CTRL=PC 再发 AT+RUN (或 AT+TRIG=0 连续跑)");
     ESP_LOGI(TAG, "    连续模式: 每帧 2 行(#n 指标行 + #n RESULT, 结果带置信度); 结果可疑时自动补打一行诊断");
     ESP_LOGI(TAG, "    完整诊断(掩码+候选表+覆盖率剖面): 长按 BOOT >=2s 走一轮; 自动诊断开关 = main.cpp 的 AUTO_DIAG_ON_SUSPECT");
     ESP_LOGI(TAG, "    串口图片: $IMG,<len> + JPEG + CRC32(大端4B) + $END  -> BY串口助手选「二进制帧」, 波特率 %d", CONFIG_ESP_CONSOLE_UART_BAUDRATE);
+    ESP_LOGI(TAG, "              发图走电脑那条口(不占节点线); 电脑口在正常/调试模式下都能设 AT+IMG, 默认 0(关); 发图时 $PLATE 尾巴带 img=");
     ESP_LOGI(TAG, "    图片输出一旦不发图: 按一下 BOOT 会自动复位(关编码器再重开), 不必重启");
 
     // ---- 1. 建模型 (直接从 flash rodata 加载) ----
@@ -3049,6 +3273,13 @@ extern "C" void app_main(void) {
     run_probe_direct_int8(model, model_input, output_float, probe_crop_bin, "探针/直写int8");
     run_probe_direct_int8(model, model_input, output_float, test_input_bin, "旧样张/直写int8");
 
+    // ---- 2.5) 节点链路 (摄像头 -> 节点单片机) ----
+    //   现在手上没有节点板: 链路复用控制台口, 电脑串口助手就是"假节点"(发 AT / 收 $PLATE)。
+    //   真节点到手后: 把 node_link.h 里 NODE_LINK_USE_UART1 改成 1, 接 UART1(GPIO1=TX / GPIO2=RX)。
+    node_link_init("P5.79");
+    node_link_set_extra_handler(nl_extra_cmd);
+    img_mode_apply();   // P5.74: 上电生效档 = 默认档 0(关); 电脑口随时 AT+IMG=<档> 就能开图
+
     // ---- 3. BOOT 按钮 (GPIO0, 低电平按下) ----
     gpio_config_t io = {};
     io.pin_bit_mask = 1ULL << BOOT_BTN_PIN;
@@ -3070,29 +3301,52 @@ extern "C" void app_main(void) {
     if (camera_ok) {
         camera_discard_frames(CAM_WARMUP_FRAMES, CAM_WARMUP_DELAY_MS);   // 等 AE/AGC 稳定, 否则头几帧偏暗
         ESP_LOGI(TAG, "摄像头就绪: VGA RGB565, XCLK 20MHz, fb_count=2");
+        if (!g_verbose_mode) plain_out("摄像头就绪: VGA RGB565 (简单日志; AT+HELP 看命令表)");
         // P5.52: 开机自检时探针读对, 摄像头一起来就变错 -> 说明是运行时内存/环境被搅了, 不是数据问题
         run_probe_selfcheck(model, model_input, output_float, probe_crop_bin, "探针/摄像头已开第1次");
         run_probe_selfcheck(model, model_input, output_float, probe_crop_bin, "探针/摄像头已开第2次");
-        if (AUTO_PERIOD_MS > 0) {
-            ESP_LOGI(TAG, "触发方式: 开机 1 次 + 每 %u ms 自动 1 次 + 短按 BOOT 立即拍一帧",
-                     (unsigned)AUTO_PERIOD_MS);
-            ESP_LOGI(TAG, "说明: 周期 %u ms => 背靠背连续识别, 精简模式; BOOT 单击(<1s)=切图片输出(当前 %d), 双击=复位图片输出, 三击=取样几何档%d(左净 %+.0f%% 右净 %+.0f%%), 长按(>=2s)=详细模式开关",
-                     (unsigned)AUTO_PERIOD_MS, g_img_mode, g_pad_profile,
-                     (g_pad_u_l - ROI_TRIM_X) * 100.0f, (g_pad_u_r - ROI_TRIM_X) * 100.0f);
-        } else {
-            ESP_LOGI(TAG, "触发方式: 开机 1 次 + 单击(<1s)BOOT 切图片模式并拍一帧 + 双击复位图片输出 + 三击循环切取样几何档 + 长按(>=2s)切详细模式开关");
-            ESP_LOGI(TAG, "图片输出模式: 0=干净预览 1=预览+绿框(=模型实际取样框) 2=模型输入块94x24(训练素材)");
-        }
+        ESP_LOGI(TAG, "触发方式: %s —— 发 AT+RUN 立刻拍一帧, 发 AT+TRIG=0 回到连续自动识别(周期 %u ms)",
+                 g_trigger_only ? "**只听触发**(默认, 开机不会自动拍)" : "连续自动识别",
+                 (unsigned)AUTO_PERIOD_MS);
+        ESP_LOGI(TAG, "图片输出: 档 %d (0=关 1=干净预览 2=预览+绿框 3=模型输入块94x24; 非 0 时 $PLATE 尾巴带 img=); 详细模式 %s; 取样几何档 %d (左净 %+.0f%% 右净 %+.0f%%)",
+                 (int)g_img_mode, g_verbose_mode ? "开" : "关", g_pad_profile,
+                 (g_pad_u_l - ROI_TRIM_X) * 100.0f, (g_pad_u_r - ROI_TRIM_X) * 100.0f);
+        ESP_LOGI(TAG, "控制权: %s —— 电脑要发命令先 AT+CTRL=PC (AT+HELP 看命令表)",
+                 node_link_ctrl_is_pc() ? "调试模式(电脑是主人)" : "正常模式(节点是主人, 电脑只读)");
     } else {
         ESP_LOGE(TAG, "摄像头不可用, 先跑一次内嵌样张自检; 之后每 5s 重试摄像头");
+        if (!g_verbose_mode) plain_out("摄像头不可用: 先跑内嵌样张自检, 之后每 5s 重试");
         run_embedded_selfcheck(model, model_input, output_float);
     }
 
     // ---- 5. 主循环: 按钮 / 定时触发识别 ----
-    TickType_t next_auto = 0;          // 0 => 立刻跑第一次
+    TickType_t next_auto = 0;          // 0 => 第一次进连续模式时立刻跑 (默认「只听触发」, 开机不会自动跑)
     TickType_t next_cam_retry = 0;
     while (true) {
         TickType_t now = xTaskGetTickCount();
+
+        // P5.68: 收"节点"发来的 AT 命令 (非阻塞; 一轮识别 ~0.9s, 命令最快下一轮才被处理)
+        node_link_poll();
+
+        // P5.73: 切换控制权只回一行 OK, 不打任何日志 (要状态就发 AT+CTRL 查询)。
+        // P5.74: 图片档位不再跟着控制权变 —— 这里只是把事件消费掉, 顺手同步一次生效档/提醒。
+        if (node_link_take_ctrl_event()) img_mode_apply();
+
+        // P5.68: 节点发来的"拍一张"(AT+RUN) —— 在这里执行, 因为模型句柄/摄像头状态都是 app_main 的局部量
+        if (g_run_request) {
+            g_run_request = false;
+            if (camera_ok) {
+                recognize_frame(model, model_input, output_float, norm_lut, "节点触发(AT+RUN)", g_verbose_mode, true);
+                // 跳过推理 / 认不出的兜底补行由 recognize_frame() 统一负责, 这里不用再管。
+                next_auto = xTaskGetTickCount() + pdMS_TO_TICKS(AUTO_PERIOD_MS);
+            } else {
+                ESP_LOGW(TAG, "AT+RUN: 摄像头当前不可用, 直接回一条空结果");
+                print_fail_block("摄像头当前不可用 (开机自检没通过, 每 5s 自动重试)", 0);
+                node_link_report_plate("", false, 0, 0);
+            }
+            // P5.74: 节点口的回复就是 recognize_frame() 刚发出去的那行 $PLATE (档位非 0 时尾巴带 img=);
+            //   P5.77: 电脑口看的是结果块, 没出结果时就是上面那条"未识别"块。
+        }
 
         if (camera_ok) {
             // P5.15: 单击(<1s) = 循环切换图片输出模式; 长按(>=2s) = 详细模式开关 (P5.31 起改成开关, 不再是"一帧")。
@@ -3150,11 +3404,10 @@ extern "C" void app_main(void) {
                          triple_click ? "三击" : (dbl_click ? "双击" : (long_press ? "长按" : (short_press ? "单击" : "空档"))));
                 if (long_press) {
                     g_verbose_mode = !g_verbose_mode;   // P5.31: 长按 = 详细模式开关
+                    apply_log_levels();                 // P5.76: 日志档位跟着切
                     img_tx_reset("BOOT 长按");   // P5.20: 顺手复位图片输出 —— 卡住时按一下就能救回来
-                    ESP_LOGW(TAG, "详细模式: %s —— 之后每一帧%s完整诊断, 再长按一次切换",
+                    ESP_LOGW(TAG, "详细模式: %s —— 之后每一帧%s完整诊断, 再长按一次切换 (P5.69 起按键只换设置, 不再顺手拍一帧)",
                              g_verbose_mode ? "开" : "关", g_verbose_mode ? "都带" : "都不带");
-                    recognize_once(model, model_input, output_float, norm_lut,
-                                   g_verbose_mode ? "BOOT 长按(详细开)" : "BOOT 长按(详细关)", g_verbose_mode);
                 } else if (dbl_click) {
                     // P5.61: 双击原来 = "长边收边"开关, 收边已整段删除; 现在改成 **图片输出全复位 + 打一张发图统计** ——
                     //   串口图卡住时双击一下就能救回来, 而且不改图片模式 (不会因为救卡而多刷几帧)。
@@ -3164,7 +3417,6 @@ extern "C" void app_main(void) {
                     ESP_LOGW(TAG, "发图统计: 累计成功 %u 帧 / %u KB; 连续失败 %u 次 (最后原因: %s)",
                              (unsigned)g_tx_ok, (unsigned)(g_tx_bytes / 1024), (unsigned)g_tx_fail,
                              g_tx_fail_why ? g_tx_fail_why : "-");
-                    recognize_once(model, model_input, output_float, norm_lut, "BOOT 双击(图片输出复位)", true);
                 } else if (triple_click) {
                     // P5.40: 三击 = 循环切"取样几何档" 0 -> 1 -> 2 -> 3 -> 0 (四档定义见 k_pad_profiles)。
                     //   ⚠ 这一支必须排在 short_press 前面 (三击时 short_press 必然也为真), 否则被整块删掉。
@@ -3178,16 +3430,17 @@ extern "C" void app_main(void) {
                              profile_name[g_pad_profile],
                              (g_pad_u_l - ROI_TRIM_X) * 100.0f, (g_pad_u_r - ROI_TRIM_X) * 100.0f);
                     img_tx_reset("BOOT 三击");
-                    recognize_once(model, model_input, output_float, norm_lut, "BOOT 三击(切取样几何档)", true);
                 } else if (short_press) {
                     img_tx_reset("BOOT 短按");   // P5.20: 同理, 不用再重启单片机
-                    g_img_mode = (g_img_mode + 1) % 3;
-                    static const char *mode_name[3] = {
+                    g_img_mode_want = (g_img_mode_want + 1) & 3;
+                    img_mode_apply();
+                    static const char *mode_name[4] = {
+                        "关 (不发图 —— 默认档, 接真节点用这档)",
                         "干净预览图 (320x240, 画面/采数据)",
                         "预览图 + 绿框 (看框套得准不准)",
                         "模型输入块 (94x24, 训练素材 —— 和推理输入逐像素一致)"};
-                    ESP_LOGW(TAG, "图片输出: %s", mode_name[g_img_mode]);
-                    recognize_once(model, model_input, output_float, norm_lut, "BOOT 短按(切图片模式)", false);
+                    ESP_LOGW(TAG, "图片输出设置: %s%s", mode_name[g_img_mode_want & 3],
+                             (g_img_mode_want == 0) ? "" : "  (非 0 时每条 $PLATE 尾巴会带 img= 提醒)");
                 } else {
                     ESP_LOGW(TAG, "按键 %d ms 落在 1~2s 空档里, 当作没按 (单击<1s=切图片模式, 双击=复位图片输出, 三击=循环切取样几何档, 长按>=2s=详细模式开关)", (int)dur_ms);
                 }
@@ -3198,11 +3451,9 @@ extern "C" void app_main(void) {
                 }
                 boot_btn_latched = false;   // 松手过程中的抖动边沿一并清掉
                 next_auto = xTaskGetTickCount() + pdMS_TO_TICKS(AUTO_PERIOD_MS);
-            } else if (AUTO_PERIOD_MS > 0 && now >= next_auto) {
-                const bool first = (next_auto == 0);        // 开机头一次用详细模式
-                const bool vb = first || g_verbose_mode;    // P5.31: 详细模式开着就一直详细
-                recognize_once(model, model_input, output_float, norm_lut,
-                               first ? "开机" : (g_verbose_mode ? "定时(连续/详细开)" : "定时(连续)"), vb);
+            } else if (!g_trigger_only && AUTO_PERIOD_MS > 0 && now >= next_auto) {
+                recognize_frame(model, model_input, output_float, norm_lut,
+                               (g_verbose_mode ? "定时(连续/详细开)" : "定时(连续)"), g_verbose_mode, false);
                 next_auto = now + pdMS_TO_TICKS(AUTO_PERIOD_MS);
             }
         } else if (now >= next_cam_retry) {
