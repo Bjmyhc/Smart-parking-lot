@@ -51,7 +51,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
-#include "node_link.h"   // P5.68: 摄像头 -> 节点单片机 链路 (现在用电脑串口助手当"假节点")
+#include "node_link.h"   // P5.68: 摄像头 -> 节点单片机 链路 (P5.80 起走 UART1: TX=GPIO47 / RX=GPIO48)
 
 static const char *TAG = "plate";
 
@@ -3141,14 +3141,15 @@ static void nl_extra_cmd(const char *verb, const char *arg, char *resp, size_t r
 extern "C" void app_main(void) {
     apply_log_levels();   // P5.76: 第一件事就定档 —— 简单模式(默认)之后 ESP_LOG 一个字都不出
     if (!g_verbose_mode) {
-        plain_out("=== LPRNet on ESP32-S3 —— 固件 P5.79 (简单日志: 只打结果块/未识别原因; 想看详细就发 AT+LOG=1 或长按 BOOT) ===");
+        plain_out("=== LPRNet on ESP32-S3 —— 固件 P5.80 (简单日志: 只打结果块/未识别原因; 想看详细就发 AT+LOG=1 或长按 BOOT) ===");
     }
-    ESP_LOGI(TAG, "=== LPRNet on ESP32-S3 —— 固件 P5.79 ===");
-    ESP_LOGI(TAG, "    构建时间: %s %s —— 开机看到 P5.79 才说明烧进去的是新固件", __DATE__, __TIME__);
+    ESP_LOGI(TAG, "=== LPRNet on ESP32-S3 —— 固件 P5.80 ===");
+    ESP_LOGI(TAG, "    构建时间: %s %s —— 开机看到 P5.80 才说明烧进去的是新固件", __DATE__, __TIME__);
     ESP_LOGI(TAG, "    P5.76: **日志两档** —— 简单(默认)只打一个结果块(车牌号码/颜色/置信度/帧号/位置); 详细(AT+LOG=1 或长按 BOOT)才有 ROI 行/候选表/掩码/警告");
     ESP_LOGI(TAG, "    P5.77: **同一帧不再打两遍** —— 每帧自动上行的 $PLATE 只走真节点口, 电脑口只看结果块(AT+TEST/AT+PUSH 例外, 那是人主动要看线上格式); **没拍出来也给原因** —— 被 AT+RUN 点名的那一帧没出结果时补一个\"未识别\"块(车牌号码 - + 一行原因 + 帧号), 连续模式不打");
     ESP_LOGI(TAG, "    P5.78: **AT+INFO 一眼看全** —— 第1行 +INFO 是版本/时长/统计, 第2行 +CFG 把每条带取值的命令当前值列一遍: LOG/IMG/TRIG/PAD/PLATE");
     ESP_LOGI(TAG, "    P5.79: **只读命令不看控制权** —— AT+HELP / AT+INFO / AT+XXX? 任何口、任何模式都能发 (AT+CTRL 和电脑口的 AT+IMG 照旧放行)");
+    ESP_LOGI(TAG, "    P5.80: **节点链路改走真串口** —— 节点口从控制台切到 UART1 (TX=GPIO47 / RX=GPIO48, 板上丝印 SDA/SCL 的那两个脚, 115200 8N1); 每帧自动上行的 $PLATE 同步抄一份 [镜像] 到电脑口(没接节点板也能验证); 电脑要发命令仍是先 AT+CTRL=PC");
     ESP_LOGI(TAG, "    P5.75: AT+HELP 命令表前后各加一行 \"-----\" 分隔; 删掉 AT+MIRROR 命令 —— 镜像没有要关掉的场景, 一直开着");
     ESP_LOGI(TAG, "    P5.74: IMG 档位重排: 0=关(默认) 1=干净预览 2=预览+绿框 3=模型输入块94x24");
     ESP_LOGI(TAG, "    P5.74: AT+RUN 不回 OK、也不另发一行 —— 它的回复就是那一帧的 $PLATE,<车牌>,<置信度>,<帧号>");
@@ -3274,9 +3275,10 @@ extern "C" void app_main(void) {
     run_probe_direct_int8(model, model_input, output_float, test_input_bin, "旧样张/直写int8");
 
     // ---- 2.5) 节点链路 (摄像头 -> 节点单片机) ----
-    //   现在手上没有节点板: 链路复用控制台口, 电脑串口助手就是"假节点"(发 AT / 收 $PLATE)。
-    //   真节点到手后: 把 node_link.h 里 NODE_LINK_USE_UART1 改成 1, 接 UART1(GPIO1=TX / GPIO2=RX)。
-    node_link_init("P5.79");
+    //   P5.80: 节点口已经是 UART1 (TX=GPIO47 / RX=GPIO48, 丝印 SDA/SCL 那两个脚, 115200 8N1)。
+    //   现在手上没有节点板: 那根线上发出去的内容靠电脑口的 [镜像] 行核对; 电脑要发命令先 AT+CTRL=PC 抢控制权。
+    //   接节点时: 摄像头 TX(47) -> 节点 USART3 RX(PB11), 摄像头 RX(48) -> 节点 USART3 TX(PB10), 共地。
+    node_link_init("P5.80");
     node_link_set_extra_handler(nl_extra_cmd);
     img_mode_apply();   // P5.74: 上电生效档 = 默认档 0(关); 电脑口随时 AT+IMG=<档> 就能开图
 

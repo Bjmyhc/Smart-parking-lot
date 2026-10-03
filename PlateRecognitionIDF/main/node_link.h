@@ -1,5 +1,5 @@
 /*
- * node_link —— 摄像头(ESP32-S3) -> 节点单片机 的那条链路 (P5.79)
+ * node_link —— 摄像头(ESP32-S3) -> 节点单片机 的那条链路 (P5.80)
  *
  * 为什么有这条链路
  *   摄像头原来是"独立个体": 自己拍、自己认、自己上报云平台。
@@ -10,9 +10,11 @@
  *   NODE_LINK_USE_UART1 = 0 : 复用控制台串口。
  *       现在的现实: 手上没有节点板, 用电脑串口助手当"假节点" —— 发 AT 命令进来, 收结果块/未识别原因。
  *       零额外硬件, 插着现在这根 USB 线就能调。
- *   NODE_LINK_USE_UART1 = 1 : 走 UART1 (TX=GPIO1, RX=GPIO2, 115200)。
- *       以后真节点到手: 摄像头 GPIO1 -> 节点 USART3 RX(PB11), 摄像头 GPIO2 -> 节点 USART3 TX(PB10),
- *       再把这里改成 1 重新编译烧录即可。
+ *   NODE_LINK_USE_UART1 = 1 : 走 UART1, 现用 **TX=GPIO47 / RX=GPIO48 @115200** (P5.80)。
+ *       这两个脚就是板上丝印写着 SDA / SCL 的那两个 —— ESP32 的 GPIO 矩阵允许把 UART 映射到
+ *       任意空闲 GPIO, 丝印只是给人看的标签, 跟芯片无关。
+ *       接法: 摄像头 TX(47) -> 节点 USART3 RX(PB11), 摄像头 RX(48) -> 节点 USART3 TX(PB10)。
+ *       (把 48 当 RX 是为了避开少数 S3 开发板把 GPIO48 接板载 RGB 灯的情况 —— 那个脚做输入更干净。)
  *
  * 控制权 (P5.69) —— 一个开关 AT+CTRL, 两种模式, 每个模式一个"主人" + 一个只能发 AT+CTRL 的"旁观者":
  *
@@ -33,6 +35,8 @@
  *   (节点侧同款范式: bsp_lora.c 发真帧 + 打一行人话摘要)。$PLATE 那行额外附一句人话。
  *   时期 A(只有一条 USB 线)两条口本来就是同一根线, 抄了就是同一句话打两遍 -> 那时自动不抄;
  *   P5.75: 去掉 AT+MIRROR 开关 —— 没有"要关掉"的场景, 一直开着(时期 B 抄, 时期 A 不抄)。
+ *   P5.80: 每帧自动上行的 $PLATE 也纳入镜像 —— 手上没节点板时, 那根线上发出去没有
+ *     全靠这行 [镜像] 才能看见 (以前它只走私下的"静默上行"通道, 电脑口完全看不到)。
  *
  *   时期 A (NODE_LINK_USE_UART1=0) 只有一条口, 那一条口算"电脑口":
  *   所以开机默认(正常模式)下电脑什么都发不了, 必须先来一条 AT+CTRL=PC 解锁, 才能发别的命令。
@@ -84,9 +88,9 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define NODE_LINK_USE_UART1     0
-#define NODE_LINK_UART_TX_GPIO  1
-#define NODE_LINK_UART_RX_GPIO  2
+#define NODE_LINK_USE_UART1     1
+#define NODE_LINK_UART_TX_GPIO  47
+#define NODE_LINK_UART_RX_GPIO  48
 #define NODE_LINK_UART_BAUD     115200
 
 #ifdef __cplusplus

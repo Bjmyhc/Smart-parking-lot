@@ -8,6 +8,8 @@
  *   3) P5.69 起"节点口"和"电脑口"是两路独立输入(各自一个行缓冲, 绝不串行解析);
  *      输出按目的路由: $PLATE 和"回给节点的回复"走节点口, 日志和"给电脑的回复"走电脑口。
  *      P5.77: 每帧自动上行 $PLATE 只在真节点口出 (时期 A 干脆不打); 电脑口只看结果块/未识别块。
+ *      P5.80: 真节点口改用 UART1 (TX=GPIO47 / RX=GPIO48) —— 丝印写着 SDA/SCL 的那两个脚;
+ *             每帧自动上行的 $PLATE 也同步抄一份到电脑口 (否则没接节点板时根本没法验证)。
  */
 #include "node_link.h"
 
@@ -139,7 +141,8 @@ static void nl_write_to(nl_src_t dst, const char *s, size_t n)
  * P5.77: console_ok=false 是"只给机器看、不给人看"的那些行 (每帧自动上行 $PLATE):
  *   时期 A(节点口==电脑口) 干脆一个字都不打 —— 人看的东西由主固件的结果块/未识别块负责,
  *     $PLATE 是给节点解析的, 两条口径分开才不重复;
- *   时期 B 照发 UART1, 只是不往电脑口镜像 (镜像那条留给"人主动要看线上格式"的场合)。
+ *   时期 B 照发 UART1, 并同步抄一份 [镜像] 到电脑口 (P5.80) —— 手上没接节点板时,
+ *     那根线上到底发出去没有、内容对不对, 只能靠这一行才看得见。
  */
 static void nl_vout_to(nl_src_t dst, bool console_ok, const char *fmt, va_list ap)
 {
@@ -151,6 +154,7 @@ static void nl_vout_to(nl_src_t dst, bool console_ok, const char *fmt, va_list a
 
     if (!console_ok && dst == NL_SRC_NODE) {
 #if NODE_LINK_USE_UART1
+        nl_mirror("发给节点", buf, (size_t)n);
         uart_write_bytes(NL_UART, buf, (size_t)n);
 #endif
         return;
@@ -535,7 +539,7 @@ void node_link_init(const char *fw_version)
     ESP_LOGW(TAG, "节点链路 = 控制台口 (电脑串口助手当'假节点': 发 AT, 收结果块/未识别原因)");
 #endif
     ESP_LOGW(TAG, "控制权 = 正常模式(NODE, 上电默认): 节点口能发全部命令, 电脑口只能发 AT+CTRL");
-    ESP_LOGW(TAG, "    上行 $PLATE,<车牌>,<置信度>,<帧号> 只走真节点口(UART1); 电脑口看结果块 | 电脑要发命令先解锁: AT+CTRL=PC (命令表 AT+HELP)");
+    ESP_LOGW(TAG, "    上行 $PLATE,<车牌>,<置信度>,<帧号> 只走真节点口(UART1, 电脑口带 [镜像] 抄本) | 电脑要发命令先解锁: AT+CTRL=PC (命令表 AT+HELP)");
 }
 
 void node_link_poll(void)
