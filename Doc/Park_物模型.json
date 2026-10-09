@@ -162,6 +162,21 @@
       "required": false
     },
     {
+      "identifier": "PlateThumb",
+      "name": "车牌缩略图",
+      "functionType": "u",
+      "accessMode": "r",
+      "desc": "S5 图传: 94×24 二值位图的 base64(376 字符)，行优先、每字节高位在前、1=白字。网关收到 0xF2 重组后随批量上报附带一次；与车牌同批或更晚(缩略图时间早于车牌=上一张残留，App 不画)；车走/未识别不上报",
+      "dataType": {
+        "type": "string",
+        "specs": {
+          "length": 512
+        }
+      },
+      "functionMode": "property",
+      "required": false
+    },
+    {
       "identifier": "SensorDistanceCm",
       "name": "超声波判定阈值",
       "functionType": "u",

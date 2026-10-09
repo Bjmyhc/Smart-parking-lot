@@ -211,6 +211,9 @@ void updateNodeFromRaw(uint8_t nodeId, const LoraNodeData_t *raw)
      * 只置不比对(不参与 changed): 它不直接上报, 但取牌后车牌变化会经 updateNodePlate 触发 */
     if (raw->CamFlags & 0x04)
         nd.plateFetchPending = true;
+    /* ⭐ S5: CamFlags.bit4 "有缩略图待取" → 置旗子, 由 lora_tick 消费并入队 AT+IMG */
+    if (raw->CamFlags & 0x10)
+        nd.imgFetchPending = true;
     /* ⭐ S29: 收到首帧业务数据 → 允许代子设备上报属性.
      * (上报门控 hasDataFrame: 节点上线但数据帧未到时拦截, 避免全 0 垃圾快照) */
     nd.hasDataFrame = true;
@@ -310,6 +313,14 @@ void updateNodePlate(uint8_t nodeId, const LoraPlate_t *plate)
     nd.plate[sizeof(nd.plate) - 1] = '\0';
     nd.plateFetchPending = false;   /* 已取到, 清"有牌待取"旗子 */
     nd.plateNeedPost     = true;    /* ⭐ 新一次识别结果 → 该车牌下次 pack/post 上报一次(之后不再重复上报) */
+    if (!nd.plateValid)
+    {
+        /* ⭐ S5: 未识别("-") → 本地缩略图随之作废(图是上一张有效车牌的).
+         * 不向平台上报空串(平台拒值会连累整条 pack/post), PlateThumb 旧值
+         * 留在平台, App 端按 PlateNumber=='-' 门控不绘制即可 */
+        nd.thumbValid    = false;
+        nd.thumbNeedPost = false;
+    }
 
     nd.hasDataFrame = true;
     updateNodeState((uint8_t)slot, NODE_EVT_DATA);
@@ -319,6 +330,32 @@ void updateNodePlate(uint8_t nodeId, const LoraPlate_t *plate)
     DBG_PRINTF("[节点] 节点%d 车牌: %s (置信度=%d 有效=%d 来源=%d 帧号=%lu)\n",
                nodeId, nd.plate, nd.plateConf, nd.plateValid,
                plate->source, (unsigned long)plate->frameNo);
+}
+
+/* ⭐ S5: 缩略图分包帧(0xF2)两包收齐 → 更新节点缩略图缓存.
+ * 图与车牌同为事件量: 收到即置 thumbNeedPost, 随下一次 pack/post
+ * 附带一次 PlateThumb(base64) 后清零, 平台旧值不在整帧里重复刷新 */
+void updateNodeThumb(uint8_t nodeId, uint16_t imgNo, const uint8_t *img, uint16_t len)
+{
+    int slot = findNode(nodeId);
+    if (slot < 0) slot = registerNode(nodeId);
+    if (slot < 0) return;
+
+    NodeData &nd = nodes[slot];
+
+    if (len > LORA_IMG_BYTES) len = LORA_IMG_BYTES;   /* 防御(重组处已按界拷贝) */
+    memcpy(nd.thumb, img, len);
+    nd.thumbNo       = imgNo;
+    nd.thumbValid    = true;
+    nd.thumbNeedPost = true;
+
+    nd.hasDataFrame = true;
+    updateNodeState((uint8_t)slot, NODE_EVT_DATA);   /* 收到响应 = 链路活性确认 */
+    sysEventFlag |= (1 << (nd.nodeId - 1));
+    dataChanged = true;
+
+    DBG_PRINTF("[节点] 节点%d 缩略图收齐: imgNo=%u (%u 字节)\n",
+               nodeId, imgNo, len);
 }
 
 /* ⭐ 三态状态统一赋值入口 (S9): linkAlive/mode/serviceOnline 只经此修改.

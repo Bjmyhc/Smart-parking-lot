@@ -32,12 +32,17 @@
 /* 摄像头命令(均以 \r\n 结尾, 与 P5.80 节点口约定一致) */
 #define PLATE_CMD_RUN    "AT+RUN\r\n"
 #define PLATE_CMD_INFO   "AT+INFO\r\n"
+#define PLATE_CMD_THUMB  "AT+THUMB\r\n"   /* S5: 取缩略图, 摄像头回 $IMGD/$IMGB/$IMGE 行 */
 
-/* 单行接收上限: 摄像头单行上限 95B, 超 127B 必是噪声 -> 整行丢弃 */
+/* 单行接收上限: 摄像头单行上限 95B, 超 127B 必是噪声 -> 整行丢弃
+ * (S5 缩略图 $IMGB 数据行 = 6 + 60*2 = 126 字符, 恰在上限内) */
 #define PLATE_LINE_MAX   128
 
 /* 进入 PC_IDLE 后需停留的时间才允许发探活(避免刚收尾就发, 见手册 §2.1) */
 #define PLATE_IDLE_SETTLE_MS   2000UL
+
+/* S5: $IMGD..$IMGE 全程超时(7 行 @115200 约 70ms, 放宽到 1.5s 兜底丢行) */
+#define PLATE_THUMB_TIMEOUT_MS 1500UL
 
 /* ==================== 全局变量定义 ==================== */
 PlateCache_t     g_plateCache;
@@ -45,11 +50,18 @@ volatile uint8_t g_plateFetchPending = 0;
 volatile uint8_t g_camOnline         = 0;
 uint8_t          g_capturePolicy     = CAPTURE_POLICY_DEFAULT;
 
+/* S5 车牌缩略图(见 app_plate.h 注释) */
+uint8_t          g_thumbCache[LORA_IMG_BYTES];
+volatile uint8_t g_thumbValid  = 0;
+volatile uint8_t g_imgFetchPending = 0;
+volatile uint16_t g_thumbNo    = 0;
+
 /* ==================== 状态机内部变量 ==================== */
 typedef enum {
     PC_IDLE = 0,        /* 无在途命令 */
     PC_RUN_SENT,        /* 已发 AT+RUN, 等 $PLATE 结果 */
-    PC_PROBE_SENT       /* 已发 AT+INFO, 等任意一行 */
+    PC_PROBE_SENT,      /* 已发 AT+INFO, 等任意一行 */
+    PC_THUMB_SENT       /* S5: 已发 AT+THUMB, 等 $IMGD..$IMGE(行由全局分派处理) */
 } PlateState_t;
 
 static PlateState_t s_state = PC_IDLE;
@@ -77,6 +89,13 @@ static char     s_line[PLATE_LINE_MAX];
 static uint16_t s_lineLen;
 static uint8_t  s_lineDiscard;      /* 1=当前行超长, 丢弃到行尾 */
 
+/* S5 缩略图接收(摄像头 AT+THUMB 应答行) */
+static uint8_t  s_thumbReq;         /* 1=识别结果刚有效, 待发 AT+THUMB */
+static uint8_t  s_rxOn;             /* 1=$IMGD 已开收, 等数据行/结束行 */
+static uint16_t s_rxLen;            /* 本图期望总长(282) */
+static uint16_t s_rxPos;            /* 已收字节 */
+static uint16_t s_rxNo;             /* 本图 imgNo(结束行校验通过才提交) */
+
 /* 诊断计数(仅日志) */
 static uint16_t s_camTimeout;       /* 拍照超时放弃次数 */
 static uint16_t s_camPreempted;     /* 被抢占(ERR:)次数 */
@@ -85,6 +104,7 @@ static uint16_t s_strayPlate;       /* 非本次窗口的 $PLATE 行数 */
 /* ==================== 内部函数声明 ==================== */
 static void Plate_OnLine(const char *line);
 static void Plate_ParseResult(const char *line);
+static void Plate_OnThumbLine(const char *line);   /* S5: $IMGD/$IMGB/$IMGE */
 
 /* ==================== 内部函数实现 ==================== */
 
@@ -149,7 +169,19 @@ static void Plate_TryNextCommand(void)
         return;
     }
 
-    /* ② 探活: 距上次探活 >= 周期 且 已在 IDLE 停留 >= 2s */
+    /* ② S5 取缩略图: 刚识别出有效车牌 -> 立刻向摄像头取图
+     *    (不等探活静默: 图要趁新; 探活让路, 1.5s 内必有结局) */
+    if (s_thumbReq)
+    {
+        Usart3_FlushRx();
+        Usart3_SendAsync((const uint8_t *)PLATE_CMD_THUMB, sizeof(PLATE_CMD_THUMB) - 1);
+        s_sentAt = Get_Tick();
+        s_state  = PC_THUMB_SENT;
+        Usart_Printf(USART_DEBUG, "[PLATE] -> AT+THUMB 取缩略图\r\n");
+        return;
+    }
+
+    /* ③ 探活: 距上次探活 >= 周期 且 已在 IDLE 停留 >= 2s */
     if ((uint32_t)(now - s_lastProbeAt) >= PLATE_PROBE_MS &&
         (uint32_t)(now - s_idleSince)  >= PLATE_IDLE_SETTLE_MS)
     {
@@ -181,7 +213,13 @@ static void Plate_CheckAutoTrigger(void)
             memset(&g_plateCache, 0, sizeof(g_plateCache));
             strcpy(g_plateCache.plate, "-");
             g_plateFetchPending = 1;
-            Usart_Printf(USART_DEBUG, "[PLATE] 车已离开, 清空车牌缓存\r\n");
+            /* S5: 车走了同时清缩略图 —— 不清则下辆车进场的空档期,
+             * 网关/平台仍挂着上一辆车的图(与车牌 '-' 同步清, 语义一致) */
+            g_thumbValid     = 0;
+            g_imgFetchPending = 0;
+            s_thumbReq       = 0;
+            s_rxOn           = 0;
+            Usart_Printf(USART_DEBUG, "[PLATE] 车已离开, 清空车牌缓存与缩略图\r\n");
         }
         s_prevStatus = ParkStatus;
         s_autoArmed  = 0;
@@ -313,10 +351,121 @@ static void Plate_ParseResult(const char *line)
 }
 
 /****************************************************************************
+ * S5: hex 字符 -> 数值, 非法返回 -1
+ ****************************************************************************/
+static int Plate_HexVal(char c)
+{
+    if (c >= '0' && c <= '9') return c - '0';
+    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+    return -1;
+}
+
+/****************************************************************************
+ * S5: 缩略图传输行处理(全局分派, 与拍照/探活状态无关)
+ *   $IMGD,<len>,<imgNo>  开收: 旧图立即作废, 只收 282B 标准图
+ *   $IMGB,<hex>          数据行: 解到 g_thumbCache, 半截/脏 hex 直接放弃本图
+ *   $IMGE,<crc16>        结束行: 长度+CRC16 双校验, 过了才提交 (置 valid/bits)
+ *   直接写 g_thumbCache: 本图收不完时 valid 已在 $IMGD 置 0, 残缺数据不会被当图用
+ ****************************************************************************/
+static void Plate_OnThumbLine(const char *line)
+{
+    if (strncmp(line, "$IMGD,", 6) == 0)
+    {
+        const char *comma = strchr(line + 6, ',');
+        long len = strtol(line + 6, NULL, 10);
+        if (comma == NULL || len != (long)LORA_IMG_BYTES)
+        {
+            s_rxOn = 0;
+            Usart_Printf(USART_DEBUG, "[PLATE] 缩略图起始行异常(len=%ld), 忽略\r\n", len);
+            return;
+        }
+        g_thumbValid = 0;                /* 旧图作废; 收完并通过校验才恢复 */
+        s_rxLen = (uint16_t)len;
+        s_rxPos = 0;
+        s_rxNo  = (uint16_t)strtoul(comma + 1, NULL, 10);
+        s_rxOn  = 1;
+        return;
+    }
+
+    if (strncmp(line, "$IMGB,", 6) == 0)
+    {
+        const char *p = line + 6;
+        if (!s_rxOn)
+            return;
+        while (p[0] != '\0' && p[1] != '\0')
+        {
+            int hi, lo;
+            if (s_rxPos >= s_rxLen)      /* 超长: 脏数据, 放弃本图 */
+            {
+                s_rxOn = 0;
+                return;
+            }
+            hi = Plate_HexVal(p[0]);
+            lo = Plate_HexVal(p[1]);
+            if (hi < 0 || lo < 0)
+            {
+                s_rxOn = 0;
+                Usart_Printf(USART_DEBUG, "[PLATE] 缩略图数据行含非法hex, 放弃本图\r\n");
+                return;
+            }
+            g_thumbCache[s_rxPos++] = (uint8_t)((hi << 4) | lo);
+            p += 2;
+        }
+        return;
+    }
+
+    if (strncmp(line, "$IMGE,", 6) == 0)
+    {
+        uint16_t rx, calc;
+        if (!s_rxOn)
+            return;
+        s_rxOn = 0;
+        if (s_rxPos != s_rxLen)
+        {
+            Usart_Printf(USART_DEBUG, "[PLATE] 缩略图不完整(%u/%u), 丢弃\r\n",
+                         (unsigned)s_rxPos, (unsigned)s_rxLen);
+            return;
+        }
+        calc = lora_crc16(g_thumbCache, s_rxLen);
+        rx   = (uint16_t)strtoul(line + 6, NULL, 16);
+        if (calc != rx)
+        {
+            Usart_Printf(USART_DEBUG, "[PLATE] 缩略图CRC错(收%04X 算%04X), 丢弃\r\n",
+                         (unsigned)rx, (unsigned)calc);
+            return;
+        }
+        g_thumbNo       = s_rxNo;
+        g_thumbValid    = 1;
+        g_imgFetchPending = 1;           /* 立 CamFlags bit4, 网关择机 AT+IMG 取 */
+        s_thumbReq      = 0;
+        if (s_state == PC_THUMB_SENT)
+        {
+            s_state     = PC_IDLE;
+            s_idleSince = Get_Tick();
+        }
+        Usart_Printf(USART_DEBUG, "[PLATE] 缩略图收妥: imgNo=%u %uB crc=%04X\r\n",
+                     (unsigned)g_thumbNo, (unsigned)s_rxLen, (unsigned)calc);
+        return;
+    }
+}
+
+/****************************************************************************
  * 单行处理: 按当前状态分派
  ****************************************************************************/
 static void Plate_OnLine(const char *line)
 {
+    /* S5: 缩略图传输行($IMGD/$IMGB/$IMGE)全局分派 —— 必须在状态机之前:
+     * 取图窗口(PC_THUMB_SENT)收到的这些行与拍照/探活状态无关, 任何状态下都先吃掉 */
+    if (line[0] == '$' &&
+        (strncmp(line, "$IMGD,", 6) == 0 ||
+         strncmp(line, "$IMGB,", 6) == 0 ||
+         strncmp(line, "$IMGE,", 6) == 0))
+    {
+        Plate_OnThumbLine(line);
+        return;
+    }
+
     /* 探活态: 收到任何一行即证明摄像头在线 */
     if (s_state == PC_PROBE_SENT)
     {
@@ -326,6 +475,14 @@ static void Plate_OnLine(const char *line)
         s_probeFail = 0;
         s_state     = PC_IDLE;
         s_idleSince = Get_Tick();
+        return;
+    }
+
+    /* S5: 取图窗口收到 ERR(摄像头不认识 AT+THUMB / 还没有图) —— 必须打出来,
+     * 否则被下面的"非拍照窗口静默丢弃"吞掉, 现场只看得到干巴巴的超时 */
+    if (s_state == PC_THUMB_SENT && strncmp(line, "ERR:", 4) == 0)
+    {
+        Usart_Printf(USART_DEBUG, "[PLATE] 取缩略图被拒: %s\r\n", line);
         return;
     }
 
@@ -344,6 +501,8 @@ static void Plate_OnLine(const char *line)
         s_runGotResult      = 1;
         Plate_ParseResult(line);
         g_plateFetchPending = 1;
+        /* S5: 识别出有效车牌才接着取缩略图(无效帧没图可看, 省一次图传输) */
+        s_thumbReq          = g_plateCache.valid ? 1 : 0;
         s_captureReq        = 0;
         s_state             = PC_IDLE;
         s_idleSince         = Get_Tick();
@@ -379,8 +538,14 @@ void Plate_Init(void)
     g_capturePolicy     = CAPTURE_POLICY_DEFAULT;
     g_plateFetchPending = 0;
     g_camOnline         = 0;
+    memset(g_thumbCache, 0, sizeof(g_thumbCache));   /* S5 */
+    g_thumbValid        = 0;
+    g_imgFetchPending   = 0;
+    g_thumbNo           = 0;
 
     s_state          = PC_IDLE;
+    s_thumbReq       = 0;
+    s_rxOn           = 0;
     s_bootAt         = Get_Tick();
     s_idleSince      = s_bootAt;
     /* 首次探活: 把上次探活时刻回拨一个周期, 使静默期(PLATE_ARM_DELAY_MS)
@@ -474,6 +639,19 @@ void Plate_Task(void)
                                      s_probeFail);
                     g_camOnline = 0;
                 }
+                s_state     = PC_IDLE;
+                s_idleSince = now;
+            }
+            break;
+
+        case PC_THUMB_SENT:
+            /* S5: $IMGD..$IMGE 没在 1.5s 内收完(丢行/摄像头没理) -> 放弃本次取图。
+             * 不重试: 下次识别出有效车牌自然再来一轮; 残留半截传输由 s_rxOn 收口 */
+            if ((uint32_t)(now - s_sentAt) >= PLATE_THUMB_TIMEOUT_MS)
+            {
+                s_rxOn     = 0;
+                s_thumbReq = 0;
+                Usart_Printf(USART_DEBUG, "[PLATE] 取缩略图超时, 放弃本次\r\n");
                 s_state     = PC_IDLE;
                 s_idleSince = now;
             }

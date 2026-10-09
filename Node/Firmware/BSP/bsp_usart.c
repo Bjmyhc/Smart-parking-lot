@@ -31,9 +31,9 @@ static volatile uint16_t usart2_rtail = 0;    /* 读取指针 */
 
 /* ==================== USART2 发送缓冲 + DMA(TX 非阻塞) ====================
  * ⭐ DMA 搬运期间缓冲必须保持有效, 故用静态区(不能是调用者的栈变量).
- * 单帧最大长度: 3(定点头 AddrH/AddrL/CH) + 1(帧头) + 64(ACK 命令上限) + 2(\r\n) = 70,
- * 取 128 留足余量 */
-#define USART2_TXBUF_SIZE       128
+ * 单帧最大长度: 3(定点头 AddrH/AddrL/CH) + 208(S5 缩略图帧 0xF2: 类型1+头5+数据200+CRC2)
+ *               = 211, 取 256 留足余量 */
+#define USART2_TXBUF_SIZE       256
 #define USART2_TX_DMA_CHANNEL   DMA1_Channel7     /* USART2_TX = DMA1_Channel7 */
 #define USART2_TX_DMA_FLAG_TC   DMA1_FLAG_TC7
 #define USART2_TX_DMA_FLAG_GL   DMA1_FLAG_GL7

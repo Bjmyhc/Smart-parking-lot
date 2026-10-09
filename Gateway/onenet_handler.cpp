@@ -61,6 +61,7 @@
 #define SUB_PROP_CAPTURE_POLICY      "CapturePolicy"     /* int32 0~3, 只读(以节点回报为准) */
 #define SUB_PROP_CAMERA_ONLINE       "CameraOnline"      /* bool, 只读 */
 #define SUB_PROP_PLATE_COLOR         "PlateColor"        /* int32 0~5, 一期不上报(color==0 时报空) */
+#define SUB_PROP_PLATE_THUMB         "PlateThumb"        /* ⭐ S5: string, 94×24 二值图 base64(376B ≤平台上限512), 只读 */
 /* ⭐ v4 车牌子系统服务 */
 #define SUB_SERVICE_TRIGGER_CAPTURE  "TriggerCapture"    /* 无入参, 出参 Result/ActualValue */
 #define SUB_SERVICE_CAPTURE_POLICY   "SetCapturePolicy"  /* 入参 PolicyValue(int32 0~3) */
@@ -187,6 +188,27 @@ static void utf8SafeCopy(char *dst, size_t dstSize, const char *src, size_t maxB
     dst[n] = '\0';
 }
 
+/* ⭐ S5: 标准 base64 编码 (282B 位图 → 376 字符, 平台 string 上限 512).
+ * 无外部库依赖; 返回 String 由调用方赋给 JsonVariant(序列化时拷入文档池) */
+static String base64Encode(const uint8_t *data, size_t len)
+{
+    static const char tbl[] =
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    String out;
+    out.reserve(((len + 2) / 3) * 4);
+    for (size_t i = 0; i < len; i += 3)
+    {
+        uint32_t v = (uint32_t)data[i] << 16;
+        if (i + 1 < len) v |= (uint32_t)data[i + 1] << 8;
+        if (i + 2 < len) v |= (uint32_t)data[i + 2];
+        out += tbl[(v >> 18) & 0x3F];
+        out += tbl[(v >> 12) & 0x3F];
+        out += (i + 1 < len) ? tbl[(v >> 6) & 0x3F] : '=';
+        out += (i + 2 < len) ? tbl[v & 0x3F]       : '=';
+    }
+    return out;
+}
+
 /* 代子设备批量上报属性 (pack/post): 把本轮所有在线且已上线成功的子设备
  * 合并进同一条 params 数组, 整轮仅 1 次上行.
  * 依据 OneNET 平台限制"上行报文 ≤1次/s": 若 N 台节点各自发一条,
@@ -205,12 +227,18 @@ static void subPostBatch(void)
     }
     if (count == 0) return;
 
-    StaticJsonDocument<2048> doc;   /* 与 MQTT 发送缓冲(2048B)对齐 */
+    /* ⭐ S5: 池 2048→4096 —— PlateThumb(base64 376B)随包时原池不够分配;
+     * 改静态而非栈上: 4KB 放主循环栈会挤爆(overflowed 时静默丢成员).
+     * 每次使用前 clear, subPostBatch 单线程串行, 无重入 */
+    static StaticJsonDocument<4096> doc;
+    doc.clear();
     doc["id"] = String(millis());
     doc["version"] = "1.0";
     JsonArray params = doc.createNestedArray("params");
     uint8_t platePosted[LORA_MAX_NODES];   /* 本帧实际带了车牌的节点, publish 成功后才清标志 */
     uint8_t platePostedCount = 0;
+    uint8_t thumbPosted[LORA_MAX_NODES];   /* ⭐ S5: 本帧实际带了缩略图的节点 */
+    uint8_t thumbPostedCount = 0;
     for (uint8_t k = 0; k < count; k++)
     {
         NodeData &nd = nodes[slots[k]];
@@ -247,12 +275,21 @@ static void subPostBatch(void)
         }
         if (nd.plateColor != 0)    /* 一期 color 恒 0: 不上报 PlateColor */
             props[SUB_PROP_PLATE_COLOR]["value"] = (int)nd.plateColor;
+        /* ⭐ S5 缩略图: 与车牌同范式"只在新图时上报一次" —— 平台 pack/post
+         * 不带该属性即不改旧值, PlateThumb.time 才等于"缩略图最后更新时间" */
+        if (nd.thumbValid && nd.thumbNeedPost)
+        {
+            props[SUB_PROP_PLATE_THUMB]["value"] =
+                base64Encode(nd.thumb, sizeof(nd.thumb));   /* 282B → 376 字符 */
+            thumbPosted[thumbPostedCount++] = slots[k];
+        }
     }
 
     String out;
     serializeJson(doc, out);
     logPhase(LOGPH_MQTT);   /* ⭐ S34: MQTT 阶段分隔 */
-    DBG_PRINTF("[MQTT] 批量上报 %d 台子设备 (附带车牌 %d 台)\n", count, platePostedCount);
+    DBG_PRINTF("[MQTT] 批量上报 %d 台子设备 (附带车牌 %d 台, 缩略图 %d 台)\n",
+               count, platePostedCount, thumbPostedCount);
     bool sent = mqtt.publish(TOPIC_PACK_POST, out.c_str());
     mqttTxCount++;   /* 上行计数 */
     /* ⭐ 只有真正 publish 出去才清标志(断线未发出则保留, 下次补报),
@@ -260,6 +297,12 @@ static void subPostBatch(void)
     if (sent)
         for (uint8_t k = 0; k < platePostedCount; k++)
             nodes[platePosted[k]].plateNeedPost = false;
+    /* ⭐ S5: 缩略图额外校验"确实序列化进了报文"(文档池不够时 ArduinoJson 静默
+     * 丢末尾成员, 只看 sent 会误清标志导致这张图永远上不了云) */
+    if (sent && (thumbPostedCount == 0 ||
+                 out.indexOf(SUB_PROP_PLATE_THUMB) >= 0))
+        for (uint8_t k = 0; k < thumbPostedCount; k++)
+            nodes[thumbPosted[k]].thumbNeedPost = false;
 }
 
 /* 处理平台下行: 子设备属性设置 -> 转发 LoRa 控制命令 */
@@ -685,7 +728,8 @@ void onenet_init(void)
 {
     mqtt.setServer(ONENET_SERVER, ONENET_PORT);
     mqtt.setCallback(mqtt_callback);
-    mqtt.setBufferSize(2048);
+    mqtt.setBufferSize(4096);   /* ⭐ 2048→4096: pack/post 携带 PlateThumb(base64 376B)
+                                 * 时总报文逼近 2KB, 留足余量防 publish 拒发 */
     /* keepalive 60→30: 断网/链路假死时更快判定失效(≤60s内)并走重连,
      * 缩短网关本身"静默掉线"时间, 也就缩短平台侧代子设备下线的空窗 */
     mqtt.setKeepAlive(30);

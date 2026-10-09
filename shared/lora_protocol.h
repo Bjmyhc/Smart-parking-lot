@@ -27,6 +27,7 @@ extern "C" {
 
 /* ============ 协议版本 ============ */
 #define LORA_PROTO_VERSION    4   /* v4: 数据帧新增 CamFlags 字节(18→19B) + 新增车牌事件帧 0xF1
+                                   *     + 新增缩略图分包帧 0xF2(0xF2 为增量: 旧端收到未知帧类型直接丢弃, 不破坏数据帧)
                                    * ⚠ 本版为结构性变更: 节点与网关必须用串口线**同时烧**,
                                    *   禁止走 OTA(OTA 必然一先一后, 中间窗口长度不符 → 数据帧全丢) */
 
@@ -66,6 +67,7 @@ static inline uint16_t lora_crc16(const uint8_t *data, size_t len)
 #define LORA_FRAME_OTA_OK       0xD1    /* OTA接收128B成功, 准备下一包 */
 #define LORA_FRAME_OTA_RETRY    0xE1    /* OTA要求重发上一包 */
 #define LORA_FRAME_PLATE        0xF1    /* ⭐ v4: 车牌识别结果(响应 AT+PLATE, 事件量走独立帧) */
+#define LORA_FRAME_IMG          0xF2    /* ⭐ v4: 车牌缩略图分包帧(响应 AT+IMG, 94×24 二值图 282B 拆 2 包) */
 
 /* ============ 节点传感器数据 ============
  * 字段顺序、类型、对齐双端强制一致 (本文件为唯一来源)。
@@ -92,7 +94,8 @@ typedef struct {
     uint8_t  CamFlags;        /* bit0~1 = 拍照策略(0~3)
                                * bit2   = 有新车牌待取(网关据此发 AT+PLATE)
                                * bit3   = 摄像头在线(节点探活结果, 1=在线)
-                               * bit4~7 = 预留(以后再要加状态位无需改协议) */
+                               * bit4   = 有缩略图待取(网关据此发 AT+IMG)
+                               * bit5~7 = 预留(以后再要加状态位无需改协议) */
     /* === v2 协议新增字段 (放末尾, 兼容前向布局) === */
     uint8_t  seq;             /* 帧序列号, 节点每次发送 ++, 0..255 循环 */
     uint16_t crc16;           /* CRC16/MODBUS 校验, 覆盖前面所有字节 (不含本字段) */
@@ -111,6 +114,28 @@ typedef struct {
     uint8_t  color;       /* 预留: 车牌颜色 0=未知 1=蓝 2=黄 3=绿 4=白 5=黑 (一期恒为 0, 不上报) */
     uint16_t crc16;       /* CRC16/MODBUS, 覆盖 [结构体首, offsetof(crc16)) = 前 32 字节 */
 } LoraPlate_t;            /* 34 字节 = 24+1+1+1+4+1+2 */
+
+/* ============ 车牌缩略图 ============
+ * 94×24 二值位图 = 282 字节(行优先, 1=白字 0=黑底), 自适应阈值二值化。
+ * 摄像头产图 → 节点缓存 → 数据帧 CamFlags bit4「有图待取」旗子
+ * → 网关发 AT+IMG 取图 → 节点回 LORA_FRAME_IMG 分包帧 */
+#define LORA_IMG_W         94     /* 图宽(像素) */
+#define LORA_IMG_H         24     /* 图高(像素) */
+#define LORA_IMG_BYTES     282    /* LORA_IMG_W * LORA_IMG_H / 8 */
+#define LORA_IMG_FRAG_MAX  200    /* 单包最大数据段(230B模块上限留余量: 类型1B+头5B+数据200B+CRC2B=208B) */
+
+/* 车牌缩略图分包帧(v4)
+ * LORA_FRAME_IMG + 下面结构体。282B 二值图(94×24)拆成 2 包发送:
+ *   第1包 dataLen=200, 第2包 dataLen=82 (每帧线上 1+5+200+2 = 208B ≤ 模块230B上限)
+ * ⚠ 数据长度是 200 不取满230: 230 是否含定点传输3字节地址头未确证, 留足余量 */
+typedef struct {
+    uint16_t imgNo;      /* 图像序号(节点每次新图 ++, 0..65535 循环), 用于丢弃旧图残包 */
+    uint8_t  total;      /* 总包数(本图固定 2, 预留扩展) */
+    uint8_t  idx;        /* 当前包序号(1 起) */
+    uint8_t  dataLen;    /* 本包数据长度(1~LORA_IMG_FRAG_MAX) */
+    uint8_t  data[LORA_IMG_FRAG_MAX]; /* 图像数据片段(二进制位图, 行优先) */
+    uint16_t crc16;      /* CRC16/MODBUS, 覆盖 [结构体首, offsetof(crc16)) */
+} LoraImgFrame_t;        /* 5+200+2 = 207 字节(线上加类型1B = 208 字节) */
 
 /* 节点证书帧(v2: 32 字节, 加 seq + crc16)
  * LORA_FRAME_CERT + 下面结构体 */
@@ -133,6 +158,7 @@ typedef struct {
  *   AT+SetLed=<v>\r\n  设置节点报警灯使能(僵尸车报警灯), v=0/1
  *   AT+CAPTURE\r\n        手动触发拍照识别(无参), 节点回 ACK 后置"有牌待取"旗子
  *   AT+PLATE\r\n          取车牌(无参), 节点回一帧 LORA_FRAME_PLATE(0xF1) 并清旗子
+ *   AT+IMG\r\n            取车牌缩略图(无参), 节点回 LORA_FRAME_IMG(0xF2) 分包帧并清旗子
  *   AT+CapturePolicy=<0..3>\r\n  设置拍照策略(0不拍/1有车/2僵尸车/3都拍)
  *   AT+OTA=start,V<m>.<n>\r\n  触发节点OTA升级
  *

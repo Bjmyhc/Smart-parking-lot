@@ -43,6 +43,7 @@ enum RxState {
     RX_FRAME_DATA,       /* 收 LoraNodeData_t */
     RX_FRAME_CERT,       /* 收 LoraNodeCert_t */
     RX_FRAME_PLATE,      /* ⭐ v4: 收 LoraPlate_t (车牌事件帧 0xF1) */
+    RX_FRAME_IMG,        /* ⭐ S5: 收 LoraImgFrame_t (缩略图分包帧 0xF2) */
     RX_FRAME_ACK         /* 收命令ACK字符串, 读到\r */
 };
 /* ⭐ 帧尾 DRSSI 消费状态: 载荷消费完后, 模块附加的 1 字节实时 RSSI 必须被吃掉.
@@ -67,19 +68,30 @@ static const char *rxStateName(RxState s)
         case RX_FRAME_DATA:  return "RX_FRAME_DATA";
         case RX_FRAME_CERT:  return "RX_FRAME_CERT";
         case RX_FRAME_PLATE: return "RX_FRAME_PLATE";
+        case RX_FRAME_IMG:   return "RX_FRAME_IMG";
         case RX_FRAME_ACK:   return "RX_FRAME_ACK";
         default:             return "?";
     }
 }
-/* ⭐ S17: 接收缓冲固定 64B, 不再依赖结构体大小"恰好装下" (方案 8.4.3):
+/* ⭐ S17: 接收缓冲 (方案 8.4.3):
  *   - DATA/CERT 帧: 需 sizeof(结构体)+1 (末字节DRSSI), 解析前有显式长度校验
  *   - ACK 帧: 命令回显字符串, 以 \r 结尾, 上限 RX_BUF_SIZE-1
- * 编译期断言固化边界: 两结构体+RSSI 必须能装下, 防未来字段扩张静默溢出 */
-#define RX_BUF_SIZE 64
+ *   - S5: 0xF2 缩略图分包帧 sizeof(LoraImgFrame_t)+1 = 208B → 缓冲 64→256
+ * 编译期断言固化边界: 各结构体+RSSI 必须能装下, 防未来字段扩张静默溢出 */
+#define RX_BUF_SIZE 256
 static uint8_t  rxBuf[RX_BUF_SIZE];
 static_assert(sizeof(LoraNodeData_t) + 1 <= RX_BUF_SIZE, "LoraNodeData_t+RSSI 超出 RX_BUF_SIZE");
 static_assert(sizeof(LoraNodeCert_t) + 1 <= RX_BUF_SIZE, "LoraNodeCert_t+RSSI 超出 RX_BUF_SIZE");
 static_assert(sizeof(LoraPlate_t) + 1 <= RX_BUF_SIZE, "LoraPlate_t+RSSI 超出 RX_BUF_SIZE");
+static_assert(sizeof(LoraImgFrame_t) + 1 <= RX_BUF_SIZE, "LoraImgFrame_t+RSSI 超出 RX_BUF_SIZE");
+
+/* ⭐ S5: 0xF2 缩略图分包重组缓冲 (282B 二值位图).
+ * 节点拆 2 包(200+82)发送, 两包 imgNo 相同才拼; 收齐即回调 updateNodeThumb.
+ * 命令队列串行投递, 同时只有一台节点在传图, 全局单份缓冲即可 */
+static uint8_t  imgFragBuf[LORA_IMG_BYTES];   /* 重组后的完整位图 */
+static uint16_t imgFragNo   = 0;              /* 当前重组中的图像序号 */
+static uint8_t  imgFragGot  = 0;              /* bit0=第1包已收, bit1=第2包已收 */
+static uint8_t  imgFragNode = 0;              /* 第1包归属节点(第2包到达时 lastCmdNodeId 可能已前移) */
 
 /* ---------- 轮询调度 ---------- */
 static uint8_t  currentNode   = LORA_POLL_FROM_NODE;   /* 当前处理节点 */
@@ -286,7 +298,7 @@ static bool isFrameHeader(uint8_t c)
 {
     return (c == LORA_FRAME_CERT || c == LORA_FRAME_DATA || c == LORA_FRAME_ACK
          || c == LORA_FRAME_OTA_OK || c == LORA_FRAME_OTA_RETRY
-         || c == LORA_FRAME_PLATE);   /* ⭐ v4: 车牌事件帧 */
+         || c == LORA_FRAME_PLATE || c == LORA_FRAME_IMG);   /* ⭐ v4: 车牌帧 / S5: 缩略图帧 */
 }
 
 /* ==================== 内部函数 ==================== */
@@ -586,10 +598,12 @@ static bool handleCompleteFrame(uint8_t header)
      * 已推进(节点2), 节点1 的 ACK 被误归属为节点2 → 清错标志/误重试
      * (实测日志: 50.342 "收到<- 节点2 确认: AT+SensorDistance" 实为节点1 回复).
      * 串行协议下 lastCmdNodeId 即"当前等待响应的节点", 归属精确 */
-    else if ((header == LORA_FRAME_ACK || header == LORA_FRAME_PLATE) &&
+    else if ((header == LORA_FRAME_ACK || header == LORA_FRAME_PLATE ||
+              header == LORA_FRAME_IMG) &&
              lastCmdNodeId != 0xFF)
-        nodeId = lastCmdNodeId;   /* ⭐ v4: 车牌帧同 ACK, 归属最近投递命令目标节点
-                                   * (AT+PLATE 经命令队列投递, 轮询指针可能已前移) */
+        nodeId = lastCmdNodeId;   /* ⭐ v4: 车牌帧 / S5: 缩略图帧同 ACK, 归属最近投递命令目标节点
+                                   * (AT+PLATE/AT+IMG 经命令队列投递, 轮询指针可能已前移;
+                                   *  0xF2 第2包归属以第1包记录的 imgFragNode 为准) */
 
     switch (header)
     {
@@ -717,6 +731,59 @@ static bool handleCompleteFrame(uint8_t header)
             DBG_PRINTF("[LoRa] 收到 <- 节点%d 车牌帧 (车牌=%s 置信度=%d 有效=%d 帧号=%lu)\n",
                        nodeId, plateTxt, pl->conf, pl->valid,
                        (unsigned long)pl->frameNo);
+        }
+        break;
+
+    case LORA_FRAME_IMG:   /* ⭐ S5: 缩略图分包帧 (响应 AT+IMG), 2 包重组 282B */
+        if (rxGot != sizeof(LoraImgFrame_t) + 1)   /* ⭐ +1: 末字节为DRSSI附加RSSI */
+        {
+            LOG_W("[LoRa] 缩略图帧长度不匹配: 期望 %u 字节, 收到 %u 字节 → 丢弃\n",
+                  (unsigned)(sizeof(LoraImgFrame_t) + 1), (unsigned)rxGot);
+            break;
+        }
+        {
+            const LoraImgFrame_t *im = (const LoraImgFrame_t *)rxBuf;
+            uint16_t calc = lora_crc16(rxBuf, offsetof(LoraImgFrame_t, crc16));
+            if (calc != im->crc16)
+            {
+                LOG_W("[LoRa] 缩略图帧 CRC 错 (节点%d imgNo=%u idx=%d 算=%04X 收=%04X) → 丢弃\n",
+                      nodeId, im->imgNo, im->idx, calc, im->crc16);
+                break;
+            }
+            /* 字段合理性: 固定 2 包, 包序/长度越界直接丢, 防错位数据写越界 */
+            if (im->total != 2 || im->idx < 1 || im->idx > 2 ||
+                im->dataLen == 0 || im->dataLen > LORA_IMG_FRAG_MAX ||
+                (uint16_t)(im->idx - 1) * LORA_IMG_FRAG_MAX + im->dataLen > LORA_IMG_BYTES)
+            {
+                LOG_W("[LoRa] 缩略图帧字段越界 (imgNo=%u total=%d idx=%d len=%d) → 丢弃\n",
+                      im->imgNo, im->total, im->idx, im->dataLen);
+                break;
+            }
+            /* 第1包 = 一次新传输的开始: 无条件重新起拼并记录归属节点
+             * (第2包到达时 lastCmdNodeId 可能已前移);
+             * 第2包只与已登记的第1包同 imgNo 才接收 —— 丢第1包后迟到的第2包不会拼错图 */
+            if (im->idx == 1)
+            {
+                imgFragNo   = im->imgNo;
+                imgFragGot  = 0;
+                imgFragNode = nodeId;
+            }
+            else if (imgFragNo != im->imgNo || (imgFragGot & 0x01) == 0)
+            {
+                DBG_PRINTF("[LoRa] 缩略图第2包无匹配第1包 (imgNo=%u), 丢弃\n", im->imgNo);
+                break;
+            }
+            memcpy(imgFragBuf + (uint16_t)(im->idx - 1) * LORA_IMG_FRAG_MAX,
+                   im->data, im->dataLen);
+            imgFragGot |= (im->idx == 1) ? 0x01 : 0x02;
+            DBG_PRINTF("[LoRa] 收到 <- 节点%d 缩略图第%d/2包 (imgNo=%u len=%d 累计旗=0x%02X)\n",
+                       nodeId, im->idx, im->imgNo, im->dataLen, imgFragGot);
+            if (imgFragGot == 0x03)
+            {
+                imgFragGot = 0;   /* 收齐即复位, 下一张图从第1包重新起拼 */
+                updateNodeThumb(imgFragNode, imgFragNo, imgFragBuf, LORA_IMG_BYTES);
+                gotData = true;
+            }
         }
         break;
 
@@ -977,14 +1044,16 @@ static bool feedRx(uint8_t c)
             rxState = (c == LORA_FRAME_CERT) ? RX_FRAME_CERT
                    : (c == LORA_FRAME_DATA) ? RX_FRAME_DATA
                    : (c == LORA_FRAME_PLATE) ? RX_FRAME_PLATE   /* ⭐ v4 */
+                   : (c == LORA_FRAME_IMG)   ? RX_FRAME_IMG     /* ⭐ S5 */
                    :                          RX_FRAME_ACK;
             /* ⭐ DRSSI: 接收端模块开启数据包RSSI后, 收包末尾会被附加1字节
-             * 实时RSSI(见DX-LR22手册5.3.11). 故 DATA/CERT/PLATE 都多收1字节,
+             * 实时RSSI(见DX-LR22手册5.3.11). 故 DATA/CERT/PLATE/IMG 都多收1字节,
              * 解析时最后一字节作RSSI剥离, 不参与CRC/字段校验.
              * ASCII 帧(以\r结尾)不在此消费该字节, 改由 rxTail 丢弃. */
             rxNeed  = (rxState == RX_FRAME_CERT) ? (uint16_t)(sizeof(LoraNodeCert_t) + 1)
                    : (rxState == RX_FRAME_DATA) ? (uint16_t)(sizeof(LoraNodeData_t) + 1)
                    : (rxState == RX_FRAME_PLATE) ? (uint16_t)(sizeof(LoraPlate_t) + 1)
+                   : (rxState == RX_FRAME_IMG)   ? (uint16_t)(sizeof(LoraImgFrame_t) + 1)
                    :                               (uint16_t)(RX_BUF_SIZE - 1);   /* ⭐ S17: ACK 显式长度上限 */
             rxGot   = 0;
             /* ⭐ v2 加固: 进入新状态时清零 rxBuf, 防止上次残留字节污染本次解析
@@ -1019,12 +1088,14 @@ static bool feedRx(uint8_t c)
     case RX_FRAME_DATA:
     case RX_FRAME_CERT:
     case RX_FRAME_PLATE:
+    case RX_FRAME_IMG:
         lastRxByteMs = millis();
         rxBuf[rxGot++] = c;
         if (rxGot >= rxNeed)
         {
             uint8_t hdr = (rxState == RX_FRAME_DATA)  ? LORA_FRAME_DATA
                         : (rxState == RX_FRAME_PLATE) ? LORA_FRAME_PLATE
+                        : (rxState == RX_FRAME_IMG)   ? LORA_FRAME_IMG
                         :                               LORA_FRAME_CERT;
             gotFrame = handleCompleteFrame(hdr);
             rxState  = RX_WAIT_HEADER;
@@ -1195,6 +1266,25 @@ bool lora_tick(void)
             logPhase(LOGPH_CMD);
             DBG_PRINTF("[LoRa] 节点%d 有牌待取, 入队 AT+PLATE\n", nd.nodeId);
             break;   /* 一拍只入队一条, 与 section 2 单条投递节拍一致 */
+        }
+    }
+
+    /* --- 1.9b ⭐ S5: "有缩略图待取"(CamFlags.bit4) → 入队 AT+IMG 取图 ---
+     * 与 1.9 同范式: 节点在数据帧里置 bit4 表示已缓存通过 CRC 的缩略图;
+     * 消费(清旗子)并入队, 节点回 0xF2 两分包, 收齐由 handleCompleteFrame
+     * 重组并置 thumbNeedPost. AT+IMG 本身丢失 → 节点没收到就没清 bit4,
+     * 下个数据帧仍带 bit4 → 自动重试.
+     * 排在车牌入队之后: 同一拍两条都待取时先取牌(0xF1)再取图(0xF2) */
+    for (uint8_t i = 0; i < nodeCount; i++)
+    {
+        NodeData &nd = nodes[i];
+        if (nd.imgFetchPending && nd.certSent)
+        {
+            nd.imgFetchPending = false;   /* 消费: 先清, 收齐 0xF2 才算真取到 */
+            lora_sendControlNoParam(nd.nodeId, "IMG");
+            logPhase(LOGPH_CMD);
+            DBG_PRINTF("[LoRa] 节点%d 有缩略图待取, 入队 AT+IMG\n", nd.nodeId);
+            break;   /* 一拍只入队一条 */
         }
     }
 

@@ -903,6 +903,85 @@ static volatile bool g_trigger_only = true;     // 默认「只听触发」: 定
 //   **省字自己**(省字笔画太密, 一行 9 个采样点里蓝点常常不到 4 个), 再按它收 = 把省字切掉,
 //   真机表现就是 京 -> 皖/粤/沪 乱跳、或者整串少一个字。详见文档第四十五节。
 static uint8_t g_crop_u8[IMG_W * IMG_H * 3] __attribute__((aligned(16)));  // 模式 2: 输入张量反量化回来的 RGB (JPEG 源序)。必须 16 字节对齐 —— esp_new_jpeg v0.6 起在 S3 上会检查编码器输入缓冲的对齐
+
+// ===================== S5: 车牌缩略图 (94×24 二值位图, 282B) =====================
+// 模型输入反量化 -> 灰度 -> 自适应阈值(σ=6 高斯局部背景, 亮于背景 +12 记白字)。
+// 参数与 L1 预览脚本 _conv_preview.py 的"自适应"档一致(两张真牌实测可读)。
+// 位序: 2256 比特行优先连续打包(每行 94 比特不断行), 每字节高位在前(bit7 = 第 0 个像素),
+//       1 = 白字 0 = 黑底 —— 节点/网关只透传, App 端按同样规则点阵绘制。
+// 产图时机: recognize_once 里模型输入填充处(必须在 run() 之前, 理由同 g_crop_u8);
+//           不看 g_img_mode 档位, 每帧都算(94×24 高斯两趟 ≈ 1ms)。
+static uint8_t g_thumb[IMG_W * IMG_H / 8];          // 94*24/8 = 282
+static volatile bool g_thumbValid = false;          // 1=有图可取
+static volatile uint16_t g_thumbNo = 0;             // 每出一张新图 ++, 节点透传给网关丢旧图残包
+
+static void thumb_build(const int8_t *cp)
+{
+    static uint16_t kw[25];        // σ=6 高斯核, 半径 12, 定点 q16 (和 = 65536)
+    static bool kinit = false;
+    static uint8_t gray[IMG_W * IMG_H];
+    static uint8_t bg[IMG_W * IMG_H];
+    const int R = 12, W = IMG_W, H = IMG_H, N = IMG_W * IMG_H;
+
+    if (!kinit) {                  // 核只算一次: exp(-i²/2σ²) 归一化后放大到 65536
+        double sum = 0;
+        for (int i = -R; i <= R; i++) sum += exp((double)-(i * i) / (2.0 * 6.0 * 6.0));
+        uint32_t acc = 0;
+        for (int i = -R; i <= R; i++) {
+            double v = exp((double)-(i * i) / (2.0 * 6.0 * 6.0)) / sum * 65536.0;
+            kw[i + R] = (uint16_t)(v + 0.5);
+            acc += kw[i + R];
+        }
+        kw[R] = (uint16_t)(kw[R] + (65536u - acc));   // 抹平取整误差, 保证权重和恰为 65536
+        kinit = true;
+    }
+
+    // 灰度: cp 是 B,G,R 序(与 g_crop_u8 填充同源), BT.601 定点
+    for (int i = 0; i < N; i++) {
+        const int b = g_inv_lut[(int)cp[i * 3 + 0] + 128];
+        const int g = g_inv_lut[(int)cp[i * 3 + 1] + 128];
+        const int r = g_inv_lut[(int)cp[i * 3 + 2] + 128];
+        gray[i] = (uint8_t)((77 * r + 150 * g + 29 * b + 128) >> 8);
+    }
+
+    // 水平高斯(边界钳制) -> 暂存
+    for (int y = 0; y < H; y++) {
+        const uint8_t *src = gray + y * W;
+        uint8_t *dst = bg + y * W;
+        for (int x = 0; x < W; x++) {
+            uint32_t acc = 0;
+            for (int d = -R; d <= R; d++) {
+                int xx = x + d;
+                if (xx < 0) xx = 0; else if (xx >= W) xx = W - 1;
+                acc += (uint32_t)src[xx] * kw[d + R];
+            }
+            dst[x] = (uint8_t)(acc >> 16);
+        }
+    }
+    // 垂直高斯 -> 局部背景
+    static uint8_t tmp[IMG_W * IMG_H];
+    for (int x = 0; x < W; x++) {
+        for (int y = 0; y < H; y++) {
+            uint32_t acc = 0;
+            for (int d = -R; d <= R; d++) {
+                int yy = y + d;
+                if (yy < 0) yy = 0; else if (yy >= H) yy = H - 1;
+                acc += (uint32_t)bg[yy * W + x] * kw[d + R];
+            }
+            tmp[y * W + x] = (uint8_t)(acc >> 16);
+        }
+    }
+
+    // 二值: 字比局部背景亮 12 以上 = 白字(1), 否则黑底(0), 行优先打包
+    memset(g_thumb, 0, sizeof(g_thumb));
+    for (int i = 0; i < N; i++) {
+        if ((int)gray[i] > (int)tmp[i] + 12)
+            g_thumb[i >> 3] |= (uint8_t)(0x80 >> (i & 7));
+    }
+    g_thumbValid = true;
+    g_thumbNo++;
+}
+
 static uint8_t *g_tx_rgb = nullptr;              // RGB888 (16 字节对齐), PSRAM
 static uint8_t *g_tx_jpg = nullptr;              // JPEG 输出缓冲, PSRAM
 static uint8_t *g_prov_rgb = nullptr;            // P5.67: 省字 patch 的原色 RGB (PROV_W*PROV_H*3), 详细模式/低置信时发回串口
@@ -2591,6 +2670,10 @@ static bool recognize_once(dl::Model *model,
             }
         }
 
+        // S5: 车牌缩略图(94×24 二值 282B)每帧都产, 不看图片档位 —— 节点 AT+THUMB 取的就是它。
+        // 同样必须在 run() 之前 (模型输入 run 后被显存复用)。
+        thumb_build((const int8_t *)model_input->data);
+
         // P5.8: 裁剪块的三通道均值 —— 必须在这里取(run() 之后这块显存会被复用, 见下面那段警告)。
         // 用途: 把"拍得发白"和"认错字"对上号 (现场 B=229 G=179 R=103, 正常蓝牌底约 B≈200 G≈70 R≈40)。
         long cm_sb = 0, cm_sg = 0, cm_sr = 0;
@@ -3103,6 +3186,15 @@ static void nl_extra_cmd(const char *verb, const char *arg, char *resp, size_t r
                 img_mode_apply();        // P5.74: 立刻生效(跟控制权无关); 顺手把 img= 提醒同步给链路层
                 snprintf(resp, resp_sz, "OK");
             }
+        }
+    } else if (strcmp(verb, "THUMB") == 0) {
+        // S5: 节点取车牌缩略图 —— 把 $IMGD/$IMGB/$IMGE 行推给节点, 这行回复只是"受理"。
+        // 注意命令名不叫 AT+IMG: AT+IMG=<0..3> 已被图片档位占用(节点口也发不了它, 见权限闸门)。
+        if (!g_thumbValid) {
+            snprintf(resp, resp_sz, "ERR:还没有图 (摄像头还没识别出过车牌)");
+        } else {
+            node_link_send_thumb(g_thumb, (int)sizeof(g_thumb), (int)g_thumbNo);
+            snprintf(resp, resp_sz, "OK");
         }
     } else if (strcmp(verb, "RUN") == 0) {
         // P5.74: 这里回 OK 只是"受理了"—— node_link 会把它吞掉并记下是谁问的;

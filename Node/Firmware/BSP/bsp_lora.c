@@ -37,8 +37,13 @@ static uint8_t AUX_Read(void)
     return (GPIO_ReadInputDataBit(LORA_AUX_PORT, LORA_AUX_PIN) == Bit_SET) ? 1 : 0;
 }
 
-/* 单帧最大载荷: 1(帧头) + 64(ACK 原命令上限) + 2(\r\n) = 67 */
-#define LORA_TX_PAYLOAD_MAX  67
+/* 单帧最大载荷: 原为 1(帧头)+64(ACK)+2(\r\n)=67; S5 起容纳缩略图帧 0xF2
+ * (1类型+5头+200数据+2CRC = 208), 上限取 215 —— 3B定点头+215=218B 仍 ≤ 模块 230B 单包上限 */
+#define LORA_TX_PAYLOAD_MAX  215
+
+/* 组帧缓冲: 静态而非栈上 —— 218B 对 1KB 启动栈(0x400)占比太大,
+ * 现场栈溢出=硬错误难排查; LoRa 发送只在主循环上下文, 无重入 */
+static uint8_t s_txFrame[3 + LORA_TX_PAYLOAD_MAX];
 
 /****************************************************************************
  * 发送定点传输帧
@@ -62,7 +67,7 @@ static uint8_t AUX_Read(void)
 static void LoRa_SendFrame(uint16_t dstAddr, uint8_t ch,
                            const uint8_t *data, uint16_t len)
 {
-    uint8_t  frame[3 + LORA_TX_PAYLOAD_MAX];
+    uint8_t  *frame = s_txFrame;   /* S5: 改静态缓冲(见 s_txFrame 注释) */
     uint8_t  auxBefore;
     uint32_t t0, durBefore = 0;
 
@@ -325,6 +330,80 @@ void LoRa_Node_SendPlate(const LoraPlate_t *p)
                  (unsigned long)tmp.frameNo, tmp.crc16);
 }
 
+/****************************************************************************
+ * 发送车牌缩略图(S5, 响应网关 AT+IMG): 282B 拆 2 包
+ *   第1包 dataLen=200 立即发; 第2包 82B 由 ImgTx_Poll() 在第1包**空中发完**
+ *   (AUX 转闲, 且距第1包 >=300ms)后再发 —— 9600bps 下第1包光串口排空就要
+ *   ~220ms, 若立即发第2包, 其 50ms AUX 等待会超时强制发送, 半双工直接撞坏第1包。
+ * 两包都发满整帧(sizeof(LoraImgFrame_t)+1=208B, 未用数据补 0, dataLen 指示真实长度):
+ *   网关接收状态机按固定长度收帧(与 0xF1 同范式), 不必按 dataLen 动态改收长。
+ * 线格式: [0xF2][imgNo 2][total][idx][dataLen][data 200][crc16 2]
+ *   crc16 覆盖结构体首至 offsetof(crc16) 前(buf[1..205]), 与共享头定义一致。
+ * 字段用 memcpy 落位: 结构体在缓冲区偏移 1, 不能按对齐指针直写。
+ ****************************************************************************/
+static struct {
+    uint8_t        left;    /* 1=第2包待发 */
+    uint16_t       imgNo;
+    const uint8_t *img2;    /* 第2包数据(指向调用方全图缓存+200, 调用方保证存活) */
+    uint32_t       at;      /* 第1包发出时刻 */
+} s_imgTx;
+
+static void Img_SendFrag(uint16_t imgNo, uint8_t idx,
+                         const uint8_t *data, uint8_t dataLen)
+{
+    static uint8_t buf[1 + sizeof(LoraImgFrame_t)];   /* 208B, 静态省栈(同 s_txFrame 理由) */
+    uint16_t crc;
+
+    if (dataLen > LORA_IMG_FRAG_MAX)
+        dataLen = LORA_IMG_FRAG_MAX;
+
+    memset(buf, 0, sizeof(buf));
+    buf[0] = LORA_FRAME_IMG;
+    memcpy(buf + 1, &imgNo, 2);
+    buf[3] = 2;                /* total: 本图固定 2 包 */
+    buf[4] = idx;
+    buf[5] = dataLen;
+    if (dataLen > 0)
+        memcpy(buf + 6, data, dataLen);
+    crc = lora_crc16(buf + 1, offsetof(LoraImgFrame_t, crc16));
+    memcpy(buf + 1 + offsetof(LoraImgFrame_t, crc16), &crc, 2);
+
+    LoRa_SendFrame(LORA_GATEWAY_ADDR, LORA_CHANNEL, buf, (uint16_t)sizeof(buf));
+
+    Usart_Printf(USART_DEBUG, "[LoRa] 发送-> 缩略图: imgNo=%u 包%u/2 数据%uB crc=%04X\r\n",
+                 (unsigned)imgNo, (unsigned)idx, (unsigned)dataLen, crc);
+}
+
+void LoRa_Node_SendImg(uint16_t imgNo, const uint8_t *img)
+{
+    Img_SendFrag(imgNo, 1, img, LORA_IMG_FRAG_MAX);
+    s_imgTx.imgNo = imgNo;
+    s_imgTx.img2  = img + LORA_IMG_FRAG_MAX;
+    s_imgTx.at    = Get_Tick();
+    s_imgTx.left  = 1;
+}
+
+/* 第2包择机发送: 由 LoRa_Node_Poll 每轮调(主循环节拍) */
+static void ImgTx_Poll(void)
+{
+    if (!s_imgTx.left)
+        return;
+    if ((uint32_t)(Get_Tick() - s_imgTx.at) < 300UL)
+        return;                                   /* 等第1包串口排空 + 起呼 */
+    if (AUX_Read() == 1)
+    {                                             /* 第1包还在空中 */
+        if ((uint32_t)(Get_Tick() - s_imgTx.at) > 5000UL)
+        {
+            s_imgTx.left = 0;
+            Usart_Printf(USART_DEBUG, "[LoRa][ERR] 缩略图第2包放弃(第1包5s未发完)\r\n");
+        }
+        return;
+    }
+    Img_SendFrag(s_imgTx.imgNo, 2, s_imgTx.img2,
+                 (uint8_t)(LORA_IMG_BYTES - LORA_IMG_FRAG_MAX));
+    s_imgTx.left = 0;
+}
+
 void LoRa_Node_SendAck(const char *cmd)
 {
     uint8_t buf[1 + 64 + 2];
@@ -348,6 +427,9 @@ void LoRa_Node_SendAck(const char *cmd)
 uint8_t LoRa_Node_Poll(LoRaCmdCallback cb)
 {
     uint8_t processed = 0;
+
+    /* S5: 缩略图第2包择机补发(第1包空中发完后, 见 ImgTx_Poll) */
+    ImgTx_Poll();
 
     /* 读取所有可用数据 */
     LoRa_ReadRx();

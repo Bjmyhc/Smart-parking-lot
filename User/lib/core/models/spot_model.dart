@@ -18,6 +18,11 @@ class SpotModel {
   final String? plateColor;
   final int? plateConfidence;
   final String? plateUpdatedAt;
+  /* ⭐ S5 车牌缩略图 (PlateThumb 属性): 94×24 二值位图的 base64(376字符),
+   * 行优先、每字节高位在前、1=白字. plateThumbUpdatedAt = 该属性平台更新时间,
+   * 用于与 plateUpdatedAt 比新旧(缩略图总与车牌同批或更晚上报, 早于车牌=上一张残留) */
+  final String? plateThumb;
+  final String? plateThumbUpdatedAt;
   final String? lastUpdated;
   final bool isOnline;
 
@@ -66,6 +71,8 @@ class SpotModel {
     this.plateColor,
     this.plateConfidence,
     this.plateUpdatedAt,
+    this.plateThumb,
+    this.plateThumbUpdatedAt,
     this.lastUpdated,
     this.isOnline = true,
     this.isDisabled = false,
@@ -145,6 +152,10 @@ class SpotModel {
         rawConf is int ? rawConf : (rawConf is String ? int.tryParse(rawConf.trim()) : null);
     final int capturePolicy = properties['CapturePolicy'] as int? ?? 1;
     final bool cameraOnline = properties['CameraOnline'] as bool? ?? true;
+    // ⭐ S5 车牌缩略图: base64 字符串原样缓存, 解码/绘制交给 PlateThumbView
+    final rawThumb = properties['PlateThumb'];
+    final String? plateThumb =
+        (rawThumb is String && rawThumb.isNotEmpty) ? rawThumb : null;
 
     // 调试输出: 真实在线节点阈值未读到 → 打印所有属性key用于排查OneNET真实标识符
     if (isOnline && !isDisabled && zombieThresholdSec == null && rawName.startsWith(RegExp(r'Park|park'))) {
@@ -168,6 +179,8 @@ class SpotModel {
       plateColor: null, // 预留属性 PlateColor, 一期不上报
       plateConfidence: plateConfidence,
       plateUpdatedAt: json['plate_updated_at'] as String?,
+      plateThumb: plateThumb,
+      plateThumbUpdatedAt: json['plate_thumb_updated_at'] as String?,
       capturePolicy: capturePolicy,
       cameraOnline: cameraOnline,
       lastUpdated: json['updated_at'] as String?,
@@ -195,6 +208,8 @@ class SpotModel {
       'plate_color': plateColor,
       'plate_confidence': plateConfidence,
       'plate_updated_at': plateUpdatedAt,
+      'plate_thumb': plateThumb,
+      'plate_thumb_updated_at': plateThumbUpdatedAt,
       'capture_policy': capturePolicy,
       'camera_online': cameraOnline,
       'last_updated': lastUpdated,
@@ -217,6 +232,8 @@ class SpotModel {
     String? plateColor,
     int? plateConfidence,
     String? plateUpdatedAt,
+    String? plateThumb,
+    String? plateThumbUpdatedAt,
     String? lastUpdated,
     int? capturePolicy,
     bool? cameraOnline,
@@ -253,6 +270,8 @@ class SpotModel {
       plateColor: plateColor ?? this.plateColor,
       plateConfidence: plateConfidence ?? this.plateConfidence,
       plateUpdatedAt: plateUpdatedAt ?? this.plateUpdatedAt,
+      plateThumb: plateThumb ?? this.plateThumb,
+      plateThumbUpdatedAt: plateThumbUpdatedAt ?? this.plateThumbUpdatedAt,
       capturePolicy: capturePolicy ?? this.capturePolicy,
       cameraOnline: cameraOnline ?? this.cameraOnline,
       lastUpdated: lastUpdated ?? this.lastUpdated,
@@ -289,6 +308,8 @@ class SpotModel {
         plateColor: null,
         plateConfidence: null,
         plateUpdatedAt: null,
+        plateThumb: null, // ⭐ S5: 上一辆车的缩略图一并作废
+        plateThumbUpdatedAt: null,
         capturePolicy: capturePolicy,
         cameraOnline: cameraOnline,
         lastUpdated: lastUpdated,
@@ -317,6 +338,23 @@ class SpotModel {
   bool get hasPlate =>
       plateNumber != null && plateNumber!.isNotEmpty && plateNumber != '-';
   bool get plateUnrecognized => plateNumber == '-';
+
+  /* ⭐ S5 缩略图可显示判定:
+   * 1) 先过车牌三态门控(hasPlate): 未识别('-')/从未上报一律不画;
+   * 2) 时间门控: 缩略图正常与车牌同批或更晚一批上报(网关先取牌后取图),
+   *    plateThumbUpdatedAt 早于 plateUpdatedAt = 新车牌已到而新图未到 →
+   *    这是上一张车的残留图, 不画(等下一次全量刷新带来新图). */
+  bool get hasPlateThumb {
+    if (!hasPlate) return false;
+    final t = plateThumb;
+    if (t == null || t.isEmpty) return false;
+    final thumbTime = plateThumbUpdatedAt;
+    final plateTime = plateUpdatedAt;
+    if (thumbTime != null && plateTime != null && thumbTime.compareTo(plateTime) < 0) {
+      return false;
+    }
+    return true;
+  }
 
   /* ⭐⭐⭐ 【实时占用秒数】: 彻底解决刷新滞后问题
    * 原 occupiedSec 完全依赖节点上报的 OccupiedTime 属性, 节点仅在 LoRa 轮询时才更新 → 严重滞后

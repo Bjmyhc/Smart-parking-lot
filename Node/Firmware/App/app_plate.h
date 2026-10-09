@@ -42,6 +42,12 @@ extern PlateCache_t      g_plateCache;         /* 车牌缓存 */
 extern volatile uint8_t  g_plateFetchPending;  /* 1=有新车牌待取(数据帧 CamFlags bit2) */
 extern volatile uint8_t  g_camOnline;          /* 1=摄像头在线(CamFlags bit3) */
 extern uint8_t           g_capturePolicy;      /* 拍照策略 0~3(CamFlags bit0~1) */
+/* S5 车牌缩略图(94×24 二值 282B): 摄像头 AT+THUMB 推来 → CRC 校验缓存
+ * → 数据帧 CamFlags bit4 立旗 → 网关 AT+IMG 取 → 节点拆 2 包回 0xF2 */
+extern volatile uint8_t  g_imgFetchPending;    /* 1=有缩略图待网关取(CamFlags bit4) */
+extern uint8_t           g_thumbCache[LORA_IMG_BYTES];  /* 缩略图位图(行优先, 1=白字) */
+extern volatile uint8_t  g_thumbValid;         /* 1=缓存内有通过 CRC 校验的图 */
+extern volatile uint16_t g_thumbNo;            /* 图像序号(透传摄像头计数, 网关丢残包) */
 
 /* ==================== 接口函数 ==================== */
 

@@ -4,6 +4,7 @@ import '../../../../shared/widgets/card_container.dart';
 import '../../../../shared/widgets/custom_app_bar.dart';
 import '../../../../shared/widgets/status_badge.dart';
 import '../../../../shared/widgets/plate_badge.dart';
+import '../../../../shared/widgets/plate_thumb_view.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_dims.dart';
 import '../../../../core/models/spot_model.dart';
@@ -410,6 +411,18 @@ class _SpotDetailPageState extends State<SpotDetailPage> {
                 fontWeight: FontWeight.w500,
                 color: _confidenceColor(conf),
               ),
+            ),
+          ],
+          /* ⭐ S5 摄像头原图点阵 (PlateThumb 94×24 二值图 base64):
+           * hasPlateThumb 内含门控 —— 未识别不画; 新车牌已到而新图未到
+           * (缩略图时间早于车牌时间)视为上一张残留也不画 */
+          if (spot.hasPlateThumb) ...[
+            const SizedBox(height: 12),
+            PlateThumbView(base64Data: spot.plateThumb!),
+            const SizedBox(height: 4),
+            const Text(
+              '摄像头原图 (94×24)',
+              style: TextStyle(fontSize: 11, color: AppColors.textSecondary),
             ),
           ],
         ],

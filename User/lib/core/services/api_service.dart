@@ -215,6 +215,7 @@ class ApiService {
             final properties = <String, dynamic>{};
             final List<dynamic> propList = data['data'] ?? [];
             String? plateUpdatedAt; // ⭐ 车牌属性的平台更新时间 (替代已废弃的摄像头 CaptureTime)
+            String? plateThumbUpdatedAt; // ⭐ S5 缩略图属性的平台更新时间(判新旧门控用)
 
             for (final prop in propList) {
               final identifier = prop['identifier'] as String? ?? '';
@@ -234,11 +235,17 @@ class ApiService {
                 if (identifier == 'PlateNumber') {
                   plateUpdatedAt = _extractPropertyTime(prop as Map);
                 }
+                if (identifier == 'PlateThumb') {
+                  plateThumbUpdatedAt = _extractPropertyTime(prop as Map);
+                }
               }
             }
 
             device['properties'] = properties;
             if (plateUpdatedAt != null) device['plate_updated_at'] = plateUpdatedAt;
+            if (plateThumbUpdatedAt != null) {
+              device['plate_thumb_updated_at'] = plateThumbUpdatedAt;
+            }
             device['updated_at'] = DateTime.now().toIso8601String();
             device['online'] = true;
           } else {
@@ -282,6 +289,7 @@ class ApiService {
           final properties = <String, dynamic>{};
           final List<dynamic> propList = data['data'] ?? [];
           String? plateUpdatedAt;
+          String? plateThumbUpdatedAt; // ⭐ S5 缩略图属性更新时间
 
           for (final prop in propList) {
             final identifier = prop['identifier'] as String? ?? '';
@@ -301,11 +309,17 @@ class ApiService {
               if (identifier == 'PlateNumber') {
                 plateUpdatedAt = _extractPropertyTime(prop as Map);
               }
+              if (identifier == 'PlateThumb') {
+                plateThumbUpdatedAt = _extractPropertyTime(prop as Map);
+              }
             }
           }
 
           result['properties'] = properties;
           if (plateUpdatedAt != null) result['plate_updated_at'] = plateUpdatedAt;
+          if (plateThumbUpdatedAt != null) {
+            result['plate_thumb_updated_at'] = plateThumbUpdatedAt;
+          }
           result['updated_at'] = DateTime.now().toIso8601String();
           return result;
         }

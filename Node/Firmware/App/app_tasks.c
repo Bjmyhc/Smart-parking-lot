@@ -364,10 +364,11 @@ static void PackNodeData(void)
     NodeDataCache.ZombieThreshold = g_zombieThreshold;   /* ⭐ 当前生效阈值上报给平台观看 */
     NodeDataCache.SensorDistanceCm = g_sensorDistanceCm;  /* ⭐ 当前生效超声波距离阈值上报 */
 
-    /* ⭐ v4 车牌子系统状态标志: bit0~1 策略 / bit2 有牌待取 / bit3 摄像头在线 */
+    /* ⭐ v4 车牌子系统状态标志: bit0~1 策略 / bit2 有牌待取 / bit3 摄像头在线 / bit4 有缩略图待取 */
     NodeDataCache.CamFlags = (uint8_t)((g_capturePolicy & 0x03) |
                                        (g_plateFetchPending ? 0x04 : 0) |
-                                       (g_camOnline        ? 0x08 : 0));
+                                       (g_camOnline        ? 0x08 : 0) |
+                                       (g_imgFetchPending   ? 0x10 : 0));
 }
 
 /****************************************************************************
@@ -510,6 +511,15 @@ static void LoRa_CmdCallback(const char *cmd, const char *value)
     {
         LoRa_Node_SendPlate(Plate_BuildFrame());
         g_plateFetchPending = 0;    /* 清"待取"旗子 */
+    }
+    /* ⭐ S5 网关取缩略图: AT+IMG (无参) → 拆 2 包回 0xF2 图像帧, 不另回 ACK */
+    else if (strcmp(cmd, "AT+IMG") == 0)
+    {
+        if (g_thumbValid)
+            LoRa_Node_SendImg(g_thumbNo, g_thumbCache);
+        else
+            Usart_Printf(USART_DEBUG, "[PLATE] AT+IMG 但无有效缩略图, 忽略\r\n");
+        g_imgFetchPending = 0;      /* 清"待取"旗子 */
     }
     /* ⭐ 平台设置拍照策略 → 网关转发: AT+CapturePolicy=<0..3> */
     else if (strcmp(cmd, "AT+CapturePolicy") == 0)

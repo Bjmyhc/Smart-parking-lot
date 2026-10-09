@@ -25,6 +25,9 @@
 #include "esp_log.h"
 #include "esp_timer.h"
 
+/* S5: 缩略图结束行的 CRC16/MODBUS 与节点/网关共用同一实现(协议单一事实源) */
+#include "../../shared/lora_protocol.h"
+
 #if NODE_LINK_USE_UART1
 #include "driver/uart.h"
 #define NL_UART   UART_NUM_1
@@ -280,6 +283,7 @@ static void nl_help(nl_src_t src)
     nl_out_to(src, "   AT+TRIG=<0|1>       1=只听 AT+RUN(默认), 0=连续自动识别");
     nl_out_to(src, "   AT+LOG=<0|1>         日志档位: 1=详细, 0=简单(默认)");
     nl_out_to(src, "   AT+IMG=<0..3>       串口图片输出档位");
+    nl_out_to(src, "   AT+THUMB            S5: 取车牌缩略图 (282B 二值图, 按 $IMGD/$IMGB/$IMGE 行推给节点)");
     nl_out_to(src, "   AT+PAD=<0..3>       取样几何档");
     nl_out_to(src, "-----");
     nl_out_to(src, "   带 \"=\" 是设置(成功回 OK, 失败回 ERR:<原因>); 不带 \"=\" 是查询(只回 +XXX:<当前值>)");
@@ -565,6 +569,33 @@ void node_link_report_plate(const char *plate, bool valid, int conf_pct, int fra
 {
     nl_set_last(plate, valid, conf_pct, frame_id);
     nl_send_plate(valid, s_last_plate, s_last_conf, s_last_frame, false);
+}
+
+/* S5: 车牌缩略图下发 —— $IMGD 起始行 + $IMGB 数据行(每行 60B 的 hex) + $IMGE 结束行(CRC16)。
+ *   行协议约束: 节点侧单行缓冲 128B(超长整行丢弃), 故 6 + 60*2 = 126 字符封顶。
+ *   nl_out_to_quiet 只走节点口(不刷结果区), 但 P5.80 镜像照抄, 电脑口仍能看见全过程。 */
+void node_link_send_thumb(const uint8_t *img, int len, int img_no)
+{
+    static const char hx[] = "0123456789ABCDEF";
+    char line[140];
+    int off = 0;
+
+    nl_out_to_quiet(NL_SRC_NODE, "$IMGD,%d,%d", len, img_no);
+    while (off < len) {
+        int n = len - off;
+        if (n > 60) n = 60;
+        char *p = line;
+        memcpy(p, "$IMGB,", 6);
+        p += 6;
+        for (int i = 0; i < n; i++) {
+            *p++ = hx[img[off + i] >> 4];
+            *p++ = hx[img[off + i] & 0x0F];
+        }
+        *p = '\0';
+        nl_out_to_quiet(NL_SRC_NODE, "%s", line);
+        off += n;
+    }
+    nl_out_to_quiet(NL_SRC_NODE, "$IMGE,%04X", (unsigned)lora_crc16(img, (size_t)len));
 }
 
 /*

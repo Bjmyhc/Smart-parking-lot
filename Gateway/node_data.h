@@ -79,6 +79,15 @@ struct NodeData {
     uint8_t  capturePolicy;        /* ⭐ CamFlags.bit0~1: 节点当前生效拍照策略 0~3 */
     uint8_t  capturePolicySet;     /* ⭐ SetCapturePolicy 服务目标值, ACK 后回 ActualValue */
     bool     cameraOnline;         /* ⭐ CamFlags.bit3: 摄像头探活结果 (1=在线) */
+
+    /* ---- ⭐ S5 车牌缩略图 (CamFlags.bit4 / 0xF2 分包帧) ---- */
+    bool     imgFetchPending;      /* ⭐ CamFlags.bit4: 有缩略图待取, 据此下发 AT+IMG */
+    uint8_t  thumb[LORA_IMG_BYTES];/* 重组后的 94×24 二值位图(行优先, 1=白字) */
+    uint16_t thumbNo;              /* 图像序号(透传摄像头计数, 丢旧图残包用) */
+    bool     thumbValid;           /* 1=thumb 内有完整通过 CRC 的图 */
+    /* 与 plateNeedPost 同范式: 收齐 0xF2 置位, 随下一次 pack/post 附带一次
+     * PlateThumb(base64 376B) 后清零; 平台 pack/post 不带该属性=不改旧值 */
+    bool     thumbNeedPost;
 };
 
 /* ---- 三态模式枚举 (S9) ---- */
@@ -124,6 +133,9 @@ void updateNodeCert(uint8_t nodeId, const LoraNodeCert_t *cert);
 
 /* ⭐ v4: 从 LoraPlate_t (车牌事件帧 0xF1) 更新节点车牌缓存, 并清"有牌待取"旗子 */
 void updateNodePlate(uint8_t nodeId, const LoraPlate_t *plate);
+
+/* ⭐ S5: 0xF2 两分包收齐后回调, 更新节点缩略图缓存并置 thumbNeedPost */
+void updateNodeThumb(uint8_t nodeId, uint16_t imgNo, const uint8_t *img, uint16_t len);
 
 /* ⭐ S13: 一轮轮询结束(所有节点扫完一遍, advanceNextNode 回绕)时由
  * lora_handler 调用. 以"轮询轮次"而非墙钟统计超时: 本轮有响应的节点
