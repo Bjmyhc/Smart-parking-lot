@@ -70,7 +70,6 @@ uint8_t Config_Load(NodeConfig_t *cfg);
 /* 摄像头走 USART3(PB10/PB11), 单命令通道状态机参数, 详见 app_plate.c */
 #define PLATE_BAUD              115200  /* 摄像头串口波特率(P5.80 固定 115200) */
 #define PLATE_TIMEOUT_MS        2000    /* 等 $PLATE 结果超时(ms) */
-#define PLATE_STABLE_MS         3000    /* 车位状态稳定多久才算可触发(ms) */
 #define PLATE_COOLDOWN_MS       10000   /* 自动触发冷却(ms), 防同一次停车反复拍 */
 #define PLATE_RETRY_MAX         2       /* 拍照超时最大重试次数 */
 #define PLATE_RETRY_GAP_MS      3000    /* 每次重试前的等待间隔(ms) */

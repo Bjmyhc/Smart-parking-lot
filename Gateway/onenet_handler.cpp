@@ -209,6 +209,8 @@ static void subPostBatch(void)
     doc["id"] = String(millis());
     doc["version"] = "1.0";
     JsonArray params = doc.createNestedArray("params");
+    uint8_t platePosted[LORA_MAX_NODES];   /* 本帧实际带了车牌的节点, publish 成功后才清标志 */
+    uint8_t platePostedCount = 0;
     for (uint8_t k = 0; k < count; k++)
     {
         NodeData &nd = nodes[slots[k]];
@@ -229,7 +231,11 @@ static void subPostBatch(void)
          * 上报前硬处理: 策略夹 0~3; 车牌 UTF-8 安全截断 16B; 未识别时置信度报 0 */
         props[SUB_PROP_CAPTURE_POLICY]["value"] = (int)(nd.capturePolicy & 0x03);
         props[SUB_PROP_CAMERA_ONLINE]["value"]  = nd.cameraOnline;
-        if (nd.plate[0] != '\0')   /* 三态"从未上报": 未收到过 0xF1 帧则不报该属性 */
+        /* ⭐ 车牌"只在新结果时上报": 平台 pack/post 里不带某属性 = 不改该属性(旧值保留),
+         * 所以只在新收到 0xF1 时附带一次, 其余整帧不带 —— 这样平台的 PlateNumber.time
+         * 才真正等于"车牌最后更新时间"(否则每 5s 兜底整帧都把 time 刷成"刚刚").
+         * 三态"从未上报": 没收到过 0xF1 (plate 为空) 依旧不报该属性 */
+        if (nd.plate[0] != '\0' && nd.plateNeedPost)
         {
             char plateOut[17];   /* 16B 上限 + NUL */
             utf8SafeCopy(plateOut, sizeof(plateOut), nd.plate, 16);
@@ -237,6 +243,7 @@ static void subPostBatch(void)
             bool unidentified = (plateOut[0] == '-' && plateOut[1] == '\0');
             props[SUB_PROP_PLATE_CONFIDENCE]["value"] =
                 unidentified ? 0 : (int)nd.plateConf;   /* "-"报 0; 否则已夹 0~100 */
+            platePosted[platePostedCount++] = slots[k];
         }
         if (nd.plateColor != 0)    /* 一期 color 恒 0: 不上报 PlateColor */
             props[SUB_PROP_PLATE_COLOR]["value"] = (int)nd.plateColor;
@@ -245,9 +252,14 @@ static void subPostBatch(void)
     String out;
     serializeJson(doc, out);
     logPhase(LOGPH_MQTT);   /* ⭐ S34: MQTT 阶段分隔 */
-    DBG_PRINTF("[MQTT] 批量上报 %d 台子设备\n", count);
-    mqtt.publish(TOPIC_PACK_POST, out.c_str());
+    DBG_PRINTF("[MQTT] 批量上报 %d 台子设备 (附带车牌 %d 台)\n", count, platePostedCount);
+    bool sent = mqtt.publish(TOPIC_PACK_POST, out.c_str());
     mqttTxCount++;   /* 上行计数 */
+    /* ⭐ 只有真正 publish 出去才清标志(断线未发出则保留, 下次补报),
+     * 否则这张车牌会永远上不了云 */
+    if (sent)
+        for (uint8_t k = 0; k < platePostedCount; k++)
+            nodes[platePosted[k]].plateNeedPost = false;
 }
 
 /* 处理平台下行: 子设备属性设置 -> 转发 LoRa 控制命令 */
@@ -929,7 +941,7 @@ void onenet_notifyServiceResult(uint8_t slot, bool success, uint32_t value)
 }
 
 /* ⭐ v4: 供 lora_handler 调用. 收到 0xF1 车牌帧 → 回 TriggerCapture 的 invoke_reply.
- * Result=1(已执行), ActualValue=是否识别到有效车牌(0/1).
+ * Result=本次 OCR 是否识别到有效车牌(0/1), ActualValue=1(拍照动作已执行).
  * 仅当待回复服务确为 TriggerCapture 且节点匹配时才回, 自动触发(无待回复)不产生回复 */
 void onenet_notifyCaptureResult(uint8_t slot, bool valid)
 {
@@ -942,7 +954,7 @@ void onenet_notifyCaptureResult(uint8_t slot, bool valid)
     replySubServiceInvoke(s_pendingServiceReply.msgId,
                           nd.productKey, nd.deviceName,
                           s_pendingServiceReply.identifier,
-                          200, "success", 1, valid ? 1 : 0);
+                          200, "success", valid ? 1 : 0, 1);
     logPhase(LOGPH_MQTT);
     s_pendingServiceReply.active = false;
     DBG_PRINTF("[MQTT] 手动拍照结果已回复平台 (节点%d, 识别=%s)\n",

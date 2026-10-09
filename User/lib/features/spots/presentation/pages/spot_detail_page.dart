@@ -207,24 +207,27 @@ class _SpotDetailPageState extends State<SpotDetailPage> {
     );
   }
 
-  /// 摄像头 Cam001 只与真实车位 Park001 关联 (与车牌补全规则一致): 真实/在线/未停用才给远程拍照入口.
+  /// 摄像头挂在节点 Park001 上 (车牌随节点属性上报): 真实/在线/未停用才给远程拍照入口.
+  /// 摄像头自身离线由 SpotModel.cameraOnline 判定 → 按钮置灰.
   bool _isCameraPark001(SpotModel spot) =>
       spot.id == 'Park001' && spot.isReal && !spot.isOffline && !spot.isDisabledSpot;
 
-  /// 远程拍照按钮点击: 调摄像头 TriggerCapture 服务, 识别结果由 3s 轮询自动刷新.
+  /// 远程拍照按钮点击: 调【节点】TriggerCapture 服务(节点再触发摄像头).
+  /// 按钮在整个"触发 + 取牌"期间保持"拍照识别中..."(provider.capturingRemote), 车牌取到即直接显示, 全程不弹窗;
+  /// 只有真失败(节点忙/离线/冷却中)才弹原因.
   Future<void> _onRemoteCapture(ParkingProvider provider) async {
     final reason = await provider.capturePlateRemote();
     if (!mounted) return;
+    if (reason == null || reason.isEmpty) return; // 成功/拍到未识别: 卡片已直接显示, 不弹提示
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(reason ?? '已触发远程拍照, 识别结果刷新后自动显示'),
-        duration: const Duration(seconds: 2),
-      ),
+      SnackBar(content: Text(reason), duration: const Duration(seconds: 2)),
     );
   }
 
   Widget _buildPlateInfo(ParkingProvider provider, SpotModel spot) {
     final isOccupied = spot.isOccupied || spot.isZombie;
+    /* 空闲车位默认不允许远程拍照(违背逻辑), 需在 策略配置→拍照策略 开启"空闲车位可拍照" */
+    final freeBlocked = spot.isFree && !provider.policy.allowCaptureWhenFree;
 
     if (spot.isOffline) {
       return CardContainer(
@@ -315,8 +318,8 @@ class _SpotDetailPageState extends State<SpotDetailPage> {
                     color: AppColors.textSecondary,
                   ),
                 ),
-                /* ⭐ 拍照识别附加信息: 车牌颜色 / 识别置信度 / 识别时间 (有牌时显示) */
-                if (spot.plateNumber != null && spot.plateNumber!.isNotEmpty) ...[
+                /* ⭐ 拍照识别附加信息: 识别置信度 / 识别时间 (有牌时显示; 车牌颜色属性一期未上报, 不展示) */
+                if (spot.hasPlate) ...[
                   const SizedBox(height: 6),
                   SizedBox(
                     width: double.infinity,
@@ -324,27 +327,25 @@ class _SpotDetailPageState extends State<SpotDetailPage> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         _buildCaptureInfoLine(
-                            Icons.palette_outlined, '车牌颜色', spot.plateColor ?? '未知'),
-                        _buildCaptureInfoLine(
                             Icons.verified_outlined,
                             '识别置信度',
                             spot.plateConfidence != null
-                                ? '${(spot.plateConfidence! * 100).toStringAsFixed(1)}%'
+                                ? '${spot.plateConfidence}%'
                                 : '未知'),
-                        if (spot.capturedAt != null)
+                        if (spot.plateUpdatedAt != null && spot.plateUpdatedAt!.isNotEmpty)
                           _buildCaptureInfoLine(
-                              Icons.schedule, '识别时间', spot.capturedAt!),
+                              Icons.schedule, '识别时间', _formatUpdatedAt(spot.plateUpdatedAt)),
                       ],
                     ),
                   ),
                 ],
                 if (_isCameraPark001(spot)) ...[
                   const SizedBox(height: 16),
-                  // 远程拍照入口: 车牌由摄像头 Cam001 抓拍识别, 服务化调用 TriggerCapture
+                  // 远程拍照入口: 经【节点】服务 TriggerCapture 触发, 由节点再控制摄像头(间接控制)
                   SizedBox(
                     width: double.infinity,
                     child: OutlinedButton.icon(
-                      onPressed: provider.capturingRemote
+                      onPressed: (provider.capturingRemote || !spot.cameraOnline || freeBlocked)
                           ? null
                           : () => _onRemoteCapture(provider),
                       icon: provider.capturingRemote
@@ -353,9 +354,17 @@ class _SpotDetailPageState extends State<SpotDetailPage> {
                               height: 16,
                               child: CircularProgressIndicator(strokeWidth: 2),
                             )
-                          : const Icon(Icons.photo_camera_outlined, size: 18),
+                          : (!spot.cameraOnline
+                              ? const Icon(Icons.videocam_off_outlined, size: 18)
+                              : (freeBlocked
+                                  ? const Icon(Icons.do_not_disturb_on_outlined, size: 18)
+                                  : const Icon(Icons.photo_camera_outlined, size: 18))),
                       label: Text(
-                        provider.capturingRemote ? '拍照识别中...' : '远程拍照',
+                        provider.capturingRemote
+                            ? '拍照识别中...'
+                            : (!spot.cameraOnline
+                                ? '摄像头离线'
+                                : (freeBlocked ? '空闲车位不可拍照' : '远程拍照')),
                         style: const TextStyle(fontWeight: FontWeight.w600),
                       ),
                       style: OutlinedButton.styleFrom(
@@ -379,23 +388,22 @@ class _SpotDetailPageState extends State<SpotDetailPage> {
     );
   }
 
-  /// ⭐ 车牌展示区: 
-  ///  - 有牌 → PlateBadge 真实配色 + 车牌下方识别置信度小字(按阈值着色)
-  ///  - 拍过但没识别出 → 相机✕图标 + "已拍照, 未识别到车牌"
-  ///  - 从未拍照 → 原白底大字兜底
+  /// ⭐ 车牌展示区 (三态, 数据来自节点属性 PlateNumber):
+  ///  - 识别出合法车牌 → PlateBadge + 识别置信度小字(按阈值着色)
+  ///  - '-' 拍到但没认出 → 相机✕图标 + "未识别到车牌" + 靠近/换角度提示
+  ///  - 从未上报(null) → 白底"暂无车牌信息"
+  /// 说明: 仅车位非空闲(ParkStatus != 0)才可能有值; 属性是"最近一次识别结果"残留值, 车走不清空.
   Widget _buildPlateBadgeArea(SpotModel spot) {
-    final plate = spot.plateNumber;
-    final conf = spot.plateConfidence;
-    final hasPlate = plate != null && plate.isNotEmpty;
-    if (hasPlate) {
+    if (spot.hasPlate) {
+      final conf = spot.plateConfidence;
       return Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          PlateBadge(text: plate, color: spot.plateColor),
+          PlateBadge(text: spot.plateNumber!, color: spot.plateColor),
           if (conf != null) ...[
             const SizedBox(height: 6),
             Text(
-              '识别置信度 ${(conf * 100).toStringAsFixed(1)}%',
+              '识别置信度 $conf%',
               style: TextStyle(
                 fontSize: 12,
                 fontWeight: FontWeight.w500,
@@ -406,25 +414,30 @@ class _SpotDetailPageState extends State<SpotDetailPage> {
         ],
       );
     }
-    if (spot.captureFailed) {
-      // ⭐ "拍了但没拍明白": 与"从未拍照"明确区分
+    if (spot.plateUnrecognized) {
+      // '-' : 拍到但没认出 → 引导靠近/换角度重拍
       return const Column(
         mainAxisSize: MainAxisSize.min,
         children: [
           Icon(Icons.no_photography_outlined, size: 42, color: AppColors.textSecondary),
           SizedBox(height: 8),
           Text(
-            '已拍照, 未识别到车牌',
+            '未识别到车牌',
             style: TextStyle(
               fontSize: 14,
               fontWeight: FontWeight.w500,
               color: AppColors.textSecondary,
             ),
           ),
+          SizedBox(height: 4),
+          Text(
+            '请靠近或更换角度后重试',
+            style: TextStyle(fontSize: 12, color: AppColors.textSecondary),
+          ),
         ],
       );
     }
-    // 从未拍照 / 空车位 → 原白底兜底
+    // 从未上报 / 空车位 → 原白底兜底
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
       decoration: BoxDecoration(
@@ -442,14 +455,14 @@ class _SpotDetailPageState extends State<SpotDetailPage> {
     );
   }
 
-  /// 置信度阈值着色: ≥90% 绿 / ≥70% 橙 / <70% 红
-  Color _confidenceColor(double conf) {
-    if (conf >= 0.9) return const Color(0xFF16A34A);
-    if (conf >= 0.7) return const Color(0xFFF59E0B);
+  /// 置信度阈值着色: ≥90% 绿 / ≥70% 橙 / <70% 红 (plateConfidence 为 0~100 整数)
+  Color _confidenceColor(int conf) {
+    if (conf >= 90) return const Color(0xFF16A34A);
+    if (conf >= 70) return const Color(0xFFF59E0B);
     return const Color(0xFFEF4444);
   }
 
-  /// 拍照识别信息行 (车牌颜色 / 置信度 / 识别时间)
+  /// 拍照识别信息行 (置信度 / 识别时间)
   Widget _buildCaptureInfoLine(IconData icon, String label, String value) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 3),

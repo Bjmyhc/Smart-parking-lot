@@ -10,6 +10,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 /// - 传感器策略: 传感器矛盾判定距离阈值
 /// - 刷新策略: 数据轮询刷新间隔
 /// - OTA 策略: 自动检测开关 / 检测间隔 / 每轮检测次数
+/// - 🆕 手动拍照策略: 空闲车位是否允许远程拍照 (纯APP端门控, 默认关闭)
 class PolicyConfig {
   final int alertSec; // 停车超时告警阈值 (秒): 占用超过该时长生成告警
   final int zombieThresholdSec; // ⭐ 僵尸车判定阈值 (秒): 节点端占用超过该时长判定为僵尸车
@@ -20,9 +21,11 @@ class PolicyConfig {
   final bool otaEnabled; // OTA 自动检测开关
   final int otaIntervalSec; // OTA 每轮检测间隔 (秒)
   final int otaCheckCount; // OTA 每轮检测次数 (进入前台立即 1 次 + 剩余按间隔补查)
-  // 🆕 自动拍照策略 (纯APP端, 不下发设备): 检测到车位状态事件后自动调摄像头拍照识别车牌
-  final bool autoCaptureEnabled; // 自动拍照总开关
-  final int autoCaptureMode;     // 拍照时机: 0=有车就拍  1=僵尸车才拍
+  /* 🆕 空闲车位是否允许远程拍照 (纯APP端门控): 默认关闭——
+   *   空闲车位理应无车可拍, 关闭可避免误触/违背逻辑; 开启后允许在空闲车位手动拍照确认现场. */
+  final bool allowCaptureWhenFree;
+  /* ⭐ 自动拍照已归节点: 拍照时机由节点属性 CapturePolicy 决定, App 不落本地配置,
+   *   通过节点服务 SetCapturePolicy 下发, 页面直接读 Provider.capturePolicy. */
 
   const PolicyConfig({
     this.alertSec = 3600, // 默认1小时
@@ -34,8 +37,7 @@ class PolicyConfig {
     this.otaEnabled = true,
     this.otaIntervalSec = 5,
     this.otaCheckCount = 10,
-    this.autoCaptureEnabled = false, // 🆕 默认关闭
-    this.autoCaptureMode = 1,        // 🆕 默认"僵尸车才拍"(更省OCR额度, 也贴合自动取证诉求)
+    this.allowCaptureWhenFree = false, // 🆕 默认关闭: 空闲车位不可远程拍照
   });
 
   /// 出厂默认值 (用于"恢复默认设置").
@@ -50,8 +52,7 @@ class PolicyConfig {
   static const _kOtaEnabled = 'policy_ota_enabled';
   static const _kOtaIntervalSec = 'policy_ota_interval_sec';
   static const _kOtaCheckCount = 'policy_ota_check_count';
-  static const _kAutoCaptureEnabled = 'policy_auto_capture_enabled';
-  static const _kAutoCaptureMode = 'policy_auto_capture_mode';
+  static const _kAllowCaptureWhenFree = 'policy_allow_capture_when_free';
 
   /// 从 SharedPreferences 加载 (无记录时使用默认值).
   static Future<PolicyConfig> load() async {
@@ -66,8 +67,7 @@ class PolicyConfig {
       otaEnabled: p.getBool(_kOtaEnabled) ?? defaults.otaEnabled,
       otaIntervalSec: p.getInt(_kOtaIntervalSec) ?? defaults.otaIntervalSec,
       otaCheckCount: p.getInt(_kOtaCheckCount) ?? defaults.otaCheckCount,
-      autoCaptureEnabled: p.getBool(_kAutoCaptureEnabled) ?? defaults.autoCaptureEnabled,
-      autoCaptureMode: p.getInt(_kAutoCaptureMode) ?? defaults.autoCaptureMode,
+      allowCaptureWhenFree: p.getBool(_kAllowCaptureWhenFree) ?? defaults.allowCaptureWhenFree,
     );
   }
 
@@ -83,8 +83,7 @@ class PolicyConfig {
     await p.setBool(_kOtaEnabled, otaEnabled);
     await p.setInt(_kOtaIntervalSec, otaIntervalSec);
     await p.setInt(_kOtaCheckCount, otaCheckCount);
-    await p.setBool(_kAutoCaptureEnabled, autoCaptureEnabled);
-    await p.setInt(_kAutoCaptureMode, autoCaptureMode);
+    await p.setBool(_kAllowCaptureWhenFree, allowCaptureWhenFree);
   }
 
   PolicyConfig copyWith({
@@ -97,8 +96,7 @@ class PolicyConfig {
     bool? otaEnabled,
     int? otaIntervalSec,
     int? otaCheckCount,
-    bool? autoCaptureEnabled,
-    int? autoCaptureMode,
+    bool? allowCaptureWhenFree,
   }) {
     return PolicyConfig(
       alertSec: alertSec ?? this.alertSec,
@@ -110,8 +108,7 @@ class PolicyConfig {
       otaEnabled: otaEnabled ?? this.otaEnabled,
       otaIntervalSec: otaIntervalSec ?? this.otaIntervalSec,
       otaCheckCount: otaCheckCount ?? this.otaCheckCount,
-      autoCaptureEnabled: autoCaptureEnabled ?? this.autoCaptureEnabled,
-      autoCaptureMode: autoCaptureMode ?? this.autoCaptureMode,
+      allowCaptureWhenFree: allowCaptureWhenFree ?? this.allowCaptureWhenFree,
     );
   }
 }

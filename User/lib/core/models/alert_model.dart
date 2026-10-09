@@ -1,9 +1,10 @@
 class AlertModel {
   final String id;
   final String plateNumber;
-  /* ⭐ 拍照识别附加信息快照 (来自车位的拍照车牌, 供告警小票卡按真实车牌配色显示) */
+  /* ⭐ 拍照识别附加信息快照 (来自车位节点属性, 供告警小票卡显示)
+   * plateConfidence = 识别置信度 int 0~100 */
   final String? plateColor;
-  final double? plateConfidence;
+  final int? plateConfidence;
   final String spotId;
   final int occupiedHours;
   final int occupiedSec; // 🆕 原始占用秒数(保留秒级精度, 自动适配单位显示)
@@ -29,7 +30,7 @@ class AlertModel {
       id: json['id'] as String? ?? '',
       plateNumber: json['plate_number'] as String? ?? '',
       plateColor: json['plate_color'] as String?,
-      plateConfidence: (json['plate_confidence'] as num?)?.toDouble(),
+      plateConfidence: (json['plate_confidence'] as num?)?.toInt(),
       spotId: json['spot_id'] as String? ?? '',
       occupiedHours: (json['occupied_hours'] as num?)?.toInt() ?? 0,
       occupiedSec: (json['occupied_sec'] as num?)?.toInt() ?? (json['occupied_hours'] as num? ?? 0).toInt() * 3600, // 🆕 兼容旧数据: 秒不存在就按小时*3600估算
@@ -64,7 +65,7 @@ class AlertModel {
   AlertModel copyWith({
     String? plateNumber,
     String? plateColor,
-    double? plateConfidence,
+    int? plateConfidence,
     int? occupiedHours,
     int? occupiedSec,
     String? status,

@@ -705,7 +705,7 @@ static bool handleCompleteFrame(uint8_t header)
             }
             updateNodePlate(nodeId, pl);
             /* ⭐ 手动触发(TriggerCapture)的 invoke_reply 在此刻回: 车牌已取到,
-             * Result=1/ActualValue=是否识别到有效车牌. 非该服务(自动触发)则忽略 */
+             * Result=是否识别到有效车牌(0/1), ActualValue=1(已执行). 非该服务(自动触发)则忽略 */
             int slot = findNode(nodeId);
             if (slot >= 0)
                 onenet_notifyCaptureResult((uint8_t)slot, pl->valid != 0);

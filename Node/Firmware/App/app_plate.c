@@ -7,7 +7,7 @@
  *     拍照与探活共用同一条通道, 半双工口同时只允许一条在途命令;
  *   - $PLATE 结果解析 + 归属判定(只认本次窗口首行, 发送前清 RX 缓冲);
  *   - PlateCache 车牌缓存;
- *   - 自动触发判定(策略命中 + 状态稳定 PLATE_STABLE_MS + 冷却 PLATE_COOLDOWN_MS);
+ *   - 自动触发判定(车位状态变化 + 策略命中 + 冷却 PLATE_COOLDOWN_MS);
  *   - 周期探活维护 g_camOnline;
  *   - 全程非阻塞: 每轮只做"取缓冲 → 喂状态机 → 查超时", 不死等毫秒,
  *     否则会踩死网关 PING 的 500ms 超时。
@@ -69,7 +69,6 @@ static uint8_t  s_probeFail;        /* 连续探活失败次数 */
 
 /* 自动触发 */
 static ParkStatus_t s_prevStatus;   /* 上次车位状态(判上升沿) */
-static uint32_t s_statusStableAt;   /* 当前状态保持起始时刻 */
 static uint8_t  s_autoArmed;        /* 本次状态变化是否已触发过 */
 static uint32_t s_lastAutoAt;       /* 上次自动触发时刻(冷却用) */
 
@@ -159,7 +158,7 @@ static void Plate_TryNextCommand(void)
 }
 
 /****************************************************************************
- * 自动触发判定: 状态稳定 PLATE_STABLE_MS 且策略命中且冷却已过 -> 请求拍照
+ * 自动触发判定: 车位状态变化(上升沿)且策略命中且冷却已过 -> 请求拍照
  ****************************************************************************/
 static void Plate_CheckAutoTrigger(void)
 {
@@ -169,17 +168,14 @@ static void Plate_CheckAutoTrigger(void)
     if ((uint32_t)(now - s_bootAt) < PLATE_ARM_DELAY_MS)
         return;
 
-    /* 车位状态变化: 重新武装并重置稳定计时 */
+    /* 车位状态变化: 重新武装(无稳定窗, 状态一变即可触发) */
     if (ParkStatus != s_prevStatus)
     {
-        s_prevStatus     = ParkStatus;
-        s_statusStableAt = now;
-        s_autoArmed      = 0;
+        s_prevStatus = ParkStatus;
+        s_autoArmed  = 0;
     }
 
     if (s_autoArmed)                                   /* 本次变化已触发过 */
-        return;
-    if ((uint32_t)(now - s_statusStableAt) < PLATE_STABLE_MS)
         return;
     if (!Plate_PolicyAllows(ParkStatus))
         return;
@@ -380,7 +376,6 @@ void Plate_Init(void)
      * 不必干等一个 PLATE_PROBE_MS 周期 */
     s_lastProbeAt    = s_bootAt - PLATE_PROBE_MS;
     s_prevStatus     = PARK_IDLE;
-    s_statusStableAt = s_bootAt;
     s_lastAutoAt     = s_bootAt - PLATE_COOLDOWN_MS;   /* 首次触发不受冷却限制 */
     s_captureReq     = 0;
     s_autoArmed      = 0;

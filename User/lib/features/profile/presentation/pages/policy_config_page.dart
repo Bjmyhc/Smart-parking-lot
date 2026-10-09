@@ -310,66 +310,77 @@ class _PolicyConfigPageState extends State<PolicyConfigPage> {
     );
   }
 
-  /// 🆕 自动拍照策略组: 纯APP本地生效(不开节点/网关), 轮询检测到车位事件后自动调摄像头拍照.
-  /// 开关: 总开关; 时机: 有车就拍 / 僵尸车才拍 (僵尸车才拍可显著节省百度OCR额度).
+  /// 🆕 拍照策略 (节点策略): 拍照时机由【节点属性 CapturePolicy】决定, 经 SetCapturePolicy 服务下发.
+  /// App 不直接控制摄像头, 而是通过节点服务间接控制; 界面提供 0不拍 / 1有车就拍 / 2僵尸车才拍
+  /// (节点仍支持 3=都拍, 但界面不再提供); 另含"空闲车位可拍照"纯APP端门控(默认关闭).
   Widget _buildAutoCaptureGroup(BuildContext context, ParkingProvider provider, PolicyConfig policy) {
-    final on = policy.autoCaptureEnabled;
-    final modeZombie = policy.autoCaptureMode == 1;
+    final gatewayOnline = provider.gatewayOnline;
+    final current = provider.capturePolicy; // 读节点属性, 以节点实际生效值为准
     return _buildGroup(
       icon: Icons.photo_camera_outlined,
-      title: '自动拍照策略',
-      description: '车位事件自动拍照识别车牌',
+      title: '拍照策略',
+      description: gatewayOnline ? '下发到节点，由节点按时机触发摄像头' : '网关离线，无法修改',
       rows: [
-        _buildSwitchRow(
-          title: '自动拍照',
-          subtitle: on
-              ? (modeZombie ? '生效中: 变僵尸后拍照, 识别成功才通知' : '生效中: 检测到有车进入即拍照')
-              : '关闭: 不自动拍照',
-          value: on,
-          onChanged: (v) => provider.updatePolicy(policy.copyWith(autoCaptureEnabled: v)),
+        _buildChoiceRow(
+          title: '拍照时机',
+          subtitle: '节点在何种时机自动触发摄像头拍照识别车牌',
+          value: current,
+          options: const [
+            (0, '不自动拍'),
+            (1, '有车就拍'),
+            (2, '僵尸车才拍'),
+          ],
+          onChanged: (v) {
+            _dispatchNodePolicy(
+              () => provider.setCapturePolicy(v),
+              onSuccess: () {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text('✅ 拍照时机已设为「${_capturePolicyLabel(v)}」'),
+                    backgroundColor: Colors.green,
+                    duration: const Duration(seconds: 2),
+                  ),
+                );
+              },
+              onFailure: () {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text('❌ 修改失败：${provider.policyError ?? '未知错误'}'),
+                    backgroundColor: Colors.red,
+                    duration: const Duration(seconds: 2),
+                  ),
+                );
+              },
+            );
+          },
         ),
-        if (on) ...[
-          _buildChoiceRow(
-            title: '拍照时机',
-            subtitle: modeZombie
-                ? '车变僵尸时拍, 失败重试3次'
-                : '车进入即拍, 较耗OCR额度',
-            value: modeZombie ? 1 : 0,
-            options: const [(0, '有车就拍'), (1, '僵尸车才拍')],
-            onChanged: (v) => provider.updatePolicy(policy.copyWith(autoCaptureMode: v)),
-          ),
-          _buildInfoRow(
-            modeZombie
-                ? '拍照对象: Park001。无牌先拍, 拿到车牌才通知车主; 3次失败按未知车牌保底通知'
-                : '拍照对象: Park001。防抖确认后拍一次, 车离开后可再拍',
-          ),
-        ],
+        _buildSwitchRow(
+          title: '空闲车位可拍照',
+          subtitle: policy.allowCaptureWhenFree
+              ? '开启：空闲车位也可手动远程拍照'
+              : '关闭：空闲车位不可远程拍照（默认）',
+          value: policy.allowCaptureWhenFree,
+          onChanged: (v) {
+            if (v == policy.allowCaptureWhenFree) return; /* 值没变, 跳过 */
+            provider.updatePolicy(policy.copyWith(allowCaptureWhenFree: v)); /* 纯APP端门控, 不下发节点 */
+          },
+        ),
       ],
     );
   }
 
-  /// 只读提示行 (标题区下方灰字说明, 用于策略生效细节).
-  Widget _buildInfoRow(String text) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Icon(Icons.info_outline, size: 14, color: AppColors.textSecondary.withValues(alpha: 0.7)),
-          const SizedBox(width: 6),
-          Expanded(
-            child: Text(
-              text,
-              style: TextStyle(
-                fontSize: 11,
-                height: 1.5,
-                color: AppColors.textSecondary.withValues(alpha: 0.9),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
+  /// 拍照策略档位中文名 (0不拍/1有车拍/2僵尸拍/3都拍).
+  String _capturePolicyLabel(int v) {
+    switch (v) {
+      case 0:
+        return '不自动拍';
+      case 2:
+        return '僵尸车才拍';
+      case 3:
+        return '有车/僵尸都拍';
+      default:
+        return '有车就拍';
+    }
   }
 
   /// 二选一行: 标题/描述在左, 两个胶囊选项在右.

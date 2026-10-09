@@ -356,6 +356,22 @@ class _SpotsPageState extends State<SpotsPage> with TickerProviderStateMixin {
                             ),
                           ),
                         ),
+                        if (_showCameraOffline(spot)) ...[
+                          Container(
+                            width: 6,
+                            height: 6,
+                            decoration: const BoxDecoration(
+                              color: AppColors.textSecondary,
+                              shape: BoxShape.circle,
+                            ),
+                          ),
+                          const SizedBox(width: 4),
+                          const Text(
+                            '摄像头离线',
+                            style: TextStyle(fontSize: 11, color: AppColors.textSecondary),
+                          ),
+                          const SizedBox(width: 6),
+                        ],
                         if (canAct) ...[
                           if (spot.isNotified)
                             const Icon(Icons.notifications_active, size: 14, color: AppColors.primary),
@@ -399,6 +415,7 @@ class _SpotsPageState extends State<SpotsPage> with TickerProviderStateMixin {
   Widget _buildSpotGridItem(BuildContext context, ParkingProvider provider, SpotModel spot) {
     final bgColor = _getSpotColor(spot);
     final statusText = _getSpotStatusText(spot);
+    final canAct = !spot.isFree && !spot.isOffline && !spot.isDisabledSpot;
 
     return GestureDetector(
       onTap: () => _navigateToDetail(context, spot),
@@ -449,17 +466,49 @@ class _SpotsPageState extends State<SpotsPage> with TickerProviderStateMixin {
                       ),
                     ),
                   ),
+                  /* ⭐ 通知/派单标记 (与列表布局一致): 网格空间有限, 用小图标紧贴状态徽标右侧 */
+                  if (canAct) ...[
+                    if (spot.isNotified) ...[
+                      const SizedBox(width: 4),
+                      const Icon(Icons.notifications_active, size: 12, color: AppColors.primary),
+                    ],
+                    if (provider.isSpotDispatched(spot.id)) ...[
+                      const SizedBox(width: 2),
+                      const Icon(Icons.assignment, size: 12, color: AppColors.warning),
+                    ],
+                  ],
                 ],
               ),
               const Spacer(),
-              Text(
-                _getSpotSubText(spot),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  fontSize: 11,
-                  color: AppColors.textSecondary,
-                ),
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      _getSpotSubText(spot),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: 11,
+                        color: AppColors.textSecondary,
+                      ),
+                    ),
+                  ),
+                  if (_showCameraOffline(spot)) ...[
+                    Container(
+                      width: 5,
+                      height: 5,
+                      decoration: const BoxDecoration(
+                        color: AppColors.textSecondary,
+                        shape: BoxShape.circle,
+                      ),
+                    ),
+                    const SizedBox(width: 3),
+                    const Text(
+                      '摄像头离线',
+                      style: TextStyle(fontSize: 9, color: AppColors.textSecondary),
+                    ),
+                  ],
+                ],
               ),
             ],
           ),
@@ -493,6 +542,11 @@ class _SpotsPageState extends State<SpotsPage> with TickerProviderStateMixin {
     if (spot.isOccupied) return Icons.directions_car;
     return Icons.warning_amber;
   }
+
+  /// 是否显示"摄像头离线"标记: 节点真实/在线/未停用, 但摄像头属性 CameraOnline=0.
+  /// (CameraOnline 随节点数据帧上报, 未上报按在线处理, 避免误报)
+  bool _showCameraOffline(SpotModel spot) =>
+      spot.isReal && !spot.isOffline && !spot.isDisabledSpot && !spot.cameraOnline;
 
   String _getSpotSubText(SpotModel spot) {
     if (spot.isDisabledSpot) return '设备已停用';

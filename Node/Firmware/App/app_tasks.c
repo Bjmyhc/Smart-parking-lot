@@ -244,10 +244,20 @@ void ParkingStatus_Check(void)
         uint8_t carAbsent = (absentCnt >= CAR_ABSENT_DEBOUNCE);
 
         /* ⭐ 诊断: 有车状态下"车在"瞬断(去抖正保住计时不重置),
-         * 打印是哪路信号掉下去, 用于确认根因 */
+         * 打印是哪路信号掉下去, 用于确认根因.
+         * absent 未达阈值才是"去抖中"(ParkStatus 尚未变);
+         * 达阈值时本轮消抖已完成、当轮即翻转, 分开表述避免误导 */
         if (ParkStatus != PARK_IDLE && !carPresent)
-            Usart_Printf(USART_DEBUG, "[DBG] 车在瞬断: dist=%dcm mag=%d absent=%d/%d (去抖中)\r\n",
-                         Distance, MagCarPresent, absentCnt, CAR_ABSENT_DEBOUNCE);
+        {
+            if (carAbsent)
+                Usart_Printf(USART_DEBUG,
+                             "[DBG] 车在瞬断: dist=%dcm mag=%d absent=%d/%d 去抖完成, 本轮判车离开\r\n",
+                             Distance, MagCarPresent, absentCnt, CAR_ABSENT_DEBOUNCE);
+            else
+                Usart_Printf(USART_DEBUG,
+                             "[DBG] 车在瞬断: dist=%dcm mag=%d absent=%d/%d 去抖中\r\n",
+                             Distance, MagCarPresent, absentCnt, CAR_ABSENT_DEBOUNCE);
+        }
 
         switch (ParkStatus)
         {

@@ -309,6 +309,7 @@ void updateNodePlate(uint8_t nodeId, const LoraPlate_t *plate)
     memcpy(nd.plate, plate->plate, sizeof(nd.plate));
     nd.plate[sizeof(nd.plate) - 1] = '\0';
     nd.plateFetchPending = false;   /* 已取到, 清"有牌待取"旗子 */
+    nd.plateNeedPost     = true;    /* ⭐ 新一次识别结果 → 该车牌下次 pack/post 上报一次(之后不再重复上报) */
 
     nd.hasDataFrame = true;
     updateNodeState((uint8_t)slot, NODE_EVT_DATA);

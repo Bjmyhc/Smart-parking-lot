@@ -8,18 +8,23 @@ class SpotModel {
   DateTime? occupiedSince;
   final double batteryLevel;
   final int signalStrength;
+  /* ⭐ 车牌改读【节点】属性 (摄像头不再作为独立云设备, 车牌随节点数据帧上报):
+   * plateNumber 三态: 合法车牌 / '-' 拍到但没认出 / null 从未上报;
+   * 仅在车位非空闲(ParkStatus != 0)时才有值 (属性是"最近一次识别结果"残留值, 车走不清空).
+   * plateConfidence = 识别置信度 int 0~100 ('-' 时为 0)
+   * plateColor      = 车牌颜色 (预留属性 PlateColor, 一期不上报, 恒 null)
+   * plateUpdatedAt  = 车牌属性最后更新时间 (平台属性更新时间, 已无 CaptureTime) */
   final String? plateNumber;
-  /* ⭐⭐⭐ 拍照识别附加信息 (车牌只由拍照成功驱动, 摄像头Cam001属性回传):
-   * plateColor       = 车牌颜色 (中文: 蓝色/黄色/绿色/白色/黑色/红色/灰色)
-   * plateConfidence  = 识别置信度 0~1
-   * capturedAt       = 识别时间 (摄像头 CaptureTime)
-   * captureFailed    = 本占用事件内已尝试拍照但未识别出车牌 (区别于从未拍照) */
   final String? plateColor;
-  final double? plateConfidence;
-  final String? capturedAt;
-  final bool captureFailed;
+  final int? plateConfidence;
+  final String? plateUpdatedAt;
   final String? lastUpdated;
   final bool isOnline;
+
+  /* 🆕 节点拍照策略 (CapturePolicy 属性, 0不拍/1有车拍/2僵尸拍/3都拍) */
+  final int capturePolicy;
+  /* 🆕 摄像头在线 (CameraOnline 属性): 未上报按在线处理, 避免误报离线 */
+  final bool cameraOnline;
 
   /* 是否已在 OneNET 平台停用(enable_status=false):
    * 停用设备同样是"不上线", 但语义与纯粹离线区分(离线可能是网络/断电,
@@ -60,11 +65,12 @@ class SpotModel {
     this.plateNumber,
     this.plateColor,
     this.plateConfidence,
-    this.capturedAt,
-    this.captureFailed = false,
+    this.plateUpdatedAt,
     this.lastUpdated,
     this.isOnline = true,
     this.isDisabled = false,
+    this.capturePolicy = 1, // 与节点出厂默认一致(有车即拍)
+    this.cameraOnline = true, // 未上报按在线处理
     this.isReal = true,
     this.notifyStatus = 'none',
     this.handlerName,
@@ -126,6 +132,19 @@ class SpotModel {
       signalStrength = int.tryParse(rawRssi); // 兼容字符串形式 "-84"
     }
     final rawName = json['name'] as String? ?? json['deviceName'] as String? ?? '';
+
+    // ⭐ 车牌改读【节点】属性 (PlateNumber/PlateConfidence/CapturePolicy/CameraOnline)
+    //    PlateNumber 是"最近一次识别结果"残留值 → 仅在车位非空闲(ParkStatus != 0)时才有值
+    //    三态: 合法车牌 / '-' 拍到没认出 / null 从未上报
+    final rawPlate = (properties['PlateNumber'] as String?)?.trim();
+    final String? plateNumber =
+        (parkStatus != 0 && rawPlate != null && rawPlate.isNotEmpty) ? rawPlate : null;
+    final rawConf = properties['PlateConfidence'];
+    final int? plateConfidence =
+        rawConf is int ? rawConf : (rawConf is String ? int.tryParse(rawConf.trim()) : null);
+    final int capturePolicy = properties['CapturePolicy'] as int? ?? 1;
+    final bool cameraOnline = properties['CameraOnline'] as bool? ?? true;
+
     // 调试输出: 真实在线节点阈值未读到 → 打印所有属性key用于排查OneNET真实标识符
     if (isOnline && !isDisabled && zombieThresholdSec == null && rawName.startsWith(RegExp(r'Park|park'))) {
       print('[SpotModel 调试] ⚠️ 节点 $rawName 未读到僵尸阈值属性, 平台属性keys=${properties.keys.toList()}');
@@ -144,11 +163,12 @@ class SpotModel {
       ultrasonic: ultrasonic,
       zombieThresholdSec: zombieThresholdSec, // 🆕 节点端上报的真实阈值
       sensorDistanceCm: sensorDistanceCm,   // 🆕 节点端上报的真实超声波距离阈值
-      plateNumber: json['plate_number'] as String?,
-      plateColor: json['plate_color'] as String?,
-      plateConfidence: (json['plate_confidence'] as num?)?.toDouble(),
-      capturedAt: json['captured_at'] as String?,
-      captureFailed: json['capture_failed'] == true,
+      plateNumber: plateNumber,
+      plateColor: null, // 预留属性 PlateColor, 一期不上报
+      plateConfidence: plateConfidence,
+      plateUpdatedAt: json['plate_updated_at'] as String?,
+      capturePolicy: capturePolicy,
+      cameraOnline: cameraOnline,
       lastUpdated: json['updated_at'] as String?,
       isOnline: isOnline,
       isDisabled: isDisabled,
@@ -173,8 +193,9 @@ class SpotModel {
       'plate_number': plateNumber,
       'plate_color': plateColor,
       'plate_confidence': plateConfidence,
-      'captured_at': capturedAt,
-      'capture_failed': captureFailed,
+      'plate_updated_at': plateUpdatedAt,
+      'capture_policy': capturePolicy,
+      'camera_online': cameraOnline,
       'last_updated': lastUpdated,
       'is_online': isOnline,
       'is_real': isReal,
@@ -193,10 +214,11 @@ class SpotModel {
     DateTime? occupiedSince, // ⭐ 进入占用状态的本地时间戳
     String? plateNumber,
     String? plateColor,
-    double? plateConfidence,
-    String? capturedAt,
-    bool? captureFailed,
+    int? plateConfidence,
+    String? plateUpdatedAt,
     String? lastUpdated,
+    int? capturePolicy,
+    bool? cameraOnline,
     bool? isOnline,
     bool? isDisabled,
     bool? isReal,
@@ -229,8 +251,9 @@ class SpotModel {
       plateNumber: plateNumber ?? this.plateNumber,
       plateColor: plateColor ?? this.plateColor,
       plateConfidence: plateConfidence ?? this.plateConfidence,
-      capturedAt: capturedAt ?? this.capturedAt,
-      captureFailed: captureFailed ?? this.captureFailed,
+      plateUpdatedAt: plateUpdatedAt ?? this.plateUpdatedAt,
+      capturePolicy: capturePolicy ?? this.capturePolicy,
+      cameraOnline: cameraOnline ?? this.cameraOnline,
       lastUpdated: lastUpdated ?? this.lastUpdated,
       isOnline: isOnline ?? this.isOnline,
       isDisabled: isDisabled ?? this.isDisabled,
@@ -250,6 +273,14 @@ class SpotModel {
   bool get isOffline => status == 'offline';
   bool get isDisabledSpot => status == 'disabled';
   bool get isNotified => notifyStatus == 'notified';
+
+  /* ⭐ 车牌三态判定 (仅车位非空闲时 plateNumber 才有值):
+   * hasPlate          = 识别到合法车牌
+   * plateUnrecognized = 拍到但没认出('-')
+   * 两者皆 false 且非空闲时 = 从未上报(不显示) */
+  bool get hasPlate =>
+      plateNumber != null && plateNumber!.isNotEmpty && plateNumber != '-';
+  bool get plateUnrecognized => plateNumber == '-';
 
   /* ⭐⭐⭐ 【实时占用秒数】: 彻底解决刷新滞后问题
    * 原 occupiedSec 完全依赖节点上报的 OccupiedTime 属性, 节点仅在 LoRa 轮询时才更新 → 严重滞后

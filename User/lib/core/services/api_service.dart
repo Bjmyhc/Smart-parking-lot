@@ -6,17 +6,17 @@ import '../models/spot_model.dart';
 import '../models/alert_model.dart';
 import '../models/stats_model.dart';
 
-/// 摄像头一次识别结果: 车牌 + 颜色(中文) + 置信度(0~1) + 识别时间.
-/// 来自 OneNET 摄像头物模型属性 (PlateNumber/PlateColor/PlateConfidence/CaptureTime).
-class CameraPlateInfo {
+/// 节点一次车牌识别结果: 车牌 + 置信度(0~100) + 属性更新时间.
+/// 来自 OneNET 节点物模型属性 (PlateNumber/PlateConfidence), 摄像头已不再是独立云设备.
+class NodePlateInfo {
   final String? plate;
-  final String? color;
-  final double? confidence;
-  final String? captureTime;
+  final int? confidence;
+  final String? updatedAt;
 
-  const CameraPlateInfo({this.plate, this.color, this.confidence, this.captureTime});
+  const NodePlateInfo({this.plate, this.confidence, this.updatedAt});
 
-  bool get hasPlate => plate != null && plate!.isNotEmpty;
+  /// 是否识别出合法车牌 ('-' 表示拍到但没认出, 不算)
+  bool get hasPlate => plate != null && plate!.isNotEmpty && plate != '-';
 }
 
 class ApiService {
@@ -27,9 +27,7 @@ class ApiService {
   // 网关设备(承载 OtaAllow 全网升级确认门控): OtaAllow 是网关自身属性, 下发目标为 PGW001
   static const String gatewayProductId = '9YIs0S7V11';
   static const String gatewayDeviceId = 'PGW001';
-  // 摄像头独立设备(车牌识别): Park001 车位在线时, 从这里拉真实车牌补到车位卡片
-  static const String cameraProductId = '4enONCu0Y7';
-  static const String cameraDeviceId = 'Cam001';
+  // ⭐ 摄像头不再是独立云设备: 车牌/拍照策略/摄像头在线均为【节点】属性, 由网关代上报
   static const String _userId = '528332';
   static const String _accessKey = 'e3b97243b0d24ffda1befead601ef617';
 
@@ -216,6 +214,7 @@ class ApiService {
           if (data['code'] == 0) {
             final properties = <String, dynamic>{};
             final List<dynamic> propList = data['data'] ?? [];
+            String? plateUpdatedAt; // ⭐ 车牌属性的平台更新时间 (替代已废弃的摄像头 CaptureTime)
 
             for (final prop in propList) {
               final identifier = prop['identifier'] as String? ?? '';
@@ -232,10 +231,14 @@ class ApiService {
                 } else {
                   properties[identifier] = value;
                 }
+                if (identifier == 'PlateNumber') {
+                  plateUpdatedAt = _extractPropertyTime(prop as Map);
+                }
               }
             }
 
             device['properties'] = properties;
+            if (plateUpdatedAt != null) device['plate_updated_at'] = plateUpdatedAt;
             device['updated_at'] = DateTime.now().toIso8601String();
             device['online'] = true;
           } else {
@@ -278,6 +281,7 @@ class ApiService {
 
           final properties = <String, dynamic>{};
           final List<dynamic> propList = data['data'] ?? [];
+          String? plateUpdatedAt;
 
           for (final prop in propList) {
             final identifier = prop['identifier'] as String? ?? '';
@@ -294,10 +298,14 @@ class ApiService {
               } else {
                 properties[identifier] = value;
               }
+              if (identifier == 'PlateNumber') {
+                plateUpdatedAt = _extractPropertyTime(prop as Map);
+              }
             }
           }
 
           result['properties'] = properties;
+          if (plateUpdatedAt != null) result['plate_updated_at'] = plateUpdatedAt;
           result['updated_at'] = DateTime.now().toIso8601String();
           return result;
         }
@@ -308,33 +316,53 @@ class ApiService {
     }
   }
 
-  /// 拉取摄像头 Cam001 一次识别结果: 车牌 + 颜色 + 置信度 + 识别时间 (物模型属性).
-  /// 摄像头离线 / 识别未更新 → 返回空信息. 供"拍照OCR成功(Result=true)后"拉取本次结果入库用;
-  /// ⚠️ 属性有平台入库延迟, 调用方需短间隔轮询几次(拍照后 PlateNumber 需约1~2s 才能查到).
-  Future<CameraPlateInfo> fetchCameraPlate() async {
-    try {
-      final camDetail = await getDeviceDetail(cameraDeviceId, productId: cameraProductId);
-      final camProps = camDetail['properties'] as Map?;
-      if (camProps == null) return const CameraPlateInfo();
-      final rawPlate = (camProps['PlateNumber'] as String?)?.trim() ?? '';
-      final rawColor = (camProps['PlateColor'] as String?)?.trim() ?? '';
-      final rawConf = camProps['PlateConfidence'];
-      final rawTime = (camProps['CaptureTime'] as String?)?.trim() ?? '';
-      double? conf;
-      if (rawConf is num) {
-        conf = rawConf.toDouble();
-      } else if (rawConf is String && rawConf.trim().isNotEmpty) {
-        conf = double.tryParse(rawConf.trim());
+  /// 从 OneNET 属性条目里取平台「属性更新时间」并转 ISO8601.
+  /// 兼容毫秒时间戳(int/数字串, 平台口径)与已是 ISO 的字符串; 取不到返回 null.
+  String? _extractPropertyTime(Map prop) {
+    final raw = prop['time'] ?? prop['update_at'] ?? prop['updateAt'] ?? prop['updateTime'];
+    if (raw == null) return null;
+    if (raw is num) {
+      final n = raw.toInt();
+      final ms = n > 1000000000000 ? n : n * 1000; // 秒级则补到毫秒
+      return DateTime.fromMillisecondsSinceEpoch(ms).toIso8601String();
+    }
+    if (raw is String && raw.trim().isNotEmpty) {
+      final s = raw.trim();
+      final n = int.tryParse(s);
+      if (n != null) {
+        final ms = n > 1000000000000 ? n : n * 1000;
+        return DateTime.fromMillisecondsSinceEpoch(ms).toIso8601String();
       }
-      return CameraPlateInfo(
+      return s; // 已是 ISO 字符串
+    }
+    return null;
+  }
+
+  /// 拉取【节点】当前车牌属性: 车牌 + 置信度(0~100) + 属性更新时间.
+  /// 车牌已随节点数据帧上报(摄像头不再是独立云设备), 手动触发拍照后短轮询 1~2 次取本次结果.
+  Future<NodePlateInfo> fetchNodePlate(String deviceName) async {
+    try {
+      final detail = await getDeviceDetail(deviceName); // 默认节点产品
+      final props = detail['properties'] as Map?;
+      if (props == null) return const NodePlateInfo();
+      final rawPlate = (props['PlateNumber'] as String?)?.trim() ?? '';
+      final rawConf = props['PlateConfidence'];
+      int? conf;
+      if (rawConf is int) {
+        conf = rawConf;
+      } else if (rawConf is String && rawConf.trim().isNotEmpty) {
+        conf = int.tryParse(rawConf.trim());
+      }
+      return NodePlateInfo(
         plate: rawPlate.isEmpty ? null : rawPlate,
-        color: rawColor.isEmpty ? null : rawColor,
         confidence: conf,
-        captureTime: rawTime.isEmpty ? null : rawTime,
+        updatedAt: (detail['plate_updated_at'] as String?)?.trim().isEmpty == true
+            ? null
+            : detail['plate_updated_at'] as String?,
       );
     } catch (e) {
-      debugPrint('⚠️ fetchCameraPlate 失败: $e');
-      return const CameraPlateInfo();
+      debugPrint('⚠️ fetchNodePlate 失败: $e');
+      return const NodePlateInfo();
     }
   }
 
@@ -755,13 +783,13 @@ class ApiService {
     // 🆕 每个车位补 occupiedSec=occupiedHours*3600, 让本地模拟数据也能自动适配时长单位
     return [
       SpotModel(id: 'Park001', zone: 'A', status: 'occupied', occupiedHours: 2, occupiedSec: 2*3600, batteryLevel: 85, signalStrength: -65, geoMagnetic: 1, ultrasonic: 3, plateNumber: '京A·12345', isReal: false),
-      SpotModel(id: 'Park002', zone: 'A', status: 'free', occupiedHours: 0, occupiedSec: 0, batteryLevel: 90, signalStrength: -60, geoMagnetic: 0, ultrasonic: 80, plateNumber: '京A·54321', isReal: false),
+      SpotModel(id: 'Park002', zone: 'A', status: 'free', occupiedHours: 0, occupiedSec: 0, batteryLevel: 90, signalStrength: -60, geoMagnetic: 0, ultrasonic: 80, isReal: false),
       SpotModel(id: 'Park003', zone: 'A', status: 'zombie', occupiedHours: 72, occupiedSec: 72*3600, batteryLevel: 45, signalStrength: -75, geoMagnetic: 1, ultrasonic: 3, plateNumber: '京B·67890', isReal: false),
       SpotModel(id: 'Park004', zone: 'B', status: 'occupied', occupiedHours: 5, occupiedSec: 5*3600, batteryLevel: 80, signalStrength: -70, geoMagnetic: 1, ultrasonic: 4, plateNumber: '京C·11111', isReal: false),
-      SpotModel(id: 'Park005', zone: 'B', status: 'free', occupiedHours: 0, occupiedSec: 0, batteryLevel: 88, signalStrength: -62, geoMagnetic: 0, ultrasonic: 90, plateNumber: '京B·11111', isReal: false),
+      SpotModel(id: 'Park005', zone: 'B', status: 'free', occupiedHours: 0, occupiedSec: 0, batteryLevel: 88, signalStrength: -62, geoMagnetic: 0, ultrasonic: 90, isReal: false),
       SpotModel(id: 'Park006', zone: 'B', status: 'occupied', occupiedHours: 1, occupiedSec: 1*3600, batteryLevel: 92, signalStrength: -58, geoMagnetic: 1, ultrasonic: 5, plateNumber: '京D·22222', isReal: false),
       SpotModel(id: 'Park007', zone: 'C', status: 'offline', isOnline: false, plateNumber: '京C·22222', isReal: false),
-      SpotModel(id: 'Park008', zone: 'C', status: 'free', occupiedHours: 0, occupiedSec: 0, batteryLevel: 95, signalStrength: -55, geoMagnetic: 0, ultrasonic: 75, plateNumber: '京C·33333', isReal: false),
+      SpotModel(id: 'Park008', zone: 'C', status: 'free', occupiedHours: 0, occupiedSec: 0, batteryLevel: 95, signalStrength: -55, geoMagnetic: 0, ultrasonic: 75, isReal: false),
       // Park009 故意设为矛盾案例: 地磁感应到车但超声波距离远 → 触发"传感器数据矛盾"诊断
       SpotModel(id: 'Park009', zone: 'C', status: 'occupied', occupiedHours: 8, occupiedSec: 8*3600, batteryLevel: 78, signalStrength: -80, geoMagnetic: 1, ultrasonic: 120, plateNumber: '京E·33333', isReal: false),
     ];

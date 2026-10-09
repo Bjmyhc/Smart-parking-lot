@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/spot_model.dart';
@@ -47,6 +48,10 @@ class ParkingProvider extends ChangeNotifier {
   static const _layoutKey = 'spots_layout_mode';
   static const _notifiedAtPrefix = 'notified_at_'; // 🆕 通知时间戳 SharedPreferences 前缀 (key=alertId)
   static const _spotDispatchedPrefix = 'spot_dispatched_'; // ⭐⭐⭐ 按 spotId 存派单状态 (key=spotId, 避免 alertId 因 occupiedSince 反推不准导致匹配失败)
+  /* ⭐⭐⭐ 告警快照: 持久化【工单列表 + 已处理归档 + 各阶段时间戳/处理人】,
+   *   解决"退出App再进入后告警界面清空"问题. 内容不变则跳过写盘. */
+  static const _alertsSnapshotKey = 'alerts_snapshot_v1';
+  String? _lastAlertsJson; // 上次写盘内容, 用于跳过无变化写入
 
   final ApiService _apiService;
   Timer? _refreshTimer;  /* 3s API轮询定时器 */
@@ -80,11 +85,18 @@ class ParkingProvider extends ChangeNotifier {
   bool get otaEnabled => _policy.otaEnabled; // OTA 自动检测开关
   int get otaIntervalSec => _policy.otaIntervalSec; // OTA 检测间隔(秒)
   int get otaCheckCount => _policy.otaCheckCount; // OTA 每轮检测次数
-  bool get autoCaptureEnabled => _policy.autoCaptureEnabled; // 🆕 自动拍照总开关
-  int get autoCaptureMode => _policy.autoCaptureMode; // 🆕 自动拍照时机: 0=有车就拍 1=僵尸车才拍
   bool get gatewayOnline => _gatewayOnline;  /* ⭐ 网关是否在线 */
   String? get policyError => _policyError;   /* ⭐ 策略下发失败原因 */
   bool get policyPartial => _policyPartial;  /* ⭐ 上次下发部分成功 */
+
+  /* ⭐ 节点拍照策略 (节点属性 CapturePolicy): 以第一个真实在线未停用节点为准.
+   * 0不拍/1有车拍/2僵尸拍/3都拍; 取不到时按出厂默认 1 */
+  int get capturePolicy {
+    for (final s in _spots) {
+      if (s.isReal && !s.isDisabledSpot && s.isOnline) return s.capturePolicy;
+    }
+    return 1;
+  }
 
   /* ⭐⭐⭐ 告警事件隔离机制: 按「每次停车事件」生成独立工单, 不再和车位永久绑定
    * 同一车位发生 N 次僵尸车事件 → 生成 N 个独立告警（独立id、独立时间戳、独立处理流程）*/
@@ -105,28 +117,14 @@ class ParkingProvider extends ChangeNotifier {
   final Map<String, String> _mockStatusOverrides = {};
   final Map<String, int> _mockOccupiedOverrides = {};
 
-  /* ⭐⭐⭐ 自动拍照策略状态机 (只作用于绑定相机的真实车位 Park001)
-   * 防抖: 连续 [_autoCapConfirmRounds] 轮(约 confirmRounds×refreshSec 秒)保持目标状态才触发;
-   * 单次触发: 同一停车事件拍一次, 车辆离开(状态退出占用/僵尸)后才恢复资格;
-   * 存量跳过: App 启动时车位已在占用/僵尸(非本轮新进入) → 该停车事件不自动拍 */
-  static const int _autoCapModeOccupied = 0; // 拍照时机: 0=有车就拍, 1=僵尸车才拍
-  static const int _autoCapConfirmRounds = 2; // 防抖确认轮数
-  /* ⭐ 拍照回执三态 (固件 Result/ActualValue 已填真值): */
+  /* ⭐ 拍照手动触发回执三态 (节点服务 TriggerCapture, 回执 0/1 int32): */
   static const int _captureOutcomeNotTriggered = 0; // 忙/异常 → 拍照动作没触发
   static const int _captureOutcomeNoPlate = 1;      // 已拍照, 但本次OCR未识别出车牌
   static const int _captureOutcomeOk = 2;           // 已拍照且识别出车牌(可拉属性取本次牌)
-  final Map<String, int> _autoCapStreak = {};  // spotId -> 连续处于目标状态的轮数
-  final Set<String> _autoCapFired = {};        // spotId -> 本次停车事件已自动拍过
-  final Set<String> _autoCapBootedIn = {};     // spotId -> App启动时已在占用/僵尸(存量事件, 本停车过程不拍)
-  /* 🆕 僵尸车"通知前补牌"连续失败计数 (alertId -> 次数), 达到上限后保底按未知车牌通知 */
-  final Map<String, int> _captureMisses = {};
-  static const int _autoCapMaxPlateTries = 3; // 补牌最多尝试轮数
-  /* ⭐⭐⭐ 拍照识别结果事件缓存 (spotId -> 车牌+颜色+置信度+识别时间):
-   * 平台节点数据不含车牌(车牌只存在摄像头Cam001属性), 3s轮询重建会把拍照写回的车牌冲成null;
-   * 因此拍照识别结果先存这里, 只要车辆仍占用就每轮贴回显示, 车辆真正离开(free)才清除 */
-  final Map<String, CameraPlateInfo> _capturedPlateCache = {};
-  /* 🆕 拍照但未识别出车牌的车位集合 (spotId): UI 显示"已拍照, 未识别到车牌", 区别于从未拍照 */
-  final Set<String> _captureNoPlateSpots = {};
+
+  /* ⭐ 手动拍照冷却: 3s 内不允许重复触发(防连点把节点/摄像头压满) */
+  static const int _manualCaptureCooldownMs = 3000;
+  DateTime? _lastManualCaptureAt;
 
   /* 批量选中集合 (收进 Provider, 跨页同步) */
   final Set<String> _selectedSpotIds = {};
@@ -201,6 +199,71 @@ class ParkingProvider extends ChangeNotifier {
         final ts = prefs.getInt(key);
         if (ts != null) _pendingDispatchedSpots[spotId] = DateTime.fromMillisecondsSinceEpoch(ts);
       }
+    }
+    await _loadAlertsSnapshot(); // ⭐ 恢复告警列表/归档/各阶段时间戳
+  }
+
+  /// ⭐⭐⭐ 启动时恢复告警快照: 工单列表 + 已处理归档 + 通知/派单/完成时间戳 + 处理人.
+  /// 恢复后由 refresh() 按实时车位状态复用/归档, 保证"退出App再进入"告警界面内容不丢.
+  Future<void> _loadAlertsSnapshot() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getString(_alertsSnapshotKey);
+      if (raw == null || raw.isEmpty) return;
+      final data = json.decode(raw) as Map<String, dynamic>;
+      _lastAlertsJson = raw;
+
+      for (final e in (data['active'] as List? ?? const [])) {
+        final a = AlertModel.fromJson(Map<String, dynamic>.from(e as Map));
+        _activeAlerts[a.spotId] = a;
+      }
+      for (final e in (data['resolved'] as List? ?? const [])) {
+        final a = AlertModel.fromJson(Map<String, dynamic>.from(e as Map));
+        _resolvedAlerts[a.id] = a;
+      }
+      void loadTimes(String key, Map<String, DateTime> target) {
+        final m = data[key] as Map<String, dynamic>? ?? const {};
+        for (final entry in m.entries) {
+          final ms = entry.value;
+          if (ms is int) target[entry.key] = DateTime.fromMillisecondsSinceEpoch(ms);
+        }
+      }
+      loadTimes('notified_ats', _notifiedAts);
+      loadTimes('dispatched_ats', _dispatchedAts);
+      loadTimes('handled_ats', _handledAts);
+      final handlers = data['handlers'] as Map<String, dynamic>? ?? const {};
+      for (final entry in handlers.entries) {
+        if (entry.value is String) _handlerNames[entry.key] = entry.value as String;
+      }
+      // 重建 active 工单的内存通知/派单标记 (供 spotAlertStatus / isSpotDispatched 判断)
+      for (final a in _activeAlerts.values) {
+        if (_notifiedAts.containsKey(a.id)) _notifiedAlertIds.add(a.id);
+        if (_dispatchedAts.containsKey(a.id)) _dispatchedAlertIds.add(a.id);
+      }
+      debugPrint('>>> 告警快照已恢复: active=${_activeAlerts.length}, resolved=${_resolvedAlerts.length}');
+    } catch (e) {
+      debugPrint('>>> 告警快照恢复失败: $e');
+    }
+  }
+
+  /// ⭐⭐⭐ 保存告警快照 (内容不变则跳过写盘, 避免每3s无谓写盘).
+  Future<void> _persistAlerts() async {
+    try {
+      final data = <String, dynamic>{
+        'active': _activeAlerts.values.map((a) => a.toJson()).toList(),
+        'resolved': _resolvedAlerts.values.map((a) => a.toJson()).toList(),
+        'notified_ats': _notifiedAts.map((k, v) => MapEntry(k, v.millisecondsSinceEpoch)),
+        'dispatched_ats': _dispatchedAts.map((k, v) => MapEntry(k, v.millisecondsSinceEpoch)),
+        'handled_ats': _handledAts.map((k, v) => MapEntry(k, v.millisecondsSinceEpoch)),
+        'handlers': _handlerNames,
+      };
+      final raw = json.encode(data);
+      if (raw == _lastAlertsJson) return;
+      _lastAlertsJson = raw;
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_alertsSnapshotKey, raw);
+    } catch (e) {
+      debugPrint('>>> 告警快照保存失败: $e');
     }
   }
 
@@ -396,18 +459,27 @@ class ParkingProvider extends ChangeNotifier {
     return true;  /* 成功 */
   }
 
-  /* ⭐⭐⭐ 摄像头远程拍照: Cam001(产品 4enONCu0Y7)物模型 TriggerCapture 服务 */
+  /* ⭐⭐⭐ 远程拍照(手动): 调节点物模型服务 TriggerCapture, 节点再触发摄像头(间接控制) */
   bool _capturingRemote = false;
   bool get capturingRemote => _capturingRemote;
 
-  /// 远程拍照(手动): 调摄像头 Cam001 的 TriggerCapture 服务.
-  /// 回执语义(固件已填真值): ActualValue=是否真的触发拍照; Result=本次OCR是否识别出车牌.
-  ///   识别成功 → 短轮询拉取本次车牌写回车位/工单(不再被平台残留旧牌误导);
-  ///   拍了但没识别出 → 提示调整角度/光照重试.
-  /// 前置: 绑定相机的真实车位 Park001 必须在线(不在线不动摄像头).
-  /// 返回: null=成功; 非 null=失败原因文本(供页面提示).
+  /// 远程拍照(手动): 调【节点】物模型 TriggerCapture 服务(无入参), 节点再触发摄像头.
+  /// 回执语义(节点已填真值, int32): ActualValue=拍照动作是否真的执行(0=节点忙/未触发);
+  ///   Result=本次 OCR 是否识别出车牌.
+  ///   触发后保持"拍照识别中"(capturingRemote=true)直到本次车牌写入车位, 卡片瞬时刷新, 全程不弹窗;
+  ///   拍到但没识别出 → 同样静默(卡片会显示"未识别到车牌"), 不弹误导性提示.
+  /// 冷却: 3s 内不允许重复触发; 仅"动作真的执行了"才计时, 节点忙/未触发不占用冷却.
+  /// 前置: 真实/在线/未停用 且摄像头在线的 Park001 才可调(摄像头离线直接提示会失败).
+  /// 返回: null=识别成功; ''=无需提示(拍到但未识别); 其他=失败原因文本(供页面提示).
   Future<String?> capturePlateRemote() async {
     if (_capturingRemote) return '上一次远程拍照尚未完成, 请稍候';
+    if (_lastManualCaptureAt != null) {
+      final elapsed = DateTime.now().difference(_lastManualCaptureAt!).inMilliseconds;
+      if (elapsed < _manualCaptureCooldownMs) {
+        final remainSec = ((_manualCaptureCooldownMs - elapsed) / 1000).ceil();
+        return '拍照冷却中, 请 $remainSec 秒后再试';
+      }
+    }
     SpotModel? park001;
     for (final s in _spots) {
       if (s.id == 'Park001') {
@@ -416,277 +488,192 @@ class ParkingProvider extends ChangeNotifier {
       }
     }
     if (park001 == null) return '未找到关联车位 Park001';
-    if (!park001.isReal) return '本地模拟车位, 无真实摄像头可调';
+    if (!park001.isReal) return '本地模拟车位, 无真实节点可调';
     if (park001.isDisabledSpot) return '车位 Park001 已在平台停用';
-    if (park001.isOffline) return '车位 Park001 离线, 摄像头不可用';
-
-    final outcome = await _triggerCameraCapture(); // 0未触发 / 1拍了没识别 / 2识别成功
-    if (outcome == _captureOutcomeNotTriggered) return '摄像头忙或调用失败, 请稍后重试';
-    if (outcome == _captureOutcomeNoPlate) {
-      _markCaptureNoPlate(park001); // ⭐ 车位显示"已拍照, 未识别到车牌"
-      debugPrint('⚠️ 远程拍照: 已拍照但本次未识别到车牌');
-      return '已拍照, 但本次未识别到车牌, 请调整角度后重试';
-    }
-    // 识别成功 → 平台属性入库有延迟, 短轮询拉取本次识别结果(车牌/颜色/置信度)并写回车位/工单
-    final info = await _pollCameraPlate();
-    final filled = info.hasPlate ? _applyPlateToSpot(park001, info) : park001;
-    _addLog(
-      type: 'capture',
-      title: '远程拍照',
-      spotId: park001.id,
-      detail: filled.plateNumber == null
-          ? '已抓拍并识别到车牌, 但属性暂未取到, 稍后将自动同步'
-          : '已抓拍识别车牌: ${filled.plateNumber}',
-    );
-    return null;
-  }
-
-  /* ==================== 🆕 自动拍照策略 ==================== */
-
-  /// 每轮轮询检测一次自动拍照: 目标车位(绑定相机的 Park001)发生"有车/僵尸车"事件时自动触发.
-  /// 规则(与用户确认的方案):
-  ///  1. 防抖: 连续 [_autoCapConfirmRounds] 轮保持目标状态才触发, 避免驶过/传感器抖动误拍
-  ///  2. 只触发一次: 同一停车事件拍一次, 车辆离开(退出占用/僵尸)后才恢复资格
-  ///  3. 存量跳过: App 启动时已在占用/僵尸的车位(首轮无上轮快照)不触发, 避免一打开就拍存量车
-  ///  4. 只针对真实/在线/未停用且绑定相机的 Park001 (与手动拍照 capturePlateRemote 前置一致)
-  ///  5. ⭐ 本 tick 只负责"有车就拍"模式(进场抓拍车牌);
-  ///     "僵尸车才拍"模式不在这里触发, 由 _autoNotifyPendingZombies 的"通知前补牌"驱动
-  ///     (僵尸车先拍照 → 拿到车牌 → 再通知车主, 通知文案必须带真实车牌).
-  void _autoCaptureTick(Map<String, SpotModel> prevById) {
-    if (!_policy.autoCaptureEnabled) return;
-    /* 僵尸车才拍模式: 拍照归通知前补牌流程, 不重复触发 */
-    if (_policy.autoCaptureMode != _autoCapModeOccupied) return;
-    SpotModel? target;
-    for (final s in _spots) {
-      if (s.id == 'Park001') {
-        target = s;
-        break;
-      }
-    }
-    if (target == null) return; // 没有绑定相机的 Park001 → 不触发
-    final id = target.id;
-
-    /* 状态退出占用 → 本次停车事件结束, 清空触发资格(允许下次停车再拍) */
-    if (!target.isOccupied && !target.isZombie) {
-      _autoCapFired.remove(id);
-      _autoCapStreak.remove(id);
-      _autoCapBootedIn.remove(id);
-      return;
+    if (park001.isOffline) return '车位 Park001 离线, 无法触发拍照';
+    if (!park001.cameraOnline) return '摄像头离线, 无法拍照';
+    // 🆕 空闲车位默认不可远程拍照(空闲理应无车可拍); 确需现场确认可在 策略配置→拍照策略 开启
+    if (park001.isFree && !_policy.allowCaptureWhenFree) {
+      return '空闲车位不可远程拍照（可在「策略配置 → 拍照策略」开启）';
     }
 
-    /* App 冷启动/首次看到该车位已在占用或僵尸(上轮无快照) → 存量事件, 本停车过程不自动拍 */
-    if (prevById[id] == null) {
-      if (target.isReal && !target.isDisabledSpot) _autoCapBootedIn.add(id);
-      return;
-    }
-    if (_autoCapBootedIn.contains(id)) return; // 存量事件未离开过 → 一直不拍
-
-    /* "有车就拍"目标状态 = occupied(有车进入的上升沿); 僵尸状态不在此触发(由通知前补牌负责) */
-    if (!target.isOccupied) {
-      _autoCapStreak.remove(id);
-      return;
-    }
-
-    /* 上轮是否已在 occupied: 是=持续占用累计轮数, 否=新事件起点(第1轮) */
-    final prev = prevById[id]!;
-    final wasInTarget = prev.isOccupied;
-    _autoCapStreak[id] = (wasInTarget ? (_autoCapStreak[id] ?? 0) : 0) + 1;
-
-    if (_autoCapFired.contains(id)) return;          // 本次停车事件已拍过
-    if ((_autoCapStreak[id] ?? 0) < _autoCapConfirmRounds) return; // 防抖未稳定
-
-    /* 触发前最终资格: 车位真实/在线/未停用, 否则拍照必然失败, 不打无谓API */
-    if (!target.isReal || target.isDisabledSpot || target.isOffline) return;
-
-    _autoCapFired.add(id); // 先占坑, 防重入/并发重复触发
-    unawaited(_autoFireCapture());
-  }
-
-  /// 调 Cam001 TriggerCapture 并等待 invoke_reply (拍照+OCR 完成).
-  /// 与手动拍照通过 [_capturingRemote] 互斥; 忙/异常返回 [_captureOutcomeNotTriggered].
-  /// 返回三态: 0=未触发  1=已拍照但未识别出车牌  2=已拍照且识别出车牌.
-  /// 不弹UI/不打日志, 由调用方决定后续动作.
-  Future<int> _triggerCameraCapture() async {
-    if (_capturingRemote) {
-      debugPrint('🚫 拍照跳过: 上一次拍照尚未完成(手动或自动进行中)');
-      return _captureOutcomeNotTriggered;
-    }
+    /* ⭐ 整个"触发 + 取牌"期间保持 capturingRemote=true: 按钮一直显示"拍照识别中...",
+     * 直到本次车牌写入车位(卡片瞬时刷新)才结束, 消除"进度条走完 → 还要等刷新"的空档. */
     _capturingRemote = true;
     notifyListeners();
+    var gotFresh = false;
+    var hasPlate = false;
     try {
-      final output = await _apiService.callService(
-        ApiService.cameraDeviceId,
-        'TriggerCapture',
-        <String, dynamic>{}, // 服务无入参
-        productId: ApiService.cameraProductId,
-        timeoutSeconds: 15, // 设备要先拍照+OCR 再回 invoke_reply, 放宽等待回执
+      /* ⭐ 基线 = 触发前读到的节点车牌信息.
+       * 判"本次是否出新结果"用**平台车牌属性的更新时间**(网关已改为【只在新收到 0xF1 车牌帧时才上报车牌】,
+       * 所以该时间只在真的发生一次识别结果时前进 —— 即使车牌值和上次一样也会前进),
+       * 时间一变即本次新结果, 立刻落地并结束加载; 平台未给时间时退化为"车牌值变化"比较(旧判据).
+       * 旧判据(只看值变化)在"重拍同一辆车 / 一直是 '-'"时会一直等到超时(≈8s)才结束. */
+      final base = await _apiService.fetchNodePlate(park001.id);
+      final outcome = await _triggerNodeCapture(); // 0未触发 / 1拍了没识别 / 2识别成功
+      if (outcome == _captureOutcomeNotTriggered) return '节点忙或调用失败, 请稍后重试';
+      // 动作确实执行了 → 开始 3s 冷却计时(节点忙/未触发不计入, 允许立即重试)
+      _lastManualCaptureAt = DateTime.now();
+      // 等本次新结果落库(期间保持"拍照识别中..."), 出新结果即写入卡片并结束
+      final info = await _pollNodePlateChanged(park001.id, baseline: base);
+      gotFresh = _isFreshPlate(info, base);
+      hasPlate = info.hasPlate;
+      _addLog(
+        type: 'capture',
+        title: '远程拍照',
+        spotId: park001.id,
+        detail: !gotFresh
+            ? '已抓拍, 但新结果暂未落库, 稍后将自动同步'
+            : (hasPlate ? '已抓拍识别车牌: ${info.plate}' : '已抓拍, 本次未识别到车牌'),
       );
-      // 回执语义(固件真值): ActualValue=拍照动作是否真正触发; Result=本次OCR是否识别出车牌
-      final av = _asBool(output?['ActualValue']);
-      final rv = _asBool(output?['Result']);
-      debugPrint('🔍 TriggerCapture 回执: ${output ?? 'null'} (ActualValue=$av, Result=$rv)');
-      if (!av) return _captureOutcomeNotTriggered; // 忙/未触发(平台直接回执或设备拒执行)
-      return rv ? _captureOutcomeOk : _captureOutcomeNoPlate;
-    } catch (e) {
-      debugPrint('❌ 拍照异常: $e');
-      return _captureOutcomeNotTriggered;
     } finally {
       _capturingRemote = false;
       notifyListeners();
     }
+    /* ⭐ 收到本次结果后立刻拉一次云端, 让整卡(状态/占用/置信度)秒级同步, 不必等下一轮 3s 定时刷新.
+     * 此时平台已是新值(上面就是按平台读值判定"变化"的), 不会被旧值打回. */
+    if (gotFresh) await refresh();
+    return hasPlate ? null : ''; // 成功=null; 拍到未识别/未落库=空串(静默, 卡片已提示)
   }
 
-  /// 宽松解析 OneNET 布尔出参(可能回 bool true/false / 数字 1/0 / 字符串 "true").
+  /* ==================== 拍照触发/短轮询 (自动拍照归节点 CapturePolicy, App 不轮询触发) ==================== */
+
+  /// 调节点 TriggerCapture 服务并等待 invoke_reply (拍照+OCR 完成).
+  /// 忙/异常返回 [_captureOutcomeNotTriggered]. 互斥与"拍照识别中"状态由 [capturePlateRemote] 统一管理.
+  /// 返回三态: 0=未触发  1=已拍照但未识别出车牌  2=已拍照且识别出车牌.
+  /// 不弹UI/不打日志, 由调用方决定后续动作.
+  Future<int> _triggerNodeCapture() async {
+    try {
+      final output = await _apiService.callService(
+        'Park001', // 车牌只挂在 Park001 节点上
+        'TriggerCapture',
+        <String, dynamic>{}, // 服务无入参
+        productId: ApiService.nodeProductId,
+        timeoutSeconds: 12, // 节点要先拍照+OCR 再回 invoke_reply, 放宽等待回执
+      );
+      // 回执语义(节点真值, int32): ActualValue=拍照动作是否真正执行; Result=本次OCR是否识别出车牌
+      final av = _asBool(output?['ActualValue']);
+      final rv = _asBool(output?['Result']);
+      debugPrint('🔍 TriggerCapture 回执: ${output ?? 'null'} (ActualValue=$av, Result=$rv)');
+      if (!av) return _captureOutcomeNotTriggered; // 忙/未触发(节点拒绝执行)
+      return rv ? _captureOutcomeOk : _captureOutcomeNoPlate;
+    } catch (e) {
+      debugPrint('❌ 拍照异常: $e');
+      return _captureOutcomeNotTriggered;
+    }
+  }
+
+  /// 宽松解析 OneNET 出参(可能回 bool true/false / 数字 1/0 / 字符串 "true").
   bool _asBool(Object? v) => v == true || v == 1 || v == '1' || v == 'true';
 
-  /// 拍照识别成功后轮询拉取本次识别结果(车牌+颜色+置信度+时间): 属性平台入库有延迟(约1~2s),
-  /// 短间隔最多试约4秒; 取到车牌即返回, 一直取不到返回空信息由调用方兜底.
-  Future<CameraPlateInfo> _pollCameraPlate() async {
-    for (var i = 0; i < 5; i++) {
-      if (i > 0) {
-        await Future<void>.delayed(const Duration(milliseconds: 800));
-      }
-      final info = await _apiService.fetchCameraPlate();
-      if (info.hasPlate) return info;
+  /// 是否为"本次新识别结果".
+  /// 首选判据 = 平台 `PlateNumber` 属性的**更新时间**变化: 网关只在收到新 `0xF1` 车牌帧时才上报车牌,
+  /// 所以该时间只在"真的发生一次识别结果"时前进(即使车牌值与上次相同也前进) → 重拍同一辆车也能秒判到.
+  /// 平台未给时间(或基线无时间)时退化为"车牌值变化"比较(旧判据).
+  bool _isFreshPlate(NodePlateInfo i, NodePlateInfo base) {
+    if (i.plate == null) return false;
+    if (i.updatedAt != null && base.updatedAt != null) {
+      return i.updatedAt != base.updatedAt;
     }
-    return const CameraPlateInfo();
+    return i.plate != (base.plate ?? '');
   }
 
-  /// 🆕 "有车就拍"自动触发(进场抓拍, fire-and-forget 不阻塞轮询):
-  ///   识别成功 → 拉取本次识别结果写入车位(异步完成);
-  ///   拍了但没识别出 → 标记车位"已拍照未识别", 车位界面可见, 本次停车事件不重试.
-  Future<void> _autoFireCapture() async {
-    final outcome = await _triggerCameraCapture();
-    if (outcome == _captureOutcomeNotTriggered) {
-      debugPrint('🚫 自动拍照(有车就拍): 忙/失败, 本次停车事件不再重试');
-      return;
-    }
-    if (outcome == _captureOutcomeNoPlate) {
-      SpotModel? target;
-      for (final s in _spots) {
-        if (s.id == 'Park001') {
-          target = s;
-          break;
-        }
-      }
-      if (target != null) _markCaptureNoPlate(target);
-      debugPrint('⚠️ 自动拍照(有车就拍): 已拍照但未识别到车牌 → 车位标记"未识别"');
-      _addLog(
-        type: 'capture',
-        title: '自动拍照',
-        spotId: 'Park001',
-        detail: '策略触发(有车就拍): 已拍照, 但未识别到车牌',
-        success: false,
-      );
-      return;
-    }
-    // 识别成功 → 属性入库有延迟, 短轮询拉本次识别结果写回车位
-    final info = await _pollCameraPlate();
-    SpotModel? cur;
-    for (final s in _spots) {
-      if (s.id == 'Park001') {
-        cur = s;
-        break;
-      }
-    }
-    if (info.hasPlate && cur != null) {
-      _applyPlateToSpot(cur, info);
-      debugPrint('✅ 自动拍照(有车就拍): 车牌 ${info.plate} 已写入车位');
-    } else {
-      debugPrint('⚠️ 自动拍照(有车就拍): 识别成功但属性暂未取到, 稍后自动同步');
-    }
-    _addLog(
-      type: 'capture',
-      title: '自动拍照',
-      spotId: 'Park001',
-      detail: info.hasPlate
-          ? '策略触发(有车就拍): 已抓拍, 车牌 ${info.plate}'
-          : '策略触发(有车就拍): 已抓拍, 车牌同步中',
-    );
-  }
-
-  /// 🆕 "僵尸车才拍"通知前补牌: 对绑定相机的 Park001 拍照并等待本次车牌,
-  /// 成功则把识别结果写回 spot/完整缓存/active工单, 返回带牌 spot; 失败返回原 spot(调用方决定重试/保底).
-  Future<SpotModel> _fillPlateBeforeNotify(SpotModel spot) async {
-    if (spot.id != 'Park001' || spot.isDisabledSpot || spot.isOffline) {
-      debugPrint('🚫 通知前补牌: ${spot.id} 无绑定相机/停用/离线, 跳过拍照');
-      return spot;
-    }
-    final outcome = await _triggerCameraCapture();
-    if (outcome == _captureOutcomeNotTriggered) {
-      debugPrint('🚫 通知前补牌: 相机忙/调用失败, 本轮放弃(下轮 refresh 自动重试)');
-      return spot;
-    }
-    if (outcome == _captureOutcomeNoPlate) {
-      _markCaptureNoPlate(spot); // ⭐ 车位显示"已拍照, 未识别到车牌"
-      debugPrint('⚠️ 通知前补牌: 已拍照但本次未识别到车牌(算1次失败, 由调用方计重试)');
-      return spot;
-    }
-    // ✅ 识别成功 → 属性入库有延迟, 短轮询拉本次识别结果写回
-    final info = await _pollCameraPlate();
-    if (!info.hasPlate) {
-      debugPrint('⚠️ 通知前补牌: OCR已识别但属性暂未取到, 本轮按无牌处理(下轮重试兜底)');
-      return spot;
-    }
-    debugPrint('✅ 通知前补牌成功: Park001 ← ${info.plate}');
-    return _applyPlateToSpot(spot, info);
-  }
-
-  /// 把一次成功识别结果(车牌/颜色/置信度/识别时间)写回 spot 内存 + 完整缓存 + 同一事件工单,
-  /// 返回新 spot 供通知使用. 同时写入 [_capturedPlateCache] 并清除"拍了没识别"标记:
-  /// 后续每轮 refresh 重建时从缓存贴回, 避免被平台数据(不含车牌)冲成 null.
-  SpotModel _applyPlateToSpot(SpotModel spot, CameraPlateInfo info) {
-    final plate = info.plate ?? '';
-    _capturedPlateCache[spot.id] = info;      // ⭐ 事件期识别结果缓存
-    _captureNoPlateSpots.remove(spot.id);     // ✅ 识别成功 → 清除"未识别"标记
-    final updated = spot.copyWith(
-      plateNumber: plate,
-      plateColor: info.color,
+  /// 把平台【已确认】的车牌写入车位卡片并立即通知 UI 刷新(不写会露旧值/写未确认值会被 refresh 打回).
+  void _applyNodePlate(String spotId, NodePlateInfo info) {
+    final idx = _spots.indexWhere((s) => s.id == spotId);
+    if (idx < 0 || info.plate == null) return;
+    _spots[idx] = _spots[idx].copyWith(
+      plateNumber: info.plate,
       plateConfidence: info.confidence,
-      capturedAt: info.captureTime,
-      captureFailed: false,
+      plateUpdatedAt: info.updatedAt,
     );
-    final idx = _spots.indexWhere((s) => s.id == spot.id);
-    if (idx >= 0) _spots[idx] = updated;
-    final cIdx = _allSpotsCache.indexWhere((s) => s.id == spot.id);
-    if (cIdx >= 0) {
-      _allSpotsCache[cIdx] = _allSpotsCache[cIdx].copyWith(
-        plateNumber: plate,
-        plateColor: info.color,
-        plateConfidence: info.confidence,
-        capturedAt: info.captureTime,
-        captureFailed: false,
-      );
-    }
-    final active = _activeAlerts[spot.id];
-    if (active != null && (active.plateNumber.isEmpty || active.plateNumber == '未知车牌')) {
-      _activeAlerts[spot.id] = active.copyWith(
-        plateNumber: plate,
-        plateColor: info.color,
-        plateConfidence: info.confidence,
-      );
-    }
     notifyListeners();
-    return updated;
   }
 
-  /// 标记车位"已拍照但未识别出车牌": UI 显示"已拍照, 未识别到车牌"(区别于从未拍照).
-  /// 仅当该事件还没有成功车牌时生效(已有牌则忽略本次失败, 不把好牌抹掉).
-  void _markCaptureNoPlate(SpotModel spot) {
-    final cached = _capturedPlateCache[spot.id];
-    if (cached != null && cached.hasPlate) return; // 已有成功车牌 → 忽略
-    _captureNoPlateSpots.add(spot.id);
-    final idx = _spots.indexWhere((s) => s.id == spot.id);
-    if (idx >= 0 && !_spots[idx].captureFailed) {
-      _spots[idx] = _spots[idx].copyWith(captureFailed: true);
-      notifyListeners();
+  /// 轮询节点车牌属性, 直到【本次新结果落库】或超时:
+  /// 平台入库有延迟(网关收到车牌帧后 ≤1s 批量上行 + 平台入库), 期间调用方保持"拍照识别中...".
+  /// 出新结果立即写卡片并返回(加载随即结束, 新车牌秒显); 超时返回最后读到的值但不写回(可能是残留旧值).
+  /// 最多 16 次 × 500ms(≈8s, 覆盖网关 ≤1s 上行 + 平台入库延迟).
+  Future<NodePlateInfo> _pollNodePlateChanged(String spotId, {required NodePlateInfo baseline}) async {
+    var info = const NodePlateInfo();
+    for (var i = 0; i < 16; i++) {
+      if (i > 0) await Future<void>.delayed(const Duration(milliseconds: 500));
+      final cur = await _apiService.fetchNodePlate(spotId);
+      if (cur.plate == null) continue; // 属性里还没车牌: 继续等
+      info = cur;
+      if (_isFreshPlate(cur, baseline)) {
+        _applyNodePlate(spotId, cur); // ⭐ 一出新结果就刷新卡片, 随后加载立即结束
+        return cur;
+      }
+      // 还没出新结果 → 继续等(期间 UI 一直"拍照识别中...")
     }
+    return info;
   }
 
-  /// 是否已有可用的真实车牌(排除空 / 占位"未知车牌").
-  bool _hasPlate(SpotModel spot) {
-    final p = spot.plateNumber;
-    return p != null && p.isNotEmpty && p != '未知车牌';
+  /* ⭐⭐⭐ 节点拍照策略下发: 调【节点】物模型服务 SetCapturePolicy (App 通过节点间接控制摄像头时机) */
+  /// 下发节点拍照策略 CapturePolicy (0不拍/1有车拍/2僵尸拍/3都拍).
+  /// 前置: 网关在线(节点由网关代管). 对各真实未停用节点逐个下发, 全部失败返回 false.
+  /// 回执语义(节点真值, int32): Result=下发是否成功; ActualValue=实际生效档位(以此为准).
+  /// 返回 true=至少一个节点确认成功; false=失败(UI 提示).
+  Future<bool> setCapturePolicy(int policy) async {
+    final value = policy < 0 ? 0 : (policy > 3 ? 3 : policy);
+    if (!await _apiService.isGatewayOnline()) {
+      _gatewayOnline = false;
+      _policyError = '网关离线';
+      notifyListeners();
+      debugPrint('⚠️ 网关离线, 无法下发拍照策略');
+      return false;
+    }
+    _gatewayOnline = true;
+    final realSpots = _spots.where((s) => s.isReal && !s.isDisabledSpot).toList();
+    int successCount = 0;
+    for (final spot in realSpots) {
+      final output = await _apiService.callService(
+        spot.id,
+        'SetCapturePolicy',
+        {'PolicyValue': value},
+        productId: ApiService.nodeProductId,
+      );
+      final ok = output != null && output['Result'] == 1;
+      debugPrint('${ok ? "✅" : "❌"} 节点 ${spot.id} 拍照策略下发($value): $output');
+      if (!ok) continue;
+      successCount++;
+      final applied = output['ActualValue'];
+      final appliedPolicy = applied is int
+          ? applied
+          : (applied is String ? (int.tryParse(applied) ?? value) : value);
+      final idx = _spots.indexWhere((s) => s.id == spot.id);
+      if (idx >= 0) _spots[idx] = _spots[idx].copyWith(capturePolicy: appliedPolicy);
+    }
+    if (successCount == 0) {
+      _policyError = '拍照策略下发失败(节点未确认)';
+      notifyListeners();
+      return false;
+    }
+    _policyError = null;
+    _addLog(
+      type: 'policy',
+      title: '拍照策略下发',
+      spotId: realSpots.isNotEmpty ? realSpots.first.id : '',
+      detail: '节点拍照时机已设为 ${_capturePolicyLabel(value)}, 成功 $successCount 个节点',
+      success: true,
+    );
+    notifyListeners();
+    return true;
+  }
+
+  /// 拍照策略档位中文名 (0不拍/1有车拍/2僵尸拍/3都拍).
+  String _capturePolicyLabel(int v) {
+    switch (v) {
+      case 0:
+        return '不自动拍';
+      case 2:
+        return '僵尸车才拍';
+      case 3:
+        return '有车/僵尸都拍';
+      default:
+        return '有车就拍';
+    }
   }
 
   int get totalSpots => _spots.length;
@@ -727,6 +714,8 @@ class ParkingProvider extends ChangeNotifier {
   AlertModel _buildAlert(SpotModel spot) {
     final realOcc = spot.actualOccupiedSec;
     final active = _activeAlerts[spot.id];
+    /* ⭐ 车牌三态归一: '-' (拍到没认出) 与 null (从未上报) 都不写入工单, 保持原有值/'未知车牌' */
+    final String? plateForAlert = spot.hasPlate ? spot.plateNumber : null;
 
     /* 情况1: 同一个事件正在处理中 → 直接复用id/createdAt, 更新状态/秒数 */
     if (active != null) {
@@ -737,7 +726,7 @@ class ParkingProvider extends ChangeNotifier {
               : 'pending';
       final updated = active.copyWith(
         status: status,
-        plateNumber: spot.plateNumber ?? active.plateNumber,
+        plateNumber: plateForAlert ?? active.plateNumber,
         plateColor: spot.plateColor ?? active.plateColor,
         plateConfidence: spot.plateConfidence ?? active.plateConfidence,
         occupiedSec: realOcc,
@@ -757,7 +746,7 @@ class ParkingProvider extends ChangeNotifier {
 
     var newAlert = AlertModel(
       id: alertId,
-      plateNumber: spot.plateNumber ?? '未知车牌',
+      plateNumber: plateForAlert ?? '未知车牌',
       plateColor: spot.plateColor,
       plateConfidence: spot.plateConfidence,
       spotId: spot.id,
@@ -904,44 +893,7 @@ class ParkingProvider extends ChangeNotifier {
       _spots = _realOnly
           ? List.of(all.where((s) => s.isReal))
           : List.of(all);
-      // ⭐⭐⭐ 拍照识别结果维持/清除 (车牌只由拍照成功驱动):
-      //    平台节点数据不含车牌, 每轮重建会把拍照写回的结果冲成 null →
-      //    车辆仍占用/僵尸时: 从 _capturedPlateCache 每轮贴回 车牌+颜色+置信度+识别时间;
-      //    该事件"拍了但没识别出" → 贴回 captureFailed 标记(UI 显示"已拍照, 未识别到车牌");
-      //    车辆真正离开(free) → 清除缓存与标记, 空车位不再显示旧牌.
-      {
-        final pkIdx = _spots.indexWhere((s) => s.id == 'Park001');
-        if (pkIdx >= 0) {
-          final pk = _spots[pkIdx];
-          if (pk.isFree) {
-            _capturedPlateCache.remove('Park001');
-            _captureNoPlateSpots.remove('Park001');
-          } else {
-            final cached = _capturedPlateCache['Park001'];
-            if (cached != null && cached.hasPlate) {
-              if (pk.plateNumber != cached.plate ||
-                  pk.plateColor != cached.color ||
-                  pk.plateConfidence != cached.confidence ||
-                  pk.capturedAt != cached.captureTime ||
-                  pk.captureFailed) {
-                _spots[pkIdx] = pk.copyWith(
-                  plateNumber: cached.plate,
-                  plateColor: cached.color,
-                  plateConfidence: cached.confidence,
-                  capturedAt: cached.captureTime,
-                  captureFailed: false,
-                );
-                changed = true;
-              }
-            } else if (_captureNoPlateSpots.contains('Park001')) {
-              if (!pk.captureFailed) {
-                _spots[pkIdx] = pk.copyWith(captureFailed: true);
-                changed = true;
-              }
-            }
-          }
-        }
-      }
+      // ⭐ 车牌已随节点数据帧上报(PlateNumber 属性), 每轮 refresh 直接带回, 无需本地贴牌缓存.
       _syncLocalState(); // 先回写本地模拟状态(含手动切换), 让自动处理看到一致的当前状态
       /* ⭐⭐⭐ 在任何自动判定之前, 先正确维护每个车位的occupiedSince本地时间戳
        * 这一步是修复"占用时间刷新滞后, 超过30秒阈值"bug的核心: 之后所有的actualOccupiedSec、僵尸判定、
@@ -955,6 +907,8 @@ class ParkingProvider extends ChangeNotifier {
        *   刚刚为本轮新车预构建出来的active, 导致后续 _buildAlert 生成的alertId
        *   (格式: spotId_occupiedSince) 可能与该车位历史已归档的 alertId
        *   (同一辆车没离开过, occupiedSince没变) 完全相同 → 新旧工单串数据 */
+      // ⭐ 首次刷新(重启后第一轮): 对账磁盘恢复的告警 — 车在App关闭期间已离开则归档, 避免空车位残留"待处理"
+      if (prevById.isEmpty && _spots.isNotEmpty) _reconcileRestoredAlerts();
       _handleAutoResolve(prevById); // ① 检测"僵尸车离开"→归档 / "新车变僵尸"→清旧active指针
       /* ⭐⭐⭐【事件流转完成后】再为目前仍为僵尸车的车位预构建 active 工单
        *   此时历史事件指针已清空 → _buildAlert 一定会生成全新的 alertId,
@@ -963,8 +917,7 @@ class ParkingProvider extends ChangeNotifier {
       // 🆕 平台告警策略 2 级自动阶梯:
       await _autoNotifyPendingZombies(); // ① 僵尸告警出现 → 立即自动通知车主(零等待)
       await _autoDispatchOverdueNotified(); // ② 通知后等待dispatchWaitSec未挪车 → 自动派单
-      // 🆕 自动拍照策略: 检测"有车进入/变僵尸车"事件边沿 → 防抖确认后自动触发摄像头拍照
-      _autoCaptureTick(prevById);
+      /* ⭐ 自动拍照已归节点: 节点按 CapturePolicy 自主触发摄像头, App 不再轮询触发 */
       
       /* ⭐ 同时检查网关在线状态 */
       _gatewayOnline = await _apiService.isGatewayOnline();
@@ -977,6 +930,7 @@ class ParkingProvider extends ChangeNotifier {
     _refreshing = false;
     _lastRefreshAt = DateTime.now();  /* ⭐ 记录成功刷新时间 */
     if (_recordHourlySnapshot()) changed = true; // 整点快照记录也算一次数据变化
+    await _persistAlerts(); // ⭐ 告警快照: 工单/归档/时间戳变化时写盘(内容不变自动跳过)
     if (prevLoading || changed) notifyListeners();
   }
 
@@ -1134,6 +1088,7 @@ class ParkingProvider extends ChangeNotifier {
     /* 记录覆盖值, 供 3s 刷新后回写, 防止模拟车位状态被刷新打回默认 */
     _mockStatusOverrides[id] = next;
     _mockOccupiedOverrides[id] = occ;
+    unawaited(_persistAlerts()); // ⭐ 模拟态切换可能新增/归档工单, 立即写盘
     notifyListeners();
   }
 
@@ -1153,8 +1108,9 @@ class ParkingProvider extends ChangeNotifier {
       type: 'notify',
       title: '通知车主',
       spotId: spot.id,
-      detail: '已通知 ${spot.plateNumber ?? spot.id} 车主尽快挪车，${_formatWaitSec(_policy.dispatchWaitSec)}后未挪车将自动派单',
+      detail: '已通知 ${spot.hasPlate ? spot.plateNumber : spot.id} 车主尽快挪车，${_formatWaitSec(_policy.dispatchWaitSec)}后未挪车将自动派单',
     );
+    await _persistAlerts();
     notifyListeners();
   }
 
@@ -1180,6 +1136,7 @@ class ParkingProvider extends ChangeNotifier {
       spotId: spot.id,
       detail: '派单给 $handlerName 现场处理',
     );
+    await _persistAlerts();
     notifyListeners();
   }
 
@@ -1201,6 +1158,7 @@ class ParkingProvider extends ChangeNotifier {
       title: '批量通知车主',
       detail: '已通知 ${list.length} 个车位的车主挪车，${_formatWaitSec(_policy.dispatchWaitSec)}后未挪车将自动派单',
     );
+    await _persistAlerts();
     notifyListeners();
   }
 
@@ -1228,6 +1186,7 @@ class ParkingProvider extends ChangeNotifier {
       title: '批量派单',
       detail: '已派单 ${list.length} 个车位',
     );
+    await _persistAlerts();
     notifyListeners();
   }
 
@@ -1356,6 +1315,28 @@ class ParkingProvider extends ChangeNotifier {
     return s;
   }
 
+  /// ⭐ 重启恢复告警快照后的一次性对账: 恢复的 active 工单若对应车位已不再是僵尸车
+  /// (车在App关闭期间已离开), 归档为"已处理", 避免空车位残留"待处理/已通知"状态.
+  void _reconcileRestoredAlerts() {
+    if (_activeAlerts.isEmpty) return;
+    final zombieIds = _spots.where((s) => s.isZombie).map((s) => s.id).toSet();
+    final staleIds = _activeAlerts.keys.where((id) => !zombieIds.contains(id)).toList();
+    for (final spotId in staleIds) {
+      final active = _activeAlerts[spotId];
+      if (active == null) continue;
+      final resolved = active.copyWith(status: 'resolved');
+      _resolvedAlerts[resolved.id] = resolved;
+      _handledAts.putIfAbsent(resolved.id, () => DateTime.now());
+      _handlerNames.putIfAbsent(resolved.id, () => '自动处理');
+      _activeAlerts.remove(spotId);
+      _notifiedAlertIds.remove(resolved.id);
+      _dispatchedAlertIds.remove(resolved.id);
+      _clearDispatchedAt(spotId);
+      _clearNotifiedAt(resolved.id);
+    }
+    debugPrint('>>> 重启告警对账: 归档 ${staleIds.length} 条已离开车位的工单');
+  }
+
   /// ⭐⭐⭐ 【按事件隔离】检测车位状态转换并自动处理（每次refresh后调用）:
   /// ① 僵尸车离开车位 → 把当前active工单归档为【已处理】（按alertId存，不再按spotId覆盖）
   /// ② 新车进场变僵尸 → 删除旧active指针 → 下次_buildAlert生成全新eventId的工单，新老彻底独立
@@ -1396,7 +1377,7 @@ class ParkingProvider extends ChangeNotifier {
           final realOcc = prev.actualOccupiedSec;
           final temp = AlertModel(
             id: 'alert_${spot.id}_${resolvedAt.millisecondsSinceEpoch}',
-            plateNumber: prev.plateNumber ?? '未知车牌',
+            plateNumber: prev.hasPlate ? prev.plateNumber! : '未知车牌',
             spotId: spot.id,
             occupiedHours: realOcc ~/ 3600,
             occupiedSec: realOcc,
@@ -1726,52 +1707,13 @@ class ParkingProvider extends ChangeNotifier {
     await prefs.remove('$_spotDispatchedPrefix$spotId');
   }
 
-  /// 🆕 ① 僵尸车自动通知. 编排规则(与用户确认):
-  ///   - "僵尸车才拍"模式开启 → 通知前置补牌: 无车牌先拍照等结果, 拿到真实车牌才通知车主;
-  ///   - 每事件最多补牌 [_autoCapMaxPlateTries] 次仍无牌 → 保底按"未知车牌"通知并标红日志提醒人工核对;
-  ///   - 自动拍照关闭 / "有车就拍"模式 → 退回旧行为: 立即通知(有牌带牌, 无牌显示未知车牌).
+  /// 🆕 ① 僵尸车自动通知: 僵尸车出现即通知车主(有牌带牌, 无牌按未知车牌显示).
+  ///   ⭐ 车牌已随节点数据帧上报(PlateNumber 属性), App 不再为通知前置拍照补牌.
   Future<void> _autoNotifyPendingZombies() async {
     for (final spot in _spots) {
       if (!spot.isZombie) continue;
       if (spotAlertStatus(spot.id) != 'pending') continue; // 只处理"待通知"的新僵尸车
-
-      /* ⭐ 通知前置补牌: 仅绑定相机的 Park001, 且"僵尸车才拍"模式开启, 且尚无车牌 */
-      final isCameraSpot = spot.id == 'Park001';
-      final needPlateFirst = isCameraSpot &&
-          _policy.autoCaptureEnabled &&
-          _policy.autoCaptureMode != _autoCapModeOccupied &&
-          !_hasPlate(spot);
-      if (needPlateFirst) {
-        final alert = _activeAlerts[spot.id];
-        final alertId = alert?.id;
-        final tried = (alertId == null) ? 0 : (_captureMisses[alertId] ?? 0);
-        if (tried < _autoCapMaxPlateTries) {
-          final filled = await _fillPlateBeforeNotify(spot); // 拍照 → 等待车牌入库(最多约4s)
-          if (_hasPlate(filled)) {
-            if (alertId != null) _captureMisses.remove(alertId);
-            await notifyOwner(filled); // ✅ 拿到真实车牌再通知车主
-          } else {
-            if (alertId != null) _captureMisses[alertId] = tried + 1;
-            debugPrint('⚠️ 僵尸车 ${spot.id} 补牌第${tried + 1}/$_autoCapMaxPlateTries 次失败, 暂缓通知, 下轮重试');
-          }
-        } else {
-          /* 已达最大补牌次数 → 保底: 带未知车牌通知 + 标红日志提醒人工核对 */
-          if (tried == _autoCapMaxPlateTries) {
-            _addLog(
-              type: 'notify',
-              title: '车牌识别失败',
-              spotId: spot.id,
-              detail: '僵尸车自动补牌已尝试 $_autoCapMaxPlateTries 次仍未识别到车牌, 现按"未知车牌"保底通知, 请人工到场核对车牌',
-              success: false,
-            );
-          }
-          await notifyOwner(spot); // 保底通知(未知车牌)
-        }
-        continue; // 本轮已处理过拍照流程, 继续处理下一个 pending
-      }
-
-      /* 关闭自动拍照 / 有车就拍模式 / 已有车牌 → 直接通知 (和手动点"通知车主"效果一致) */
-      await notifyOwner(spot);
+      await notifyOwner(spot); // 直接通知(和手动点"通知车主"效果一致)
     }
   }
 

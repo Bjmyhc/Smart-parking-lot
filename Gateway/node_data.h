@@ -71,6 +71,11 @@ struct NodeData {
     uint8_t  plateValid;           /* 0=未识别($PLATE,-) 1=有效 */
     uint8_t  plateColor;           /* 车牌颜色 0=未知(一期恒 0, 不上报) */
     bool     plateFetchPending;    /* ⭐ CamFlags.bit2: 有新车牌待取, 据此下发 AT+PLATE */
+    /* ⭐ 车牌"只在有新结果时才上报": 收到新的 0xF1 车牌帧置位, 该车牌随下一次 pack/post
+     * 上报一次后清零. 车牌值没变时后续整帧不再包含 PlateNumber/PlateConfidence,
+     * 平台保留旧值不改 —— 这样平台的 PlateNumber.time 才等于"车牌最后更新时间"
+     * (否则每 5s 兜底整帧都把 time 刷新, App 无法用 time 判新旧/无法显示识别时间) */
+    bool     plateNeedPost;
     uint8_t  capturePolicy;        /* ⭐ CamFlags.bit0~1: 节点当前生效拍照策略 0~3 */
     uint8_t  capturePolicySet;     /* ⭐ SetCapturePolicy 服务目标值, ACK 后回 ActualValue */
     bool     cameraOnline;         /* ⭐ CamFlags.bit3: 摄像头探活结果 (1=在线) */
