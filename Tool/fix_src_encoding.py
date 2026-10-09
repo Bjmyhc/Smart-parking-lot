@@ -37,8 +37,13 @@ Keil 的 armcc V5 **只有看到 UTF-8 BOM** 才按 UTF-8 读源文件;
     python Tool/fix_src_encoding.py --check    # 只报告, 不写任何文件
     python Tool/fix_src_encoding.py            # 执行归一化
     python Tool/fix_src_encoding.py <目录>...   # 覆盖默认扫描目录
+    python Tool/fix_src_encoding.py --wire <工程.uvprojx>   # 给 Keil 工程接编译前钩子
 
-默认扫描 仓库根下的 Node/ 与 shared/ (Node 含 BootLoader)。
+默认扫描 = 仓库根下的 Node/ 与 shared/ + **自动发现的每个 Keil 工程根**
+(工程文件所在目录的上一级: Node/Firmware/Project/App.uvprojx -> Node/Firmware)。
+所以以后在仓库里任何地方新建 Keil 工程, 都会被自动纳入扫描, 不用改本文件;
+新工程只要跑一次 --wire 把钩子接上即可 —— uVision 的 Before Make 是**工程级**
+配置, 没有全局开关, 这是它唯一的限制。
 不扫 Gateway/ 与 PlateRecognitionIDF/: 那两个是 GCC 工具链, 默认按 UTF-8 读,
 加 BOM 是多余动作。
 跳过目录: Output / Listing / Objects / build / obj / RTE / DebugConfig 等产物目录。
@@ -48,6 +53,7 @@ Keil 的 armcc V5 **只有看到 UTF-8 BOM** 才按 UTF-8 读源文件;
 from __future__ import annotations
 
 import os
+import re
 import sys
 
 BOM = b"\xef\xbb\xbf"
@@ -108,6 +114,106 @@ def new_bytes(raw: bytes, kind: str) -> bytes:
     return BOM + raw.decode("gbk").encode("utf-8")
 
 
+def _is_inside(path: str, parent: str) -> bool:
+    path, parent = os.path.abspath(path), os.path.abspath(parent)
+    return path == parent or path.startswith(parent + os.sep)
+
+
+def _rel_safe(path: str, base: str) -> str:
+    """相对路径; 跨盘符时退回绝对路径(relpath 会抛 ValueError)。"""
+    try:
+        return os.path.relpath(path, base)
+    except ValueError:
+        return os.path.abspath(path)
+
+
+def keil_project_roots(root: str, exclude=()):
+    """自动发现仓库里每个 Keil 工程的源码根。
+
+    工程文件一般在 <源码根>/Project/xxx.uvprojx, 所以取它所在目录的上一级。
+    这样"新建一个 Keil 工程"不需要改本脚本 —— 扫描范围自己会跟上。
+    """
+    found = set()
+    for base, subdirs, names in os.walk(root):
+        subdirs[:] = sorted(s for s in subdirs if s not in SKIP_DIRS)
+        if any(n.lower().endswith(".uvprojx") for n in names):
+            found.add(os.path.dirname(base))
+    out = []
+    for d in sorted(found):
+        if any(_is_inside(d, e) for e in list(exclude) + out):
+            continue
+        out.append(d)
+    return out
+
+
+BLOCK_RE = re.compile(r"<BeforeMake>.*?</BeforeMake>", re.S)
+
+
+def wire_beforemake(text: str, cmd: str):
+    """把 Before Make 钩子写进工程文件(文本级修改, 幂等)。返回 (新文本|None, 说明)。"""
+    msgs = []
+
+    def fix_one_block(m):
+        block = m.group(0)
+        if "fix_src_encoding.py" in block:
+            # 已接好: 只顺手修掉那个会把构建搞死的 nStopB?X=1
+            fixed = re.sub(r"(<nStopB[12]X>)1(</nStopB[12]X>)", r"\g<1>0\g<2>", block)
+            msgs.append("钩子已接好, 无需改动" if fixed == block else "钩子已在; 顺带把 nStopB?X 由 1 修正为 0")
+            return fixed
+        for slot in ("1", "2"):
+            if re.search(r"<UserProg%sName>\s*</UserProg%sName>" % (slot, slot), block):
+                new = re.sub(r"<RunUserProg%s>0</RunUserProg%s>" % (slot, slot),
+                             "<RunUserProg%s>1</RunUserProg%s>" % (slot, slot), block)
+                # 用 lambda 做替换, 避免命令里的 Windows 反斜杠被当成正则转义
+                new = re.sub(r"<UserProg%sName>\s*</UserProg%sName>" % (slot, slot),
+                             lambda _m, s=slot: "<UserProg%sName>%s</UserProg%sName>" % (s, cmd, s),
+                             new)
+                new = re.sub(r"<nStopB%sX>1</nStopB%sX>" % (slot, slot),
+                             "<nStopB%sX>0</nStopB%sX>" % (slot, slot), new)
+                msgs.append("已接入 Before Make 槽 #%s" % slot)
+                return new
+        msgs.append("Before Make 两个槽都被占用, 未改动")
+        return block
+
+    new_text = BLOCK_RE.sub(fix_one_block, text)
+    if not msgs:
+        return None, "工程文件里没有 <BeforeMake> 段(工程文件格式可能不同), 未改动"
+    return new_text, "; ".join(msgs)
+
+
+def wire_project(root: str, proj_arg: str) -> int:
+    """给指定 Keil 工程接上编译前钩子。"""
+    proj = proj_arg if os.path.isabs(proj_arg) else os.path.join(os.getcwd(), proj_arg)
+    if not os.path.isfile(proj):
+        proj = os.path.join(root, proj_arg)
+    if not os.path.isfile(proj):
+        print("找不到工程文件: %s" % proj_arg)
+        return 2
+
+    script = os.path.abspath(__file__)
+    rel = _rel_safe(script, os.path.dirname(proj))   # 跨盘符时退回绝对路径
+    if " " in rel:                # 路径带空格必须加引号
+        rel = '"%s"' % rel
+    cmd = "python " + rel.replace("/", "\\")
+    with open(proj, "rb") as f:
+        raw = f.read()
+    has_bom = raw.startswith(BOM)
+
+    new_text, msg = wire_beforemake(raw.decode("utf-8-sig"), cmd)
+    print("工程: %s" % _rel_safe(proj, root))
+    print("命令: %s" % cmd)
+    print("结果: %s" % msg)
+    if new_text is None or new_text == raw.decode("utf-8-sig"):
+        return 0
+    out = new_text.encode("utf-8")
+    if has_bom:
+        out = BOM + out
+    with open(proj, "wb") as f:
+        f.write(out)
+    print("已写回工程文件")
+    return 0
+
+
 def main() -> int:
     try:
         sys.stdout.reconfigure(errors="replace")  # 控制台是 GBK 也不炸
@@ -117,9 +223,28 @@ def main() -> int:
     argv = sys.argv[1:]
     check = "--check" in argv
     root = find_root()
+
+    # ---- 模式: 接线 (--wire <工程.uvprojx>) ----
+    if "--wire" in argv:
+        i = argv.index("--wire")
+        if i + 1 >= len(argv):
+            print("用法: python Tool/fix_src_encoding.py --wire <工程.uvprojx>")
+            return 2
+        return wire_project(root, argv[i + 1])
+
     given = [a for a in argv if not a.startswith("--")]
-    roots = [a if os.path.isabs(a) else os.path.join(root, a)
-             for a in (given or DEFAULT_DIRS)]
+    if given:
+        roots = [a if os.path.isabs(a) else os.path.join(root, a) for a in given]
+    else:
+        roots = [os.path.join(root, d) for d in DEFAULT_DIRS]
+        proj_roots = keil_project_roots(root)
+        extra = [d for d in proj_roots
+                 if not any(_is_inside(d, r) for r in roots)]
+        if proj_roots:
+            print("检测到 Keil 工程根: %s%s"
+                  % (", ".join(os.path.relpath(d, root) for d in proj_roots),
+                     "" if extra else "  (已被上面的扫描目录覆盖)"))
+        roots += extra
 
     for r in list(roots):
         if not os.path.isdir(r):

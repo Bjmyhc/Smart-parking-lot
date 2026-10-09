@@ -10,3 +10,15 @@ trim_trailing_whitespace = true
 
 [*.md]
 trim_trailing_whitespace = false
+
+# 节点/Keil 源码统一为 UTF-8 带 BOM:
+#   armcc V5 只在文件带 BOM 时才按 UTF-8 读, 否则按系统 ANSI(GBK) 读,
+#   无 BOM 的中文字符串会被误解析 -> error: #8: missing closing quote。
+#   范围与 Tool/fix_src_encoding.py 一致(只管过 armcc 的源码);
+#   Gateway/ 与 PlateRecognitionIDF/ 是 GCC 工具链, 不加 BOM。
+#   详见 Doc/车牌接入-落地手册.md 第 6 节。
+[Node/**/*.{c,h}]
+charset = utf-8-bom
+
+[shared/*.h]
+charset = utf-8-bom
