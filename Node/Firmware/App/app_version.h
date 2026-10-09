@@ -1,4 +1,4 @@
-﻿#ifndef __APP_VERSION_H
+﻿﻿#ifndef __APP_VERSION_H
 #define __APP_VERSION_H
 
 /* ==================== 固件版本单一源头 ====================
