@@ -15,6 +15,7 @@
 #include <stdint.h>
 #include "bsp_qmc5883p.h"
 #include "bsp_lora.h"
+#include "app_plate.h"   /* ⭐ 车牌全局: g_plateCache/g_plateFetchPending/g_camOnline/g_capturePolicy */
 
 /* ==================== 传感器数据 ==================== */
 

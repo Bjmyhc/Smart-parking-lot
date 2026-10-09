@@ -200,6 +200,23 @@ void QMC_Task(void)
 }
 
 /****************************************************************************
+ * 函数名: ParkStatusName
+ * 功能:   车位状态名(日志可读性)
+ * 参数:   st - 状态码
+ * 返回:   "空闲"/"有车"/"僵尸车"/"?"
+ ****************************************************************************/
+static const char *ParkStatusName(uint8_t st)
+{
+    switch (st)
+    {
+        case PARK_IDLE:     return "空闲";
+        case PARK_OCCUPIED: return "有车";
+        case PARK_ZOMBIE:   return "僵尸车";
+        default:            return "?";
+    }
+}
+
+/****************************************************************************
  * 函数名: ParkingStatus_Check
  * 功能:   车位状态检测
  * 参数:   无
@@ -216,6 +233,7 @@ void ParkingStatus_Check(void)
     if (Get_Tick() - lastCheckTick >= PARK_CHECK_INTERVAL)
     {
         uint8_t carPresent = (Distance > 0 && Distance < g_sensorDistanceCm) && MagCarPresent;
+        uint8_t prevStatus = (uint8_t)ParkStatus;   /* ⭐ 状态迁移检测用(有变才打印) */
 
         /* ⭐ 车离去抖: 连续 CAR_ABSENT_DEBOUNCE 次检测无车才判定车离开.
          * 单次毛刺只累加计数不触发切换, 计时继续, 不再被清零 */
@@ -282,6 +300,14 @@ void ParkingStatus_Check(void)
                 break;
         }
 
+        /* ⭐ 车放上/拿下(状态迁移)打印: 此前完全没有输出, 无法判断检测是否生效.
+         * 只在实际迁移时打印一行, 不随检测周期刷屏 */
+        if ((uint8_t)ParkStatus != prevStatus)
+            Usart_Printf(USART_DEBUG,
+                "[PARK] 状态变化: %s -> %s (距离=%dcm 地磁=%d 占用=%lus)\r\n",
+                ParkStatusName(prevStatus), ParkStatusName((uint8_t)ParkStatus),
+                Distance, MagCarPresent, (unsigned long)OccupiedTime);
+
         lastCheckTick = Get_Tick();
     }
 }
@@ -327,6 +353,11 @@ static void PackNodeData(void)
     NodeDataCache.LED           = LED_GetState() ? 1 : 0;   /* LED(报警灯)实际状态, 上报平台 LED 属性 */
     NodeDataCache.ZombieThreshold = g_zombieThreshold;   /* ⭐ 当前生效阈值上报给平台观看 */
     NodeDataCache.SensorDistanceCm = g_sensorDistanceCm;  /* ⭐ 当前生效超声波距离阈值上报 */
+
+    /* ⭐ v4 车牌子系统状态标志: bit0~1 策略 / bit2 有牌待取 / bit3 摄像头在线 */
+    NodeDataCache.CamFlags = (uint8_t)((g_capturePolicy & 0x03) |
+                                       (g_plateFetchPending ? 0x04 : 0) |
+                                       (g_camOnline        ? 0x08 : 0));
 }
 
 /****************************************************************************
@@ -456,6 +487,31 @@ static void LoRa_CmdCallback(const char *cmd, const char *value)
             }
         }
         LoRa_Node_SendAck("AT+SensorDistance");
+    }
+    /* ⭐ 平台手动触发拍照 → 网关转发: AT+CAPTURE (无参)
+     * 只回"已受理"; 真正结果异步走: 拍完置 bit2 → 网关发 AT+PLATE 取牌 */
+    else if (strcmp(cmd, "AT+CAPTURE") == 0)
+    {
+        Plate_RequestCapture(PLATE_SRC_MANUAL);
+        LoRa_Node_SendAck("AT+CAPTURE");
+    }
+    /* ⭐ 网关取车牌: AT+PLATE (无参) → 回一帧 0xF1 车牌事件帧, 不另回 ACK */
+    else if (strcmp(cmd, "AT+PLATE") == 0)
+    {
+        LoRa_Node_SendPlate(Plate_BuildFrame());
+        g_plateFetchPending = 0;    /* 清"待取"旗子 */
+    }
+    /* ⭐ 平台设置拍照策略 → 网关转发: AT+CapturePolicy=<0..3> */
+    else if (strcmp(cmd, "AT+CapturePolicy") == 0)
+    {
+        if (value != NULL)
+        {
+            int v = atoi(value);
+            if (v >= 0 && v <= 3)
+                g_capturePolicy = (uint8_t)v;
+        }
+        StatusChanged = 1;          /* 下个数据帧把新值带出去 */
+        LoRa_Node_SendAck("AT+CapturePolicy");
     }
     /* 网关心跳查询: AT+PING -> 回复 PONG,APP,<第三段> (上报处于 App 业务模式, 方案 5.1)
      * 第三段: 本次上电首次被 PING 回复位原因, 网关据此判定"节点刚重启";

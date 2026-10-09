@@ -435,6 +435,16 @@
               <FileType>5</FileType>
               <FilePath>..\App\app_version.h</FilePath>
             </File>
+            <File>
+              <FileName>app_plate.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\App\app_plate.c</FilePath>
+            </File>
+            <File>
+              <FileName>app_plate.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>..\App\app_plate.h</FilePath>
+            </File>
           </Files>
         </Group>
         <Group>

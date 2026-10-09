@@ -13,6 +13,7 @@
  * 作者: Bjmyhc
  * 日期: 2026-08-08 (v3)
  * 2026-09-09 S11: 收敛为双端共享单一事实源
+ * 2026-10-09 (v4): 车牌子系统接入 —— 数据帧加 CamFlags(18→19B), 新增车牌事件帧 LoraPlate_t(0xF1)
  */
 #ifndef __SHARED_LORA_PROTOCOL_H
 #define __SHARED_LORA_PROTOCOL_H
@@ -25,11 +26,13 @@ extern "C" {
 #include <stddef.h>   /* offsetof (CRC 计算用) */
 
 /* ============ 协议版本 ============ */
-#define LORA_PROTO_VERSION    3   /* v3: 移除 LedEnable 字段(LedEnable 属性已迁移为 SetLed 服务) */
+#define LORA_PROTO_VERSION    4   /* v4: 数据帧新增 CamFlags 字节(18→19B) + 新增车牌事件帧 0xF1
+                                   * ⚠ 本版为结构性变更: 节点与网关必须用串口线**同时烧**,
+                                   *   禁止走 OTA(OTA 必然一先一后, 中间窗口长度不符 → 数据帧全丢) */
 
 /* ============ CRC16/MODBUS (工业标准, 多项式 0xA001) ============
  * 覆盖范围: 整个结构体除 crc16 字段外的所有字节
- * 漏检概率 ~ 1/65536, 对 19-32 字节短帧完全够用 (LoRaWAN 也用 CRC16)
+ * 漏检概率 ~ 1/65536, 对 19~34 字节短帧完全够用 (LoRaWAN 也用 CRC16)
  * 两端共用此函数, static inline 避免 link 冲突 */
 static inline uint16_t lora_crc16(const uint8_t *data, size_t len)
 {
@@ -62,13 +65,15 @@ static inline uint16_t lora_crc16(const uint8_t *data, size_t len)
 #define LORA_FRAME_ACK          0xC1    /* 命令执行确认(响应 AT+SetLed 等) */
 #define LORA_FRAME_OTA_OK       0xD1    /* OTA接收128B成功, 准备下一包 */
 #define LORA_FRAME_OTA_RETRY    0xE1    /* OTA要求重发上一包 */
+#define LORA_FRAME_PLATE        0xF1    /* ⭐ v4: 车牌识别结果(响应 AT+PLATE, 事件量走独立帧) */
 
 /* ============ 节点传感器数据 ============
  * 字段顺序、类型、对齐双端强制一致 (本文件为唯一来源)。
  * 布局用 #pragma pack(1): Keil armcc / AC6 / GCC(ESP8266) 均支持 */
 
-/* 节点传感器数据帧(v3: 18 字节, 加 seq + crc16)
+/* 节点传感器数据帧(v4: 19 字节, 加 CamFlags + seq + crc16)
  * LORA_FRAME_DATA + 下面结构体
+ * ⭐ v4 协议: 在 seq 之前插入 CamFlags(1B), 18B → 19B (车牌子系统状态量)
  * ⭐ v3 协议: 移除 LedEnable 字段(平台原 LedEnable 属性已迁移为 SetLed 服务), 19B → 18B
  * ⭐ v2 协议: 末尾追加 seq(1B) + crc16(2B), 16B → 19B
  *   - seq: 节点每次发送 ++, 0..255 循环 (网关端可记录检测重复/丢包)
@@ -83,10 +88,29 @@ typedef struct {
     uint8_t  LED;             /* LED(报警灯)当前状态 0/1 */
     uint32_t ZombieThreshold; /* ⭐ 僵尸车判定阈值(秒), 节点当前生效值, 网关据此上报只读属性观看 */
     uint16_t SensorDistanceCm; /* ⭐ 超声波判定距离阈值(cm), 节点当前生效值 */
+    /* === v4 协议新增字段: 车牌子系统状态标志位 === */
+    uint8_t  CamFlags;        /* bit0~1 = 拍照策略(0~3)
+                               * bit2   = 有新车牌待取(网关据此发 AT+PLATE)
+                               * bit3   = 摄像头在线(节点探活结果, 1=在线)
+                               * bit4~7 = 预留(以后再要加状态位无需改协议) */
     /* === v2 协议新增字段 (放末尾, 兼容前向布局) === */
     uint8_t  seq;             /* 帧序列号, 节点每次发送 ++, 0..255 循环 */
     uint16_t crc16;           /* CRC16/MODBUS 校验, 覆盖前面所有字节 (不含本字段) */
 } LoraNodeData_t;
+
+/* 车牌事件帧(v4: 34 字节)
+ * LORA_FRAME_PLATE + 下面结构体。车牌为**事件量**, 独立成帧, 不塞进数据帧。
+ * ⚠ 本结构体**没有 seq 字段** —— 判重启只能靠 frameNo 回退, 且摄像头重启后
+ *   frameNo 会归零, 不能单靠它判新(网关侧需结合差异检测) */
+typedef struct {
+    char     plate[24];   /* UTF-8: 中文 3 字节/字, 24B 够 8 字符车牌(含中点) + null */
+    uint8_t  conf;        /* 置信度 0~100 */
+    uint8_t  valid;       /* 0=未识别($PLATE,-), 1=有效 */
+    uint8_t  source;      /* 1=节点自动 2=软件手动 0=未知 (仅排障, 不上云) */
+    uint32_t frameNo;     /* 摄像头帧号($PLATE 第 3 段, 仅排障, 不上云) */
+    uint8_t  color;       /* 预留: 车牌颜色 0=未知 1=蓝 2=黄 3=绿 4=白 5=黑 (一期恒为 0, 不上报) */
+    uint16_t crc16;       /* CRC16/MODBUS, 覆盖 [结构体首, offsetof(crc16)) = 前 32 字节 */
+} LoraPlate_t;            /* 34 字节 = 24+1+1+1+4+1+2 */
 
 /* 节点证书帧(v2: 32 字节, 加 seq + crc16)
  * LORA_FRAME_CERT + 下面结构体 */
@@ -107,7 +131,13 @@ typedef struct {
  *   AT+DATA\r\n           查询节点数据
  *   AT+PING\r\n           探测节点是否在线
  *   AT+SetLed=<v>\r\n  设置节点报警灯使能(僵尸车报警灯), v=0/1
+ *   AT+CAPTURE\r\n        手动触发拍照识别(无参), 节点回 ACK 后置"有牌待取"旗子
+ *   AT+PLATE\r\n          取车牌(无参), 节点回一帧 LORA_FRAME_PLATE(0xF1) 并清旗子
+ *   AT+CapturePolicy=<0..3>\r\n  设置拍照策略(0不拍/1有车/2僵尸车/3都拍)
  *   AT+OTA=start,V<m>.<n>\r\n  触发节点OTA升级
+ *
+ * ⚠ 命令名不得包含既有命令名(大小写敏感)作为子串; AT+CAPTURE 与 AT+CapturePolicy
+ *   一律不许改成全大写写法(靠大小写区分, 改动会破坏网关 ACK 归属匹配)
  *
  * 注意: 命令名不携带节点号, 节点身份由定点传输帧头[AddrH][AddrL]区分
  */

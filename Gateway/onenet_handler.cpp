@@ -55,6 +55,15 @@
 #define SUB_SERVICE_SENSOR_DISTANCE  "SetSensorDistance"
 /* ⭐ LED 控制服务(SetLed): 控制节点报警灯(僵尸车报警灯)的使能开关 */
 #define SUB_SERVICE_LED_CONTROL      "SetLed"
+/* ⭐ v4 车牌子系统属性 (定义在节点产品物模型上) */
+#define SUB_PROP_PLATE_NUMBER        "PlateNumber"       /* string, UTF-8 安全截断 16B, 只读 */
+#define SUB_PROP_PLATE_CONFIDENCE    "PlateConfidence"   /* int32 0~100 ("-"报 0), 只读 */
+#define SUB_PROP_CAPTURE_POLICY      "CapturePolicy"     /* int32 0~3, 只读(以节点回报为准) */
+#define SUB_PROP_CAMERA_ONLINE       "CameraOnline"      /* bool, 只读 */
+#define SUB_PROP_PLATE_COLOR         "PlateColor"        /* int32 0~5, 一期不上报(color==0 时报空) */
+/* ⭐ v4 车牌子系统服务 */
+#define SUB_SERVICE_TRIGGER_CAPTURE  "TriggerCapture"    /* 无入参, 出参 Result/ActualValue */
+#define SUB_SERVICE_CAPTURE_POLICY   "SetCapturePolicy"  /* 入参 PolicyValue(int32 0~3) */
 /* 同步服务调用截止(ms): 平台同步调用超时约10s, 网关须赶在前面回 invoke_reply */
 #define SUB_SERVICE_DEADLINE_MS    9000
 
@@ -162,6 +171,22 @@ static void subLogout(uint8_t slot)
  * 平台 code=2213 拒绝). 属性上报统一走 subPostBatch, 且批量上报
  * 以 hasDataFrame 门控, 只报"收到过真实业务数据帧"的节点 */
 
+/* ⭐ v4: 按 UTF-8 边界安全截断拷贝 (绝不截出半个汉字).
+ * maxBytes = 允许的最大字节数(不含结尾 NUL); 若截断点落在续字节(0b10xxxxxx)
+ * 上则回退到该字符首字节, 保证不产生非法 UTF-8 序列 (平台会拒收) */
+static void utf8SafeCopy(char *dst, size_t dstSize, const char *src, size_t maxBytes)
+{
+    size_t n = strlen(src);
+    if (n > maxBytes)
+    {
+        n = maxBytes;
+        while (n > 0 && ((uint8_t)src[n] & 0xC0) == 0x80) n--;
+    }
+    if (n > dstSize - 1) n = dstSize - 1;
+    memcpy(dst, src, n);
+    dst[n] = '\0';
+}
+
 /* 代子设备批量上报属性 (pack/post): 把本轮所有在线且已上线成功的子设备
  * 合并进同一条 params 数组, 整轮仅 1 次上行.
  * 依据 OneNET 平台限制"上行报文 ≤1次/s": 若 N 台节点各自发一条,
@@ -200,6 +225,21 @@ static void subPostBatch(void)
         props[SUB_PROP_ZOMBIE_THRESHOLD]["value"] = (long)nd.zombieThresholdSec;   /* ⭐ 只读属性: 节点当前生效阈值 */
         props[SUB_PROP_SENSOR_DISTANCE]["value"] = (long)nd.sensorDistanceCm;     /* ⭐ 只读属性: 节点当前生效超声波距离阈值 */
         props[SUB_PROP_RSSI]["value"]            = nd.rssi;                      /* ⭐ 只读属性: 节点信号强度(dBm) */
+        /* ⭐ v4 车牌子系统属性 (受外层 hasDataFrame 门控).
+         * 上报前硬处理: 策略夹 0~3; 车牌 UTF-8 安全截断 16B; 未识别时置信度报 0 */
+        props[SUB_PROP_CAPTURE_POLICY]["value"] = (int)(nd.capturePolicy & 0x03);
+        props[SUB_PROP_CAMERA_ONLINE]["value"]  = nd.cameraOnline;
+        if (nd.plate[0] != '\0')   /* 三态"从未上报": 未收到过 0xF1 帧则不报该属性 */
+        {
+            char plateOut[17];   /* 16B 上限 + NUL */
+            utf8SafeCopy(plateOut, sizeof(plateOut), nd.plate, 16);
+            props[SUB_PROP_PLATE_NUMBER]["value"] = plateOut;
+            bool unidentified = (plateOut[0] == '-' && plateOut[1] == '\0');
+            props[SUB_PROP_PLATE_CONFIDENCE]["value"] =
+                unidentified ? 0 : (int)nd.plateConf;   /* "-"报 0; 否则已夹 0~100 */
+        }
+        if (nd.plateColor != 0)    /* 一期 color 恒 0: 不上报 PlateColor */
+            props[SUB_PROP_PLATE_COLOR]["value"] = (int)nd.plateColor;
     }
 
     String out;
@@ -320,20 +360,24 @@ static void handleSubServiceInvoke(JsonDocument &doc)
     const char *dn         = params["deviceName"] | "";
     const char *identifier = params["identifier"] | "";
     JsonObject input = params["input"].as<JsonObject>();
-    if (input.isNull())
-    {
-        replySubServiceInvoke(msgId, pk, dn, identifier, 400, "invalid input", 0, 0);
-        return;
-    }
 
-    /* 支持的子设备服务: 僵尸车阈值 + 超声波距离阈值 + LED控制 */
-    bool isZombie    = (strcmp(identifier, SUB_SERVICE_ZOMBIE_THRESHOLD) == 0);
+    /* 支持的子设备服务: 僵尸车阈值 + 超声波距离阈值 + LED控制
+     * + v4 车牌: 手动触发拍照(无入参) + 设置拍照策略(入参 PolicyValue) */
+    bool isZombie     = (strcmp(identifier, SUB_SERVICE_ZOMBIE_THRESHOLD) == 0);
     bool isSensorDist = (strcmp(identifier, SUB_SERVICE_SENSOR_DISTANCE) == 0);
-    bool isLed       = (strcmp(identifier, SUB_SERVICE_LED_CONTROL) == 0);
-    if (!isZombie && !isSensorDist && !isLed)
+    bool isLed        = (strcmp(identifier, SUB_SERVICE_LED_CONTROL) == 0);
+    bool isCapture    = (strcmp(identifier, SUB_SERVICE_TRIGGER_CAPTURE) == 0);
+    bool isPolicy     = (strcmp(identifier, SUB_SERVICE_CAPTURE_POLICY) == 0);
+    if (!isZombie && !isSensorDist && !isLed && !isCapture && !isPolicy)
     {
         DBG_PRINTF("[MQTT] 服务调用: 不支持的 identifier=%s\n", identifier);
         replySubServiceInvoke(msgId, pk, dn, identifier, 404, "unsupported service", 0, 0);
+        return;
+    }
+    /* TriggerCapture 无入参: 平台可能不下发 input, 不能按"缺 input"报 400 */
+    if (input.isNull() && !isCapture)
+    {
+        replySubServiceInvoke(msgId, pk, dn, identifier, 400, "invalid input", 0, 0);
         return;
     }
 
@@ -357,6 +401,20 @@ static void handleSubServiceInvoke(JsonDocument &doc)
             replySubServiceInvoke(msgId, pk, dn, identifier, 400, "DistanceValue out of range", 0, 0);
             return;
         }
+    }
+    else if (isPolicy)
+    {
+        value = input["PolicyValue"] | 0;
+        if (value < 0 || value > 3)   /* 0不拍/1有车/2僵尸车/3都拍 */
+        {
+            DBG_PRINTF("[MQTT] 服务调用拍照策略越界: %d\n", value);
+            replySubServiceInvoke(msgId, pk, dn, identifier, 400, "PolicyValue out of range", 0, 0);
+            return;
+        }
+    }
+    else if (isCapture)
+    {
+        value = 0;   /* 无入参 */
     }
     else  /* isLed */
     {
@@ -423,6 +481,20 @@ static void handleSubServiceInvoke(JsonDocument &doc)
         nodes[slot].sensorDistanceRetryCount = 0;
         nodes[slot].sensorDistanceNeedsUpdate = true;
         certsMarkDirty();   /* ⭐ S19: 阈值变更置脏标记, 主循环异步落盘 */
+    }
+    else if (isPolicy)
+    {
+        /* 记录目标值(ACK 后回 ActualValue), 入队 AT+CapturePolicy=<0..3>;
+         * 实际生效值以节点下个数据帧上报的 CapturePolicy 属性为准 */
+        nodes[slot].capturePolicySet = (uint8_t)value;
+        lora_sendControl(nodes[slot].nodeId, "CapturePolicy", value);
+    }
+    else if (isCapture)
+    {
+        /* 无参命令 AT+CAPTURE 入队(节点回 ACK 表示"已受理"); 真正的结果异步走:
+         * 节点拍完置 CamFlags.bit2 → 网关发 AT+PLATE → 回 0xF1 → 此处回 invoke_reply
+         * (onenet_notifyCaptureResult), 见 lora_handler 的 0xF1 分支 */
+        lora_sendControlNoParam(nodes[slot].nodeId, "CAPTURE");
     }
     else  /* isLed: 记录命令目标并直接 LoRa 下发(AT+SetLed), 等 ACK 后回 ActualValue */
     {
@@ -854,4 +926,25 @@ void onenet_notifyServiceResult(uint8_t slot, bool success, uint32_t value)
     s_pendingServiceReply.active = false;
     DBG_PRINTF("[MQTT] 服务调用结果已回复平台 (节点%d, %s)\n",
                nodes[slot].nodeId, success ? "成功" : "失败");
+}
+
+/* ⭐ v4: 供 lora_handler 调用. 收到 0xF1 车牌帧 → 回 TriggerCapture 的 invoke_reply.
+ * Result=1(已执行), ActualValue=是否识别到有效车牌(0/1).
+ * 仅当待回复服务确为 TriggerCapture 且节点匹配时才回, 自动触发(无待回复)不产生回复 */
+void onenet_notifyCaptureResult(uint8_t slot, bool valid)
+{
+    if (!s_pendingServiceReply.active || s_pendingServiceReply.slot != slot)
+        return;   /* 无待回复(自动触发)或节点不匹配, 忽略 */
+    if (strcmp(s_pendingServiceReply.identifier, SUB_SERVICE_TRIGGER_CAPTURE) != 0)
+        return;   /* 待回复的是别的服务(如 SetLed), 不要张冠李戴 */
+
+    NodeData &nd = nodes[slot];
+    replySubServiceInvoke(s_pendingServiceReply.msgId,
+                          nd.productKey, nd.deviceName,
+                          s_pendingServiceReply.identifier,
+                          200, "success", 1, valid ? 1 : 0);
+    logPhase(LOGPH_MQTT);
+    s_pendingServiceReply.active = false;
+    DBG_PRINTF("[MQTT] 手动拍照结果已回复平台 (节点%d, 识别=%s)\n",
+               nodes[slot].nodeId, valid ? "有效车牌" : "未识别");
 }

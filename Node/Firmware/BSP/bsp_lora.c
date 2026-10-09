@@ -306,6 +306,25 @@ void LoRa_Node_SendData(const LoraNodeData_t *data)
                  tmp.seq, tmp.crc16);
 }
 
+void LoRa_Node_SendPlate(const LoraPlate_t *p)
+{
+    uint8_t buf[1 + sizeof(LoraPlate_t)];
+    LoraPlate_t tmp;
+
+    /* v4 协议: 车牌为事件量, 独立成帧(0xF1), 发送前算 CRC; 无 seq 字段 */
+    memcpy(&tmp, p, sizeof(tmp));
+    tmp.crc16 = lora_crc16((const uint8_t*)&tmp, offsetof(LoraPlate_t, crc16));
+
+    /* 帧格式: 帧头 + [帧头字节][车牌结构体], 一次性发送(与 SendData 相同) */
+    buf[0] = LORA_FRAME_PLATE;
+    memcpy(buf + 1, &tmp, sizeof(LoraPlate_t));
+    LoRa_SendFrame(LORA_GATEWAY_ADDR, LORA_CHANNEL, buf, sizeof(buf));
+
+    Usart_Printf(USART_DEBUG, "[LoRa] 发送-> 车牌: %s conf=%d valid=%d src=%d frameNo=%lu crc=%04X\r\n",
+                 tmp.plate, tmp.conf, tmp.valid, tmp.source,
+                 (unsigned long)tmp.frameNo, tmp.crc16);
+}
+
 void LoRa_Node_SendAck(const char *cmd)
 {
     uint8_t buf[1 + 64 + 2];

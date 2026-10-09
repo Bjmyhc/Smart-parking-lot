@@ -66,4 +66,18 @@ void Config_Init(void);
  ****************************************************************************/
 uint8_t Config_Load(NodeConfig_t *cfg);
 
+/* ==================== 车牌子系统参数 (v4) ==================== */
+/* 摄像头走 USART3(PB10/PB11), 单命令通道状态机参数, 详见 app_plate.c */
+#define PLATE_BAUD              115200  /* 摄像头串口波特率(P5.80 固定 115200) */
+#define PLATE_TIMEOUT_MS        2000    /* 等 $PLATE 结果超时(ms) */
+#define PLATE_STABLE_MS         3000    /* 车位状态稳定多久才算可触发(ms) */
+#define PLATE_COOLDOWN_MS       10000   /* 自动触发冷却(ms), 防同一次停车反复拍 */
+#define PLATE_RETRY_MAX         2       /* 拍照超时最大重试次数 */
+#define PLATE_RETRY_GAP_MS      3000    /* 每次重试前的等待间隔(ms) */
+#define CAPTURE_POLICY_DEFAULT  1       /* 默认拍照策略: 0不拍/1有车/2僵尸车/3都拍 */
+#define PLATE_ARM_DELAY_MS      5000    /* 上电静默期(ms), 等摄像头模组启动 */
+#define PLATE_PROBE_MS          30000   /* 探活周期(ms) */
+#define PLATE_PROBE_TIMEOUT_MS  500     /* 探活等回应超时(ms) */
+#define PLATE_PROBE_FAIL_MAX    3       /* 连续探活失败几次判离线 */
+
 #endif /* __NODE_CONFIG_H */

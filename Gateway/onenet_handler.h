@@ -36,6 +36,11 @@ void onenet_replySet(const char *id, int code, const char *msg);
  * success=true → Result=1/ActualValue=value; false → Result=0/ActualValue=0 */
 void onenet_notifyServiceResult(uint8_t slot, bool success, uint32_t value);
 
+/* ⭐ v4: 供 lora_handler 调用. 收到 0xF1 车牌帧时补回 TriggerCapture 的
+ * invoke_reply (Result=1, ActualValue=valid?1:0). 仅当待回复服务确为
+ * TriggerCapture 且节点匹配时才回, 自动触发(无待回复)不产生多余回复 */
+void onenet_notifyCaptureResult(uint8_t slot, bool valid);
+
 /* ⭐ 向平台查询网关属性 (启动时查询历史阈值配置) */
 void sendPropertyGet(const char *attr);
 

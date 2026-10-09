@@ -2,12 +2,13 @@
  * 串口驱动 - bsp_usart.c
  * 
  * 功能描述:
- *   实现USART1和USART2的初始化配置、数据发送、格式化打印等功能
- *   USART1用于调试输出，USART2用于与 LoRa 模块通信
+ *   实现USART1/USART2/USART3的初始化配置、数据发送、格式化打印等功能
+ *   USART1用于调试输出，USART2用于与 LoRa 模块通信, USART3 用于与摄像头模组通信
  * 
  * 硬件配置:
- *   - USART1: TX-PA9, RX-PA10, 波特率115200(调试)
- *   - USART2: TX-PA2, RX-PA3, 波特率由 LORA_BAUD 决定(9600)
+ *   - USART1: TX-PA9,  RX-PA10, 波特率115200(调试)
+ *   - USART2: TX-PA2,  RX-PA3,  波特率由 LORA_BAUD 决定(9600)
+ *   - USART3: TX-PB10, RX-PB11, 波特率115200(摄像头模组)
  * 
  * 作者: Bjmyhc
  * 日期: 2026-07-19
@@ -18,7 +19,7 @@
 #include <string.h>
 #include <stdio.h>
 #include "bsp_delay.h"   /* ⭐ 引入 Get_Tick() 用于串口发送超时判断 */
-#include "stm32f10x_dma.h"   /* ⭐ USART2 TX 非阻塞发送使用 DMA1 */
+#include "stm32f10x_dma.h"   /* ⭐ USART2/USART3 TX 非阻塞发送使用 DMA1 */
 
 /* ==================== 串口发送超时(ms): 硬件异常时最多阻塞 50ms, 避免死等卡死主循环 ==================== */
 #define USART_SEND_TIMEOUT_MS 50
@@ -39,6 +40,21 @@ static volatile uint16_t usart2_rtail = 0;    /* 读取指针 */
 #define USART2_TX_DMA_WAIT_MS   100UL             /* 等上一帧搬完的上限(正常 0) */
 
 static uint8_t s_usart2_txbuf[USART2_TXBUF_SIZE];
+
+/* ==================== USART3 环形缓冲区 + 发送缓冲 + DMA(TX 非阻塞) ====================
+ * 与 USART2 同范式, 但用 DMA1_Channel2(USART3_TX).
+ * 摄像头交互命令均为短报文(<=32B), 缓冲取 128 足够 */
+static volatile uint8_t  usart3_rbuf[USART3_RBUF_SIZE];
+static volatile uint16_t usart3_rhead = 0;    /* 写入指针 */
+static volatile uint16_t usart3_rtail = 0;    /* 读取指针 */
+
+#define USART3_TXBUF_SIZE       128
+#define USART3_TX_DMA_CHANNEL   DMA1_Channel2     /* USART3_TX = DMA1_Channel2 */
+#define USART3_TX_DMA_FLAG_TC   DMA1_FLAG_TC2
+#define USART3_TX_DMA_FLAG_GL   DMA1_FLAG_GL2
+#define USART3_TX_DMA_WAIT_MS   100UL             /* 等上一帧搬完的上限(正常 0) */
+
+static uint8_t s_usart3_txbuf[USART3_TXBUF_SIZE];
 
 /****************************************************************************
  * 函数名: Usart2_DmaTxInit
@@ -71,6 +87,38 @@ static void Usart2_DmaTxInit(void)
 
     /* 允许 USART2 的 TX 请求(每次 TXE)触发 DMA 搬运 */
     USART_DMACmd(USART2, USART_DMAReq_Tx, ENABLE);
+}
+
+/****************************************************************************
+ * 函数名: Usart3_DmaTxInit
+ * 功能:   配置 USART3 TX 的 DMA1_Channel2(仅初始化一次固定字段)
+ * 参数:   无
+ * 返回值: 无
+ ****************************************************************************/
+static void Usart3_DmaTxInit(void)
+{
+    DMA_InitTypeDef dma;
+
+    RCC_AHBPeriphClockCmd(RCC_AHBPeriph_DMA1, ENABLE);
+
+    DMA_DeInit(USART3_TX_DMA_CHANNEL);
+    dma.DMA_PeripheralBaseAddr = (uint32_t)&USART3->DR;
+    dma.DMA_MemoryBaseAddr     = (uint32_t)s_usart3_txbuf;
+    dma.DMA_DIR                = DMA_DIR_PeripheralDST;
+    dma.DMA_BufferSize         = 0;                       /* 每次发送时再装填 */
+    dma.DMA_PeripheralInc      = DMA_PeripheralInc_Disable;
+    dma.DMA_MemoryInc          = DMA_MemoryInc_Enable;
+    dma.DMA_PeripheralDataSize = DMA_PeripheralDataSize_Byte;
+    dma.DMA_MemoryDataSize     = DMA_MemoryDataSize_Byte;
+    dma.DMA_Mode               = DMA_Mode_Normal;         /* 传完自动关通道 */
+    dma.DMA_Priority           = DMA_Priority_Medium;     /* 低于 LoRa 的 High */
+    dma.DMA_M2M                = DMA_M2M_Disable;
+    DMA_Init(USART3_TX_DMA_CHANNEL, &dma);
+
+    DMA_Cmd(USART3_TX_DMA_CHANNEL, DISABLE);
+
+    /* 允许 USART3 的 TX 请求(每次 TXE)触发 DMA 搬运 */
+    USART_DMACmd(USART3, USART_DMAReq_Tx, ENABLE);
 }
 
 /****************************************************************************
@@ -168,6 +216,55 @@ void Usart2_Init(unsigned int baud)
 }
 
 /****************************************************************************
+ * 函数名: Usart3_Init
+ * 功能:   初始化串口3
+ * 参数:   baud - 波特率
+ * 返回值: 无
+ * 引脚:   TX-PB10, RX-PB11
+ * 用途:   与 ESP32-S3 摄像头模组通信(AT 从机, 115200)
+ ****************************************************************************/
+void Usart3_Init(unsigned int baud)
+{
+    GPIO_InitTypeDef gpioInitStruct;
+    USART_InitTypeDef usartInitStruct;
+    NVIC_InitTypeDef nvicInitStruct;
+
+    RCC_APB2PeriphClockCmd(RCC_APB2Periph_GPIOB, ENABLE);
+    RCC_APB1PeriphClockCmd(RCC_APB1Periph_USART3, ENABLE);
+
+    gpioInitStruct.GPIO_Mode = GPIO_Mode_AF_PP;
+    gpioInitStruct.GPIO_Pin = GPIO_Pin_10;
+    gpioInitStruct.GPIO_Speed = GPIO_Speed_50MHz;
+    GPIO_Init(GPIOB, &gpioInitStruct);
+
+    gpioInitStruct.GPIO_Mode = GPIO_Mode_IN_FLOATING;
+    gpioInitStruct.GPIO_Pin = GPIO_Pin_11;
+    gpioInitStruct.GPIO_Speed = GPIO_Speed_50MHz;
+    GPIO_Init(GPIOB, &gpioInitStruct);
+
+    usartInitStruct.USART_BaudRate = baud;
+    usartInitStruct.USART_HardwareFlowControl = USART_HardwareFlowControl_None;
+    usartInitStruct.USART_Mode = USART_Mode_Rx | USART_Mode_Tx;
+    usartInitStruct.USART_Parity = USART_Parity_No;
+    usartInitStruct.USART_StopBits = USART_StopBits_1;
+    usartInitStruct.USART_WordLength = USART_WordLength_8b;
+    USART_Init(USART3, &usartInitStruct);
+
+    USART_Cmd(USART3, ENABLE);
+
+    USART_ITConfig(USART3, USART_IT_RXNE, ENABLE);
+
+    nvicInitStruct.NVIC_IRQChannel = USART3_IRQn;
+    nvicInitStruct.NVIC_IRQChannelCmd = ENABLE;
+    nvicInitStruct.NVIC_IRQChannelPreemptionPriority = 2;  /* ⭐ 占先级2: 低于 USART2(0)/USART1(1), LoRa 收字节优先 */
+    nvicInitStruct.NVIC_IRQChannelSubPriority = 0;
+    NVIC_Init(&nvicInitStruct);
+
+    /* ⭐ USART3 发送改 DMA 非阻塞搬运(接收仍走 RXNE 中断) */
+    Usart3_DmaTxInit();
+}
+
+/****************************************************************************
  * 函数名: Usart_Init
  * 功能:   初始化所有串口
  * 参数:   无
@@ -253,6 +350,48 @@ uint8_t Usart2_TxBusy(void)
     /* 本 SPL 版本无 DMA_GetCmdStatus, 用剩余传输数判断:
      * 搬运中 CNDTR>0; 传输完成(Normal 模式自动关通道)或未启动时 = 0 */
     return (DMA_GetCurrDataCounter(USART2_TX_DMA_CHANNEL) != 0) ? 1 : 0;
+}
+
+/****************************************************************************
+ * 函数名: Usart3_SendAsync
+ * 功能:   USART3 非阻塞发送(DMA1_Channel2 搬运), 启动后立即返回
+ * 参数:   data - 待发送数据指针(会先拷入内部静态缓冲)
+ *         len  - 数据长度(超过 USART3_TXBUF_SIZE 则截断)
+ * 返回值: 无
+ ****************************************************************************/
+void Usart3_SendAsync(const uint8_t *data, uint16_t len)
+{
+    uint32_t t0;
+
+    if (data == 0 || len == 0)
+        return;
+
+    if (len > USART3_TXBUF_SIZE)
+        len = USART3_TXBUF_SIZE;
+
+    /* 上一帧还没搬完 -> 先等结束, 否则会覆写正在被 DMA 读取的缓冲 */
+    t0 = Get_Tick();
+    while (Usart3_TxBusy() &&
+           (Get_Tick() - t0) <= USART3_TX_DMA_WAIT_MS) { }
+
+    memcpy(s_usart3_txbuf, data, len);
+
+    /* 改 CNDTR 前必须先关通道; Normal 模式下传完会自动关通道 */
+    DMA_Cmd(USART3_TX_DMA_CHANNEL, DISABLE);
+    DMA_ClearFlag(USART3_TX_DMA_FLAG_TC | USART3_TX_DMA_FLAG_GL);
+    DMA_SetCurrDataCounter(USART3_TX_DMA_CHANNEL, len);
+    DMA_Cmd(USART3_TX_DMA_CHANNEL, ENABLE);
+}
+
+/****************************************************************************
+ * 函数名: Usart3_TxBusy
+ * 功能:   查询上一帧 DMA 是否仍在发送中
+ * 参数:   无
+ * 返回值: 1=DMA 仍在搬运; 0=已完成/空闲
+ ****************************************************************************/
+uint8_t Usart3_TxBusy(void)
+{
+    return (DMA_GetCurrDataCounter(USART3_TX_DMA_CHANNEL) != 0) ? 1 : 0;
 }
 
 /****************************************************************************
@@ -370,6 +509,48 @@ void USART2_IRQHandler(void)
 }
 
 /****************************************************************************
+ * 函数名: USART3_IRQHandler
+ * 功能:   串口3接收中断服务函数(摄像头模组)
+ * 参数:   无
+ * 返回值: 无
+ * 说明:   接收到的数据存入环形缓冲区(usart3_rbuf), 供 app_plate 读取.
+ *         处理顺序与 USART2 一致: 先 RXNE 再兜底清 ORE(见 USART2 注释)
+ ****************************************************************************/
+volatile uint16_t usart3_oreCount = 0;
+volatile uint32_t usart3_rxCount = 0;
+
+void USART3_IRQHandler(void)
+{
+    if (USART_GetITStatus(USART3, USART_IT_RXNE) != RESET)
+    {
+        uint16_t nextHead;
+        uint8_t data;
+
+        data = (uint8_t)USART_ReceiveData(USART3);  /* 读 DR: 取数据 + 清 RXNE + 清 ORE */
+
+        nextHead = (usart3_rhead + 1) % USART3_RBUF_SIZE;
+        if (nextHead == usart3_rtail)
+        {
+            /* 缓冲区满: 丢弃新数据(保持tail不动) */
+        }
+        else
+        {
+            usart3_rbuf[usart3_rhead] = data;
+            usart3_rhead = nextHead;
+            usart3_rxCount++;
+        }
+    }
+
+    /* ORE 残留兜底(纯 overrun 无新字节时 RXNE 不置位) */
+    if (USART_GetFlagStatus(USART3, USART_FLAG_ORE) != RESET)
+    {
+        usart3_oreCount++;
+        (void)USART_ReceiveData(USART3);
+        USART_ClearFlag(USART3, USART_FLAG_ORE);
+    }
+}
+
+/****************************************************************************
  * 函数名: Usart2_GetData
  * 功能:   从 USART2 环形缓冲区读取数据 (非阻塞)
  * 参数:   buf    - 接收缓冲区
@@ -387,4 +568,37 @@ uint16_t Usart2_GetData(uint8_t *buf, uint16_t maxlen)
     }
 
     return count;
+}
+
+/****************************************************************************
+ * 函数名: Usart3_GetData
+ * 功能:   从 USART3 环形缓冲区读取数据 (非阻塞)
+ * 参数:   buf    - 接收缓冲区
+ *         maxlen - 最大读取长度
+ * 返回值: 实际读取的字节数 (0=缓冲区空)
+ ****************************************************************************/
+uint16_t Usart3_GetData(uint8_t *buf, uint16_t maxlen)
+{
+    uint16_t count = 0;
+
+    while (usart3_rhead != usart3_rtail && count < maxlen)
+    {
+        buf[count++] = usart3_rbuf[usart3_rtail];
+        usart3_rtail = (usart3_rtail + 1) % USART3_RBUF_SIZE;
+    }
+
+    return count;
+}
+
+/****************************************************************************
+ * 函数名: Usart3_FlushRx
+ * 功能:   清空 USART3 接收环形缓冲
+ * 参数:   无
+ * 返回值: 无
+ * 说明:   发新命令前调用, 丢弃残留回显/上一轮未取走的结果块,
+ *         避免旧数据被误解析成本轮结果
+ ****************************************************************************/
+void Usart3_FlushRx(void)
+{
+    usart3_rtail = usart3_rhead;
 }

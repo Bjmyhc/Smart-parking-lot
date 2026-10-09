@@ -39,9 +39,10 @@
  * - LORA_FRAME_CERT: payload = LoraNodeCert_t
  * - LORA_FRAME_ACK:  payload = ASCII命令字符串 (非固定长度, 以\r结尾) */
 enum RxState {
-    RX_WAIT_HEADER,      /* 等帧头字节(0xA1/0xB1/0xC1...) */
+    RX_WAIT_HEADER,      /* 等帧头字节(0xA1/0xB1/0xC1/0xF1...) */
     RX_FRAME_DATA,       /* 收 LoraNodeData_t */
     RX_FRAME_CERT,       /* 收 LoraNodeCert_t */
+    RX_FRAME_PLATE,      /* ⭐ v4: 收 LoraPlate_t (车牌事件帧 0xF1) */
     RX_FRAME_ACK         /* 收命令ACK字符串, 读到\r */
 };
 /* ⭐ 帧尾 DRSSI 消费状态: 载荷消费完后, 模块附加的 1 字节实时 RSSI 必须被吃掉.
@@ -65,6 +66,7 @@ static const char *rxStateName(RxState s)
         case RX_WAIT_HEADER: return "RX_WAIT_HEADER";
         case RX_FRAME_DATA:  return "RX_FRAME_DATA";
         case RX_FRAME_CERT:  return "RX_FRAME_CERT";
+        case RX_FRAME_PLATE: return "RX_FRAME_PLATE";
         case RX_FRAME_ACK:   return "RX_FRAME_ACK";
         default:             return "?";
     }
@@ -77,6 +79,7 @@ static const char *rxStateName(RxState s)
 static uint8_t  rxBuf[RX_BUF_SIZE];
 static_assert(sizeof(LoraNodeData_t) + 1 <= RX_BUF_SIZE, "LoraNodeData_t+RSSI 超出 RX_BUF_SIZE");
 static_assert(sizeof(LoraNodeCert_t) + 1 <= RX_BUF_SIZE, "LoraNodeCert_t+RSSI 超出 RX_BUF_SIZE");
+static_assert(sizeof(LoraPlate_t) + 1 <= RX_BUF_SIZE, "LoraPlate_t+RSSI 超出 RX_BUF_SIZE");
 
 /* ---------- 轮询调度 ---------- */
 static uint8_t  currentNode   = LORA_POLL_FROM_NODE;   /* 当前处理节点 */
@@ -282,7 +285,8 @@ static uint8_t  forcePingNode    = 0;   /* 非0: 该节点下次轮询强制先 
 static bool isFrameHeader(uint8_t c)
 {
     return (c == LORA_FRAME_CERT || c == LORA_FRAME_DATA || c == LORA_FRAME_ACK
-         || c == LORA_FRAME_OTA_OK || c == LORA_FRAME_OTA_RETRY);
+         || c == LORA_FRAME_OTA_OK || c == LORA_FRAME_OTA_RETRY
+         || c == LORA_FRAME_PLATE);   /* ⭐ v4: 车牌事件帧 */
 }
 
 /* ==================== 内部函数 ==================== */
@@ -517,6 +521,15 @@ static bool ackKeyMatches(const char *ack)
         return strcmp(lastCmdKey, "SetLed") == 0;
     if (strstr(ack, "SensorDistance") != NULL)
         return strcmp(lastCmdKey, "SensorDistance") == 0;
+    /* ⭐ v4: 新增命令补关键字校验, 否则被"未知内容保底放行"放行 →
+     * 迟到回执会被误当本轮命令回执. CAPTURE 与 CapturePolicy 靠大小写区分
+     * (strstr 区分大小写), 顺序无影响但仍按最具体者先行 */
+    if (strstr(ack, "CapturePolicy") != NULL)
+        return strcmp(lastCmdKey, "CapturePolicy") == 0;
+    if (strstr(ack, "CAPTURE") != NULL)
+        return strcmp(lastCmdKey, "CAPTURE") == 0;
+    if (strstr(ack, "PLATE") != NULL)
+        return strcmp(lastCmdKey, "PLATE") == 0;
     return true;                         /* 未知内容保底放行 */
 }
 
@@ -573,16 +586,22 @@ static bool handleCompleteFrame(uint8_t header)
      * 已推进(节点2), 节点1 的 ACK 被误归属为节点2 → 清错标志/误重试
      * (实测日志: 50.342 "收到<- 节点2 确认: AT+SensorDistance" 实为节点1 回复).
      * 串行协议下 lastCmdNodeId 即"当前等待响应的节点", 归属精确 */
-    else if (header == LORA_FRAME_ACK && lastCmdNodeId != 0xFF)
-        nodeId = lastCmdNodeId;
+    else if ((header == LORA_FRAME_ACK || header == LORA_FRAME_PLATE) &&
+             lastCmdNodeId != 0xFF)
+        nodeId = lastCmdNodeId;   /* ⭐ v4: 车牌帧同 ACK, 归属最近投递命令目标节点
+                                   * (AT+PLATE 经命令队列投递, 轮询指针可能已前移) */
 
     switch (header)
     {
     case LORA_FRAME_DATA:
         if (rxGot != sizeof(LoraNodeData_t) + 1)   /* ⭐ +1: 末字节为DRSSI附加RSSI */
         {
-            DBG_PRINTF("[LoRa] 数据长度不匹配 (%u vs %u)\n",
-                       (unsigned)rxGot, (unsigned)(sizeof(LoraNodeData_t) + 1));
+            /* ⭐ v4 诊断: 数据帧结构变更(18→19B), 只烧一端必然长度不符.
+             * 打印期望/实收字节与协议版本, 便于一眼判出"未同步烧录" */
+            LOG_W("[LoRa] 数据长度不匹配: 期望 %u 字节(协议 v%d), 收到 %u 字节 "
+                  "→ 疑似节点固件未同步烧录(需双端同烧 v%d), 本帧丢弃\n",
+                  (unsigned)(sizeof(LoraNodeData_t) + 1), LORA_PROTO_VERSION,
+                  (unsigned)rxGot, LORA_PROTO_VERSION);
             break;
         }
         /* ⭐ v2 协议: CRC16 校验, 不计末字节RSSI, 防止链路错位/噪声/状态机
@@ -666,6 +685,41 @@ static bool handleCompleteFrame(uint8_t header)
         gotData = true;
         break;
 
+    case LORA_FRAME_PLATE:   /* ⭐ v4: 车牌事件帧 (响应 AT+PLATE) */
+        if (rxGot != sizeof(LoraPlate_t) + 1)   /* ⭐ +1: 末字节为DRSSI附加RSSI */
+        {
+            LOG_W("[LoRa] 车牌长度不匹配: 期望 %u 字节(协议 v%d), 收到 %u 字节 "
+                  "→ 疑似节点固件未同步烧录(需双端同烧 v%d), 本帧丢弃\n",
+                  (unsigned)(sizeof(LoraPlate_t) + 1), LORA_PROTO_VERSION,
+                  (unsigned)rxGot, LORA_PROTO_VERSION);
+            break;
+        }
+        {
+            LoraPlate_t *pl = (LoraPlate_t *)rxBuf;
+            uint16_t calc = lora_crc16(rxBuf, offsetof(LoraPlate_t, crc16));
+            if (calc != pl->crc16)
+            {
+                LOG_W("[LoRa] 车牌帧 CRC 错 (节点%d 算=%04X 收=%04X) → 丢弃\n",
+                      nodeId, calc, pl->crc16);
+                break;
+            }
+            updateNodePlate(nodeId, pl);
+            /* ⭐ 手动触发(TriggerCapture)的 invoke_reply 在此刻回: 车牌已取到,
+             * Result=1/ActualValue=是否识别到有效车牌. 非该服务(自动触发)则忽略 */
+            int slot = findNode(nodeId);
+            if (slot >= 0)
+                onenet_notifyCaptureResult((uint8_t)slot, pl->valid != 0);
+            gotData = true;
+            /* 车牌字段按协议宽度拷贝并补 NUL, 避免 %s 读越界 */
+            char plateTxt[sizeof(pl->plate) + 1];
+            memcpy(plateTxt, pl->plate, sizeof(pl->plate));
+            plateTxt[sizeof(pl->plate)] = '\0';
+            DBG_PRINTF("[LoRa] 收到 <- 节点%d 车牌帧 (车牌=%s 置信度=%d 有效=%d 帧号=%lu)\n",
+                       nodeId, plateTxt, pl->conf, pl->valid,
+                       (unsigned long)pl->frameNo);
+        }
+        break;
+
     case LORA_FRAME_ACK:
         rxBuf[rxGot] = '\0';
         /* ⭐ S33: 关键字双重校验. 节点1 的回复在轮询指针前移后迟到(如命令
@@ -695,6 +749,10 @@ static bool handleCompleteFrame(uint8_t header)
                 ackNote = " (超声波距离阈值下发成功)";
             else if (strstr((char *)rxBuf, "SetLed") != NULL)
                 ackNote = " (SetLed下发成功)";
+            else if (strstr((char *)rxBuf, "CapturePolicy") != NULL)
+                ackNote = " (拍照策略下发成功)";
+            else if (strstr((char *)rxBuf, "CAPTURE") != NULL)
+                ackNote = " (手动拍照已受理, 等待取牌)";
             else if (strncmp((char *)rxBuf, "AT+OTA:version_ok", 17) == 0)
                 ackNote = " (OTA版本已最新, 拒绝升级)";
             else if (strncmp((char *)rxBuf, "AT+OTA:ack", 10) == 0)
@@ -739,6 +797,14 @@ static bool handleCompleteFrame(uint8_t header)
                 nodes[slot].sensorDistanceRetryCount = 0;
                 onenet_notifyServiceResult(slot, true, nodes[slot].sensorDistanceValue);
             }
+        }
+        /* ⭐ v4: 拍照策略下发成功(SetCapturePolicy 服务): 收到 ACK 后补回 invoke_reply,
+         * ActualValue 回服务目标值(以节点实际生效为准, 下个数据帧上报 CapturePolicy 属性) */
+        if (strstr((char *)rxBuf, "CapturePolicy") != NULL)
+        {
+            int slot = findNode(nodeId);
+            if (slot >= 0)
+                onenet_notifyServiceResult(slot, true, nodes[slot].capturePolicySet);
         }
         /* ⭐ OTA 触发命令回复解析 (方案 8.1#2 / S21):
          * 必须先判 version_ok 再判 ack (两前缀同源, 需最具体者先行):
@@ -904,20 +970,22 @@ static bool feedRx(uint8_t c)
             rxTail = RX_TAIL_DROP_DRSSI;
             break;
         }
-        /* ⭐ 严格帧头白名单: 只接受 5 个合法帧头字节, 其他字节直接丢弃
+        /* ⭐ 严格帧头白名单: 只接受合法帧头字节, 其他字节直接丢弃
          * 防止 AT 命令回执/串口噪声/状态机错位被误识别为帧头 */
         if (isFrameHeader(c))
         {
             rxState = (c == LORA_FRAME_CERT) ? RX_FRAME_CERT
                    : (c == LORA_FRAME_DATA) ? RX_FRAME_DATA
+                   : (c == LORA_FRAME_PLATE) ? RX_FRAME_PLATE   /* ⭐ v4 */
                    :                          RX_FRAME_ACK;
             /* ⭐ DRSSI: 接收端模块开启数据包RSSI后, 收包末尾会被附加1字节
-             * 实时RSSI(见DX-LR22手册5.3.11). 故 DATA/CERT 都多收1字节,
+             * 实时RSSI(见DX-LR22手册5.3.11). 故 DATA/CERT/PLATE 都多收1字节,
              * 解析时最后一字节作RSSI剥离, 不参与CRC/字段校验.
              * ASCII 帧(以\r结尾)不在此消费该字节, 改由 rxTail 丢弃. */
             rxNeed  = (rxState == RX_FRAME_CERT) ? (uint16_t)(sizeof(LoraNodeCert_t) + 1)
                    : (rxState == RX_FRAME_DATA) ? (uint16_t)(sizeof(LoraNodeData_t) + 1)
-                   :                              (uint16_t)(RX_BUF_SIZE - 1);   /* ⭐ S17: ACK 显式长度上限 */
+                   : (rxState == RX_FRAME_PLATE) ? (uint16_t)(sizeof(LoraPlate_t) + 1)
+                   :                               (uint16_t)(RX_BUF_SIZE - 1);   /* ⭐ S17: ACK 显式长度上限 */
             rxGot   = 0;
             /* ⭐ v2 加固: 进入新状态时清零 rxBuf, 防止上次残留字节污染本次解析
              * 历史乱码 bug 根因之一: rxBuf 上次未清零, 凑齐长度后解析出垃圾 */
@@ -950,11 +1018,14 @@ static bool feedRx(uint8_t c)
 
     case RX_FRAME_DATA:
     case RX_FRAME_CERT:
+    case RX_FRAME_PLATE:
         lastRxByteMs = millis();
         rxBuf[rxGot++] = c;
         if (rxGot >= rxNeed)
         {
-            uint8_t hdr = (rxState == RX_FRAME_DATA) ? LORA_FRAME_DATA : LORA_FRAME_CERT;
+            uint8_t hdr = (rxState == RX_FRAME_DATA)  ? LORA_FRAME_DATA
+                        : (rxState == RX_FRAME_PLATE) ? LORA_FRAME_PLATE
+                        :                               LORA_FRAME_CERT;
             gotFrame = handleCompleteFrame(hdr);
             rxState  = RX_WAIT_HEADER;
         }
@@ -1108,6 +1179,23 @@ bool lora_tick(void)
             forcePingNode = savedOtaNode;   /* OTA 目标节点下次轮询先 PING 复核 */
         DBG_PRINTF("[LoRa] OTA 结束, 轮询状态复位, 从节点%d 重新轮询%s\n",
                    LORA_POLL_FROM_NODE, forcePingNode ? " (OTA目标节点强制先PING)" : "");
+    }
+
+    /* --- 1.9 ⭐ v4 车牌子系统: "有牌待取"(CamFlags.bit2) → 入队 AT+PLATE 取牌 ---
+     * 节点在数据帧里置 bit2 表示缓存了新车牌待取; 此处消费(清旗子)并入队无参
+     * 命令, 实际发送由下方 section 2 统一逐条投递. 若 0xF1 丢失, 节点下个数据帧
+     * 仍带 bit2 → 自动重新置位重试 (与阈值下发同思路, 不占重试限额) */
+    for (uint8_t i = 0; i < nodeCount; i++)
+    {
+        NodeData &nd = nodes[i];
+        if (nd.plateFetchPending && nd.certSent)
+        {
+            nd.plateFetchPending = false;   /* 消费: 先清, 等 0xF1 回来才算真取到 */
+            lora_sendControlNoParam(nd.nodeId, "PLATE");
+            logPhase(LOGPH_CMD);
+            DBG_PRINTF("[LoRa] 节点%d 有牌待取, 入队 AT+PLATE\n", nd.nodeId);
+            break;   /* 一拍只入队一条, 与 section 2 单条投递节拍一致 */
+        }
     }
 
     /* --- 2. 处理待发控制命令 (优先于轮询, 且不等待响应不算节点轮询) ---
@@ -1418,6 +1506,24 @@ void lora_sendControl(uint8_t nodeId, const char *property, int value)
     PendingCmd_t *pc = &cmdQueue[cmdQueueTail];
     int n = snprintf(pc->cmd, sizeof(pc->cmd), "AT+%s=%d\r\n", property, value);
     (void)n;
+    pc->nodeId = nodeId;
+    cmdQueueTail = (cmdQueueTail + 1) % CMD_QUEUE_SIZE;
+    cmdQueueCnt++;
+}
+
+/* ⭐ v4: 无参命令入队 "AT+<property>\r\n" (AT+PLATE / AT+CAPTURE).
+ * 复用同一环形队列与投递路径 (section 2), 与 lora_sendControl 仅差命令格式 */
+void lora_sendControlNoParam(uint8_t nodeId, const char *property)
+{
+    if (cmdQueueCnt >= CMD_QUEUE_SIZE)
+    {
+        DBG_PRINTF("[LoRa] 命令队列满(%d), 丢弃最旧: %s", CMD_QUEUE_SIZE,
+                   cmdQueue[cmdQueueHead].cmd);
+        cmdQueueHead = (cmdQueueHead + 1) % CMD_QUEUE_SIZE;
+        cmdQueueCnt--;
+    }
+    PendingCmd_t *pc = &cmdQueue[cmdQueueTail];
+    snprintf(pc->cmd, sizeof(pc->cmd), "AT+%s\r\n", property);
     pc->nodeId = nodeId;
     cmdQueueTail = (cmdQueueTail + 1) % CMD_QUEUE_SIZE;
     cmdQueueCnt++;

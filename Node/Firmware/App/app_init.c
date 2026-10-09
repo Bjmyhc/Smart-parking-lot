@@ -34,5 +34,6 @@ void BSP_Init(void)
     QMC5883P_Init(&qmc5883p, QMC5883P_MODE_CONTINUOUS, QMC5883P_ODR_100HZ, QMC5883P_RNG_8G);
     Config_Init();      /* 先读 Flash 配置区身份(地址/产品ID/设备名), 必须在 LoRa_Node_Init 之前 */
     LoRa_Node_Init();
+    Plate_Init();       /* ⭐ v4 车牌子系统: 初始化 USART3(PB10/PB11 @115200) */
     Usart_Printf(USART_DEBUG, "[SYS] 板级初始化完成\r\n");
 }

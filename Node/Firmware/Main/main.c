@@ -135,6 +135,7 @@ int main(void)
 
     /* 主循环 - 时间戳非阻塞架构 */
     static uint32_t s_lastWdgLogTick = 0;  /* 喂狗日志最后打印时间 */
+    static uint16_t s_lastOreReported = 0; /* ⭐ USART2 上次已上报的 ORE 计数(降噪用) */
     while (1)
     {
         US_Task();                  /* 超声波采样 */
@@ -142,18 +143,22 @@ int main(void)
         QMC_Task();                 /* 地磁采集 */
         LED_Task();                 /* LED控制 */
         LoRa_Task();                /* LoRa通信: 响应网关轮询 + 下行命令 */
+        Plate_Task();               /* 车牌子系统: 摄像头状态机 + 探活(非阻塞) */
 
         /* ⭐ 喂狗状态日志 (必须放在喂狗之前: 打印卡死 = 不喂狗 = 4s复位, 符合预期)
-         * ⭐ 喂狗正常日志已按需求注释(不再周期性打印), 保留 ISR 诊断 */
+         * ⭐ USART2 ISR 诊断降噪: 正常态(溢出恒 0)不再每 10s 刷屏 —— 仅当 ORE 溢出
+         * 计数增长(串口过载/中断被阻塞)时才打印. rxCount 仍持续统计, 出现溢出时一并
+         * 打印, 便于区分"过载"(ORE 涨) 还是"RX 中断没触发"(rxCount 不涨) */
         if (Get_Tick() - s_lastWdgLogTick >= WDG_LOG_INTERVAL_MS)
         {
             s_lastWdgLogTick = Get_Tick();
-            /* Usart_Printf(USART_DEBUG, "[WDG] 喂狗正常, 运行 %lu 秒\r\n",
-             *              (unsigned long)(Get_Tick() / 1000)); */
-            /* ⭐ USART2 ISR 诊断: oreCount 持续涨=串口过载; rxCount 不涨=RX中断没触发,
-             * 用于定位"LoRa 模块有输出但 STM32 收不到命令"类故障 */
-            Usart_Printf(USART_DEBUG, "[USART2] ORE(溢出)=%u 收字节=%lu\r\n",
-                         (unsigned)usart2_oreCount, (unsigned long)usart2_rxCount);
+            if (usart2_oreCount != s_lastOreReported)
+            {
+                s_lastOreReported = usart2_oreCount;
+                Usart_Printf(USART_DEBUG,
+                    "[USART2] ORE 溢出新增: 累计=%u 收字节=%lu\r\n",
+                    (unsigned)usart2_oreCount, (unsigned long)usart2_rxCount);
+            }
         }
 		
         /* 最后一步才喂狗: 完整跑完全部任务才有资格, 任何一步卡死都不喂 */

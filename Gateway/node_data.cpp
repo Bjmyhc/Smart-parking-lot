@@ -179,6 +179,10 @@ void updateNodeFromRaw(uint8_t nodeId, const LoraNodeData_t *raw)
     if (ultrasonic > 1000) { ultrasonic    = 1000; }   /* 距离上限 1000cm */
     if (occupiedTime > 86400) { occupiedTime = 86400; } /* 时长上限 1 天 */
 
+    /* ⭐ v4 车牌子系统状态: CamFlags 位域 (bit0~1 策略 / bit2 有牌待取 / bit3 在线) */
+    uint8_t capturePolicy = (uint8_t)(raw->CamFlags & 0x03);
+    bool    cameraOnline  = ((raw->CamFlags >> 3) & 0x01) != 0;
+
     /* ⭐ S23: 全字段 dirty 对比 — 任何业务字段变化都触发立即上报,
      * 不再只看 parkStatus (OccupiedTime 等字段截断变化此前不触发上报, 数据陈旧);
      * 上行已有 UPLOAD_MIN_INTERVAL_MS(1s) 闸门限频 + UPLOAD_INTERVAL(5s) 定时兜底,
@@ -190,7 +194,9 @@ void updateNodeFromRaw(uint8_t nodeId, const LoraNodeData_t *raw)
         (nd.geoMagnetic        != (raw->GeoMagnetic != 0)) ||
         (nd.led                != (raw->LED != 0)) ||
         (nd.zombieThresholdSec != raw->ZombieThreshold) ||
-        (nd.sensorDistanceCm   != raw->SensorDistanceCm);
+        (nd.sensorDistanceCm   != raw->SensorDistanceCm) ||
+        (nd.capturePolicy      != capturePolicy) ||
+        (nd.cameraOnline       != cameraOnline);
 
     nd.parkStatus   = parkStatus;
     nd.geoMagnetic   = (raw->GeoMagnetic != 0);   /* 任意非零值转 0/1 */
@@ -199,6 +205,12 @@ void updateNodeFromRaw(uint8_t nodeId, const LoraNodeData_t *raw)
     nd.led          = (raw->LED != 0);
     nd.zombieThresholdSec = raw->ZombieThreshold;   /* ⭐ 节点当前生效阈值, 供 pack/post 上报观看 */
     nd.sensorDistanceCm   = raw->SensorDistanceCm;   /* ⭐ 节点当前生效超声波距离阈值 */
+    nd.capturePolicy      = capturePolicy;           /* ⭐ v4: 节点当前拍照策略 */
+    nd.cameraOnline       = cameraOnline;            /* ⭐ v4: 摄像头在线 */
+    /* ⭐ v4: CamFlags.bit2 "有新车牌待取" → 置旗子, 由 lora_tick 消费并入队 AT+PLATE.
+     * 只置不比对(不参与 changed): 它不直接上报, 但取牌后车牌变化会经 updateNodePlate 触发 */
+    if (raw->CamFlags & 0x04)
+        nd.plateFetchPending = true;
     /* ⭐ S29: 收到首帧业务数据 → 允许代子设备上报属性.
      * (上报门控 hasDataFrame: 节点上线但数据帧未到时拦截, 避免全 0 垃圾快照) */
     nd.hasDataFrame = true;
@@ -277,6 +289,35 @@ void updateNodeCert(uint8_t nodeId, const LoraNodeCert_t *cert)
     if (fwVersionChanged)
         DBG_PRINTF("[节点] 节点%d 固件版本变更: %s -> %s\n",
                    nodeId, oldFw, nd.fwVersion);
+}
+
+/* ⭐ v4: 车牌事件帧(0xF1) → 更新节点车牌缓存.
+ * 车牌是事件量(独立帧), 不塞进数据帧; 收到即清"有牌待取"旗子,
+ * 并置 hasDataFrame (能收到车牌说明节点业务已就绪) */
+void updateNodePlate(uint8_t nodeId, const LoraPlate_t *plate)
+{
+    int slot = findNode(nodeId);
+    if (slot < 0) slot = registerNode(nodeId);
+    if (slot < 0) return;
+
+    NodeData &nd = nodes[slot];
+
+    nd.plateValid = plate->valid ? 1 : 0;
+    nd.plateConf  = (plate->conf > 100) ? 100 : plate->conf;   /* 夹 0~100 */
+    nd.plateColor = plate->color;
+    /* 按协议固定宽度拷贝, 并强制 NUL 结尾 (防止非结尾的 24B 车牌在 %s 越界) */
+    memcpy(nd.plate, plate->plate, sizeof(nd.plate));
+    nd.plate[sizeof(nd.plate) - 1] = '\0';
+    nd.plateFetchPending = false;   /* 已取到, 清"有牌待取"旗子 */
+
+    nd.hasDataFrame = true;
+    updateNodeState((uint8_t)slot, NODE_EVT_DATA);
+    sysEventFlag |= (1 << (nd.nodeId - 1));
+    dataChanged = true;
+
+    DBG_PRINTF("[节点] 节点%d 车牌: %s (置信度=%d 有效=%d 来源=%d 帧号=%lu)\n",
+               nodeId, nd.plate, nd.plateConf, nd.plateValid,
+               plate->source, (unsigned long)plate->frameNo);
 }
 
 /* ⭐ 三态状态统一赋值入口 (S9): linkAlive/mode/serviceOnline 只经此修改.

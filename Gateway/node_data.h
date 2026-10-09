@@ -62,6 +62,18 @@ struct NodeData {
     bool     sensorDistanceNeedsUpdate;  /* 待下发 */
     uint16_t sensorDistanceValue;         /* 待下发的距离(cm), 0=使用默认 */
     uint8_t  sensorDistanceRetryCount;    /* 下发重试次数 */
+
+    /* ---- ⭐ v4 车牌子系统状态 (来自 LoraNodeData_t.CamFlags / LoraPlate_t) ----
+     * CamFlags 随每个数据帧上报(策略/待取旗子/摄像头在线),
+     * 车牌本体是事件量, 走独立 0xF1 帧 (updateNodePlate) */
+    char     plate[24];            /* 最近一次车牌(UTF-8, 来自 0xF1 帧), 空=从未上报 */
+    uint8_t  plateConf;            /* 识别置信度 0~100 */
+    uint8_t  plateValid;           /* 0=未识别($PLATE,-) 1=有效 */
+    uint8_t  plateColor;           /* 车牌颜色 0=未知(一期恒 0, 不上报) */
+    bool     plateFetchPending;    /* ⭐ CamFlags.bit2: 有新车牌待取, 据此下发 AT+PLATE */
+    uint8_t  capturePolicy;        /* ⭐ CamFlags.bit0~1: 节点当前生效拍照策略 0~3 */
+    uint8_t  capturePolicySet;     /* ⭐ SetCapturePolicy 服务目标值, ACK 后回 ActualValue */
+    bool     cameraOnline;         /* ⭐ CamFlags.bit3: 摄像头探活结果 (1=在线) */
 };
 
 /* ---- 三态模式枚举 (S9) ---- */
@@ -104,6 +116,9 @@ void updateNodeFromRaw(uint8_t nodeId, const LoraNodeData_t *raw);
 
 /* 从 LoraNodeCert_t (二进制接收) 更新子设备证书, 并标记待代上线 */
 void updateNodeCert(uint8_t nodeId, const LoraNodeCert_t *cert);
+
+/* ⭐ v4: 从 LoraPlate_t (车牌事件帧 0xF1) 更新节点车牌缓存, 并清"有牌待取"旗子 */
+void updateNodePlate(uint8_t nodeId, const LoraPlate_t *plate);
 
 /* ⭐ S13: 一轮轮询结束(所有节点扫完一遍, advanceNextNode 回绕)时由
  * lora_handler 调用. 以"轮询轮次"而非墙钟统计超时: 本轮有响应的节点

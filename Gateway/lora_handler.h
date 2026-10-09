@@ -24,6 +24,11 @@ bool lora_tick(void);
  * 说明: 网关在当前轮询周期结束后插入, 下一条发 AT+<property><nodeId>=<value> */
 void lora_sendControl(uint8_t nodeId, const char *property, int value);
 
+/* ⭐ v4: 入队无参命令 "AT+<property>\r\n" (如 AT+PLATE / AT+CAPTURE).
+ * 原 lora_sendControl() 固定拼 "AT+X=<值>", 发不出无参命令;
+ * 此处复用同一环形队列, 由 lora_tick 逐条投递 (FIFO, 先入先发) */
+void lora_sendControlNoParam(uint8_t nodeId, const char *property);
+
 /* 手动触发节点发现: 从头扫描所有节点 */
 void lora_triggerDiscovery(void);
 
