@@ -38,6 +38,7 @@ Keil 的 armcc V5 **只有看到 UTF-8 BOM** 才按 UTF-8 读源文件;
     python Tool/fix_src_encoding.py            # 执行归一化
     python Tool/fix_src_encoding.py <目录>...   # 覆盖默认扫描目录
     python Tool/fix_src_encoding.py --wire <工程.uvprojx>   # 给 Keil 工程接编译前钩子
+    python Tool/fix_src_encoding.py --unwire <工程.uvprojx> # 摘掉钩子(交工程给别人/上公共仓库时用)
 
 默认扫描 = 仓库根下的 Node/ 与 shared/ + **自动发现的每个 Keil 工程根**
 (工程文件所在目录的上一级: Node/Firmware/Project/App.uvprojx -> Node/Firmware)。
@@ -214,6 +215,62 @@ def wire_project(root: str, proj_arg: str) -> int:
     return 0
 
 
+def unwire_beforemake(text: str):
+    """把 Before Make 里属于本脚本的那条命令摘掉(文本级, 幂等)。
+
+    只动"命令里含 fix_src_encoding.py"的那个槽, 别人占用的槽一字不动。
+    """
+    msgs = []
+
+    def fix_one_block(m):
+        block = m.group(0)
+        if "fix_src_encoding.py" not in block:
+            return block                       # 没有我们的东西 -> 一个字都不动
+        new = block
+        for slot in ("1", "2"):
+            hit = re.search(r"<UserProg%sName>([^<]*)</UserProg%sName>" % (slot, slot), new)
+            if not hit or "fix_src_encoding.py" not in hit.group(1):
+                continue
+            new = re.sub(r"<UserProg%sName>[^<]*</UserProg%sName>" % (slot, slot),
+                         "<UserProg%sName></UserProg%sName>" % (slot, slot), new)
+            new = re.sub(r"<RunUserProg%s>1</RunUserProg%s>" % (slot, slot),
+                         "<RunUserProg%s>0</RunUserProg%s>" % (slot, slot), new)
+            msgs.append("已摘除 Before Make 槽 #%s" % slot)
+        return new
+
+    new_text = BLOCK_RE.sub(fix_one_block, text)
+    if not msgs:
+        return text, "工程里没有本脚本的钩子, 无需移除"
+    return new_text, "; ".join(msgs)
+
+
+def unwire_project(root: str, proj_arg: str) -> int:
+    """把编译前钩子从指定 Keil 工程里摘掉。"""
+    proj = proj_arg if os.path.isabs(proj_arg) else os.path.join(os.getcwd(), proj_arg)
+    if not os.path.isfile(proj):
+        proj = os.path.join(root, proj_arg)
+    if not os.path.isfile(proj):
+        print("找不到工程文件: %s" % proj_arg)
+        return 2
+
+    with open(proj, "rb") as f:
+        raw = f.read()
+    has_bom = raw.startswith(BOM)
+
+    new_text, msg = unwire_beforemake(raw.decode("utf-8-sig"))
+    print("工程: %s" % _rel_safe(proj, root))
+    print("结果: %s" % msg)
+    if new_text == raw.decode("utf-8-sig"):
+        return 0
+    out = new_text.encode("utf-8")
+    if has_bom:
+        out = BOM + out
+    with open(proj, "wb") as f:
+        f.write(out)
+    print("已写回工程文件")
+    return 0
+
+
 def main() -> int:
     try:
         sys.stdout.reconfigure(errors="replace")  # 控制台是 GBK 也不炸
@@ -224,13 +281,14 @@ def main() -> int:
     check = "--check" in argv
     root = find_root()
 
-    # ---- 模式: 接线 (--wire <工程.uvprojx>) ----
-    if "--wire" in argv:
-        i = argv.index("--wire")
-        if i + 1 >= len(argv):
-            print("用法: python Tool/fix_src_encoding.py --wire <工程.uvprojx>")
-            return 2
-        return wire_project(root, argv[i + 1])
+    # ---- 模式: 接线 / 摘钩子 (--wire | --unwire <工程.uvprojx>) ----
+    for mode, fn in (("--wire", wire_project), ("--unwire", unwire_project)):
+        if mode in argv:
+            i = argv.index(mode)
+            if i + 1 >= len(argv):
+                print("用法: python Tool/fix_src_encoding.py %s <工程.uvprojx>" % mode)
+                return 2
+            return fn(root, argv[i + 1])
 
     given = [a for a in argv if not a.startswith("--")]
     if given:
