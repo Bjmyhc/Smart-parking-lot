@@ -64,6 +64,10 @@ class ParkingProvider extends ChangeNotifier {
   bool _nodeThresholdSynced = false; /* 🆕 是否已同步过节点真实阈值到本地(重启只同步1次, 避免3s反复改) */
 
   List<SpotModel> _spots = [];
+  /* ⭐ App 侧"新车进场即时清牌"的待新结果基线: spotId → 触发门控时云端车牌标识
+   * (优先 PlateNumber 属性更新时间, 无则用车牌值). 在基线被新识别结果取代前持续抹牌,
+   * 防止本地清掉的车牌被下一轮 3s 刷新用云端旧值覆盖回来. 车位转空闲即清除. */
+  final Map<String, String> _plateAwaitBaseline = {};
   bool _realOnly = true; // true=真实模式(仅真实设备), 需模拟车位再切换本地模式
   bool _isLoading = true;
   int _layoutMode = 0; // 0=列表, 1=网格, 2=流式
@@ -921,6 +925,9 @@ class ParkingProvider extends ChangeNotifier {
       
       /* ⭐ 同时检查网关在线状态 */
       _gatewayOnline = await _apiService.isGatewayOnline();
+      /* ⭐ 最后(所有告警/通知判定用牌完成后)做 App 侧即时门控:
+       * 本轮发现"空闲→非空闲"跃迁的车位, 立即抹掉旧车牌, 即时结束"旧牌残留" */
+      _clearPlateOnNewEvent(prevById);
       changed = _gatewayOnline != prevGatewayOnline || _spotsChanged(prevById);
     } catch (_) {
       // 拉取失败保留上次数据
@@ -953,6 +960,37 @@ class ParkingProvider extends ChangeNotifier {
         final startSec = s.occupiedSec > 0 ? s.occupiedSec : 0;
         final startTime = now.subtract(Duration(seconds: startSec));
         _spots[i] = s.copyWith(occupiedSince: startTime);
+      }
+    }
+  }
+
+  /// ⭐⭐⭐ "僵尸车策略空档期显示旧车牌"的 App 侧即时门控(与节点侧清空互为纵深):
+  /// 本轮观察到某车位由【空闲】→【非空闲】(新车进场)时, 立即本地抹掉车牌,
+  /// 不等节点 车走清空→LoRa 取牌→网关上报→平台更新 的 3~5s 链路(那条链路由节点侧保证数据源正确).
+  /// 关键: 记下"待新结果基线", 在云端车牌被新识别结果取代前【持续】抹牌 ——
+  /// 否则下一轮 3s 刷新会把云端旧牌覆盖回来, 门控只顶一个周期.
+  /// 仅处理"本轮亲自看到跃迁"的车位; 冷启动首轮(prev==null)不处理, 避免误抹有效车牌.
+  void _clearPlateOnNewEvent(Map<String, SpotModel> prevById) {
+    for (int i = 0; i < _spots.length; i++) {
+      final s = _spots[i];
+      // 非占用: 清基线, 下辆车进场重新判定
+      if (!(s.isOccupied || s.isZombie)) {
+        _plateAwaitBaseline.remove(s.id);
+        continue;
+      }
+      final prev = prevById[s.id];
+      // 本轮亲自看到 空闲→非空闲 跃迁 → 记基线(本轮云端拿到的仍是旧牌标识)
+      if (prev != null && prev.isFree && s.plateNumber != null) {
+        _plateAwaitBaseline[s.id] = s.plateUpdatedAt ?? s.plateNumber!;
+      }
+      final base = _plateAwaitBaseline[s.id];
+      if (base == null) continue;
+      final cur = s.plateUpdatedAt ?? s.plateNumber;
+      if (cur == base) {
+        // 云端车牌仍=基线 → 尚无新识别结果 → 持续抹牌
+        if (s.plateNumber != '-') _spots[i] = s.markPlatePending();
+      } else {
+        _plateAwaitBaseline.remove(s.id); // 新结果到达 → 解除门控
       }
     }
   }

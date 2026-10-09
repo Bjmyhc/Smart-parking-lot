@@ -134,7 +134,8 @@ class SpotModel {
     final rawName = json['name'] as String? ?? json['deviceName'] as String? ?? '';
 
     // ⭐ 车牌改读【节点】属性 (PlateNumber/PlateConfidence/CapturePolicy/CameraOnline)
-    //    PlateNumber 是"最近一次识别结果"残留值 → 仅在车位非空闲(ParkStatus != 0)时才有值
+    //    PlateNumber 是"最近一次识别结果"事件量 → 仅在车位非空闲(ParkStatus != 0)时才有值;
+    //    节点车走时已清空并上报 '-', 不再跨事件残留
     //    三态: 合法车牌 / '-' 拍到没认出 / null 从未上报
     final rawPlate = (properties['PlateNumber'] as String?)?.trim();
     final String? plateNumber =
@@ -266,6 +267,41 @@ class SpotModel {
       dispatchedAt: dispatchedAt ?? this.dispatchedAt,
     );
   }
+
+  /// ⭐ 立即抹掉旧车牌(本地即时门控用): 车位由【空闲】→【非空闲】(新车进场)时调用,
+  /// 在节点新识别结果到达前, 不让上一辆车的车牌继续显示.
+  /// 置为 '-' 与节点"车走清空并上报"的状态一致 → 界面统一显示"未识别到车牌".
+  /// copyWith 用 `??` 无法置 null, 故单独提供.
+  SpotModel markPlatePending() => SpotModel(
+        id: id,
+        zone: zone,
+        status: status,
+        occupiedHours: occupiedHours,
+        occupiedSec: occupiedSec,
+        occupiedSince: occupiedSince,
+        batteryLevel: batteryLevel,
+        signalStrength: signalStrength,
+        geoMagnetic: geoMagnetic,
+        ultrasonic: ultrasonic,
+        zombieThresholdSec: zombieThresholdSec,
+        sensorDistanceCm: sensorDistanceCm,
+        plateNumber: '-', // 抢占旧值: 本次占用尚无识别结果
+        plateColor: null,
+        plateConfidence: null,
+        plateUpdatedAt: null,
+        capturePolicy: capturePolicy,
+        cameraOnline: cameraOnline,
+        lastUpdated: lastUpdated,
+        isOnline: isOnline,
+        isDisabled: isDisabled,
+        isReal: isReal,
+        notifyStatus: notifyStatus,
+        handlerName: handlerName,
+        handledAt: handledAt,
+        alertCreatedAt: alertCreatedAt,
+        notifiedAt: notifiedAt,
+        dispatchedAt: dispatchedAt,
+      );
 
   bool get isFree => status == 'free';
   bool get isOccupied => status == 'occupied';

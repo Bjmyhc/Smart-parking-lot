@@ -392,7 +392,8 @@ class _SpotDetailPageState extends State<SpotDetailPage> {
   ///  - 识别出合法车牌 → PlateBadge + 识别置信度小字(按阈值着色)
   ///  - '-' 拍到但没认出 → 相机✕图标 + "未识别到车牌" + 靠近/换角度提示
   ///  - 从未上报(null) → 白底"暂无车牌信息"
-  /// 说明: 仅车位非空闲(ParkStatus != 0)才可能有值; 属性是"最近一次识别结果"残留值, 车走不清空.
+  /// 说明: 仅车位非空闲(ParkStatus != 0)才可能有值; 车牌是"最近一次识别结果"事件量,
+  /// 节点在车走时已清空并上报 '-'(空档期不会残留上一辆车的车牌).
   Widget _buildPlateBadgeArea(SpotModel spot) {
     if (spot.hasPlate) {
       final conf = spot.plateConfidence;

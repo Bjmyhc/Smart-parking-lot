@@ -171,6 +171,18 @@ static void Plate_CheckAutoTrigger(void)
     /* 车位状态变化: 重新武装(无稳定窗, 状态一变即可触发) */
     if (ParkStatus != s_prevStatus)
     {
+        /* ⭐ 车离开(转 PARK_IDLE): 立即清空车牌缓存并经既有 0xF1 流请求网关取走.
+         * 车牌是"最近一次识别结果"事件量, 若不在车走时清空, 下辆车进场、而本策略
+         * (如僵尸车=2)尚未触发拍照的这段"空档期", App 仍会显示上一辆车的旧车牌.
+         * 清为 '-' 并置"待取"旗子 → 网关下次 pack/post 上报一次 PlateNumber='-',
+         * 平台与 App 随即不再显示旧牌(空档期显示"未识别", 待真识别结果覆盖). */
+        if (ParkStatus == PARK_IDLE)
+        {
+            memset(&g_plateCache, 0, sizeof(g_plateCache));
+            strcpy(g_plateCache.plate, "-");
+            g_plateFetchPending = 1;
+            Usart_Printf(USART_DEBUG, "[PLATE] 车已离开, 清空车牌缓存\r\n");
+        }
         s_prevStatus = ParkStatus;
         s_autoArmed  = 0;
     }
