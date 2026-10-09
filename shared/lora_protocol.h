@@ -1,4 +1,4 @@
-/* lora_protocol.h - LoRa 协议单一事实源 (S11)
+﻿/* lora_protocol.h - LoRa 协议单一事实源 (S11)
  *
  * ⭐ 本文件是协议常量/数据结构/校验函数的唯一权威定义 (单一事实源):
  *   - 网关端: Gateway/lora_protocol.h 只做薄包装 include 本文件 + 网关调度参数
