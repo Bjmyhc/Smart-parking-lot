@@ -1,0 +1,485 @@
+{
+  "version": "1.0",
+  "profile": {
+    "industryId": "2",
+    "sceneId": "19",
+    "categoryId": "46",
+    "productId": "04kjwU9TC7"
+  },
+  "properties": [
+    {
+      "identifier": "CameraOnline",
+      "name": "摄像头在线",
+      "functionType": "u",
+      "accessMode": "r",
+      "desc": "节点周期探活(AT+INFO)结果：true=有回应, false=连续3次无回应",
+      "dataType": {
+        "type": "bool",
+        "specs": {
+          "true": "在线",
+          "false": "离线"
+        }
+      },
+      "functionMode": "property",
+      "required": false
+    },
+    {
+      "identifier": "CapturePolicy",
+      "name": "拍照策略",
+      "functionType": "u",
+      "accessMode": "r",
+      "desc": "0=不自动拍 1=有车即拍 2=僵尸车拍 3=都拍；以节点回报的真实生效值为准",
+      "dataType": {
+        "type": "int32",
+        "specs": {
+          "max": "3",
+          "min": "0",
+          "step": "1",
+          "unit": "档位"
+        }
+      },
+      "functionMode": "property",
+      "required": false
+    },
+    {
+      "identifier": "GeoMagnetic",
+      "name": "地磁采样值",
+      "functionType": "u",
+      "accessMode": "r",
+      "desc": "",
+      "dataType": {
+        "type": "int32",
+        "specs": {
+          "max": "65536",
+          "min": "0",
+          "step": "1"
+        }
+      },
+      "functionMode": "property",
+      "required": false
+    },
+    {
+      "identifier": "LED",
+      "name": "报警灯状态",
+      "functionType": "u",
+      "accessMode": "r",
+      "desc": "",
+      "dataType": {
+        "type": "bool",
+        "specs": {
+          "true": "触发",
+          "false": "空闲"
+        }
+      },
+      "functionMode": "property",
+      "required": false
+    },
+    {
+      "identifier": "OccupiedTime",
+      "name": "占用时长",
+      "functionType": "u",
+      "accessMode": "r",
+      "desc": "",
+      "dataType": {
+        "type": "int32",
+        "specs": {
+          "max": "31536000",
+          "min": "0",
+          "step": "1",
+          "unit": "秒 / s"
+        }
+      },
+      "functionMode": "property",
+      "required": false
+    },
+    {
+      "identifier": "ParkStatus",
+      "name": "车位状态",
+      "functionType": "u",
+      "accessMode": "r",
+      "desc": "",
+      "dataType": {
+        "type": "int32",
+        "specs": {
+          "max": "2",
+          "min": "0",
+          "step": "1",
+          "unit": "状态"
+        }
+      },
+      "functionMode": "property",
+      "required": false
+    },
+    {
+      "identifier": "PlateColor",
+      "name": "车牌颜色",
+      "functionType": "u",
+      "accessMode": "r",
+      "desc": "预留，一期不上报。0=未知 1=蓝 2=黄 3=绿 4=白 5=黑",
+      "dataType": {
+        "type": "int32",
+        "specs": {
+          "max": "5",
+          "min": "0",
+          "step": "1",
+          "unit": ""
+        }
+      },
+      "functionMode": "property",
+      "required": false
+    },
+    {
+      "identifier": "PlateConfidence",
+      "name": "识别置信度",
+      "functionType": "u",
+      "accessMode": "r",
+      "desc": "端侧车牌识别置信度 0~100；车牌为 '-' 时上报 0",
+      "dataType": {
+        "type": "int32",
+        "specs": {
+          "max": "100",
+          "min": "0",
+          "step": "1",
+          "unit": "%"
+        }
+      },
+      "functionMode": "property",
+      "required": false
+    },
+    {
+      "identifier": "PlateNumber",
+      "name": "车牌号码",
+      "functionType": "u",
+      "accessMode": "r",
+      "desc": "最近一次识别结果；'-'=拍到了但没认出来。车走后不会自动清空，App 只在车位非空闲时显示",
+      "dataType": {
+        "type": "string",
+        "specs": {
+          "length": 16
+        }
+      },
+      "functionMode": "property",
+      "required": false
+    },
+    {
+      "identifier": "SensorDistanceCm",
+      "name": "超声波判定阈值",
+      "functionType": "u",
+      "accessMode": "r",
+      "desc": "",
+      "dataType": {
+        "type": "int32",
+        "specs": {
+          "max": "400",
+          "min": "2",
+          "step": "1",
+          "unit": "厘米 / cm"
+        }
+      },
+      "functionMode": "property",
+      "required": false
+    },
+    {
+      "identifier": "SignalRssi",
+      "name": "信号强度",
+      "functionType": "u",
+      "accessMode": "r",
+      "desc": "节点和网关之间的信号强度",
+      "dataType": {
+        "type": "int32",
+        "specs": {
+          "max": "0",
+          "min": "-120",
+          "step": "1",
+          "unit": "dBm"
+        }
+      },
+      "functionMode": "property",
+      "required": false
+    },
+    {
+      "identifier": "Ultrasonic",
+      "name": "超声波距离",
+      "functionType": "u",
+      "accessMode": "r",
+      "desc": "",
+      "dataType": {
+        "type": "int32",
+        "specs": {
+          "max": "400",
+          "min": "0",
+          "step": "1",
+          "unit": "厘米 / cm"
+        }
+      },
+      "functionMode": "property",
+      "required": false
+    },
+    {
+      "identifier": "ZombieThresholdSec",
+      "name": "僵尸车判定阈值",
+      "functionType": "u",
+      "accessMode": "r",
+      "desc": "",
+      "dataType": {
+        "type": "int32",
+        "specs": {
+          "max": "2592000",
+          "min": "5",
+          "step": "1",
+          "unit": "秒 / s"
+        }
+      },
+      "functionMode": "property",
+      "required": false
+    }
+  ],
+  "events": [],
+  "services": [
+    {
+      "identifier": "SetCapturePolicy",
+      "name": "设置拍照策略",
+      "functionType": "u",
+      "desc": "响应结果：1-成功、0-失败",
+      "callType": "sync",
+      "input": [
+        {
+          "identifier": "PolicyValue",
+          "name": "拍照策略",
+          "dataType": {
+            "type": "int32",
+            "specs": {
+              "max": "3",
+              "min": "0",
+              "step": "1",
+              "unit": "档位"
+            }
+          }
+        }
+      ],
+      "output": [
+        {
+          "identifier": "Result",
+          "name": "响应结果",
+          "dataType": {
+            "type": "int32",
+            "specs": {
+              "max": "1",
+              "min": "0",
+              "step": "1",
+              "unit": ""
+            }
+          }
+        },
+        {
+          "identifier": "ActualValue",
+          "name": "实际生效值",
+          "dataType": {
+            "type": "int32",
+            "specs": {
+              "max": "3",
+              "min": "0",
+              "step": "1",
+              "unit": "档位"
+            }
+          }
+        }
+      ],
+      "functionMode": "service",
+      "required": false
+    },
+    {
+      "identifier": "SetLed",
+      "name": "控制LED开关",
+      "functionType": "u",
+      "desc": "响应结果：1-成功、0-失败",
+      "callType": "sync",
+      "input": [
+        {
+          "identifier": "LedState",
+          "name": "LED开关状态",
+          "dataType": {
+            "type": "bool",
+            "specs": {
+              "true": "使能",
+              "false": "失能"
+            }
+          }
+        }
+      ],
+      "output": [
+        {
+          "identifier": "Result",
+          "name": "响应结果",
+          "dataType": {
+            "type": "int32",
+            "specs": {
+              "max": "1",
+              "min": "0",
+              "step": "1",
+              "unit": ""
+            }
+          }
+        },
+        {
+          "identifier": "ActualValue",
+          "name": "实际生效值",
+          "dataType": {
+            "type": "int32",
+            "specs": {
+              "max": "1",
+              "min": "0",
+              "step": "1",
+              "unit": ""
+            }
+          }
+        }
+      ],
+      "functionMode": "service",
+      "required": false
+    },
+    {
+      "identifier": "SetSensorDistance",
+      "name": "设置超声波判定阈值",
+      "functionType": "u",
+      "desc": "响应结果：1-成功、0-失败",
+      "callType": "sync",
+      "input": [
+        {
+          "identifier": "DistanceValue",
+          "name": "超声波判定阈值",
+          "dataType": {
+            "type": "int32",
+            "specs": {
+              "max": "400",
+              "min": "2",
+              "step": "1",
+              "unit": "厘米 / cm"
+            }
+          }
+        }
+      ],
+      "output": [
+        {
+          "identifier": "Result",
+          "name": "响应结果",
+          "dataType": {
+            "type": "int32",
+            "specs": {
+              "max": "1",
+              "min": "0",
+              "step": "1",
+              "unit": ""
+            }
+          }
+        },
+        {
+          "identifier": "ActualValue",
+          "name": "实际生效值",
+          "dataType": {
+            "type": "int32",
+            "specs": {
+              "max": "400",
+              "min": "2",
+              "step": "1",
+              "unit": "厘米 / cm"
+            }
+          }
+        }
+      ],
+      "functionMode": "service",
+      "required": false
+    },
+    {
+      "identifier": "SetZombieThreshold",
+      "name": "设置僵尸车判定阈值",
+      "functionType": "u",
+      "desc": "",
+      "callType": "sync",
+      "input": [
+        {
+          "identifier": "ThresholdValue",
+          "name": "阈值秒数",
+          "dataType": {
+            "type": "int32",
+            "specs": {
+              "max": "2592000",
+              "min": "5",
+              "step": "1",
+              "unit": "秒 / s"
+            }
+          }
+        }
+      ],
+      "output": [
+        {
+          "identifier": "Result",
+          "name": "执行结果",
+          "dataType": {
+            "type": "int32",
+            "specs": {
+              "max": "1",
+              "min": "0",
+              "step": "1",
+              "unit": ""
+            }
+          }
+        },
+        {
+          "identifier": "ActualValue",
+          "name": "实际阈值",
+          "dataType": {
+            "type": "int32",
+            "specs": {
+              "max": "2592000",
+              "min": "5",
+              "step": "1",
+              "unit": "秒 / s"
+            }
+          }
+        }
+      ],
+      "functionMode": "service",
+      "required": false
+    },
+    {
+      "identifier": "TriggerCapture",
+      "name": "手动触发拍照识别",
+      "functionType": "u",
+      "desc": "无入参；Result=1 表示识别出合法车牌，ActualValue=1 表示动作真的执行(0=节点忙/链路异常)。识别结果由 PlateNumber 属性异步上报",
+      "callType": "sync",
+      "input": [],
+      "output": [
+        {
+          "identifier": "Result",
+          "name": "响应结果",
+          "dataType": {
+            "type": "int32",
+            "specs": {
+              "max": "1",
+              "min": "0",
+              "step": "1",
+              "unit": ""
+            }
+          }
+        },
+        {
+          "identifier": "ActualValue",
+          "name": "实际执行状态",
+          "dataType": {
+            "type": "int32",
+            "specs": {
+              "max": "1",
+              "min": "0",
+              "step": "1",
+              "unit": ""
+            }
+          }
+        }
+      ],
+      "functionMode": "service",
+      "required": false
+    }
+  ],
+  "combs": []
+}
