@@ -26,7 +26,8 @@ Keil 的 armcc V5 **只有看到 UTF-8 BOM** 才按 UTF-8 读源文件;
 
 判定与动作
 ----------
-    已有 UTF-8 BOM             -> 不动
+    已有 1 个 UTF-8 BOM        -> 不动
+    头部叠了多个 BOM (坏)      -> 折叠回 1 个(只动文件头那几个字节)
     纯 ASCII                   -> 不动(任何编码读都一样, 不制造无谓 diff)
     UTF-8 无 BOM + 有非 ASCII  -> 补 BOM(只在文件头加 3 字节, 内容一字不动)
     能按 GBK 解、且非 UTF-8    -> 整体转码为 UTF-8 + BOM
@@ -80,7 +81,17 @@ def iter_files(roots):
                     yield os.path.join(base, name)
 
 
+def count_bom(raw: bytes) -> int:
+    """数文件开头连续叠了几个 UTF-8 BOM。正常 = 1(或 0)。"""
+    n = 0
+    while raw[n * 3:n * 3 + 3] == BOM:
+        n += 1
+    return n
+
+
 def classify(raw: bytes) -> str:
+    if count_bom(raw) > 1:
+        return "bom-dup"          # 文件头被叠了多个 BOM -> 需折叠
     if raw.startswith(BOM):
         return "utf8-bom"
     if not any(b > 0x7F for b in raw):
@@ -101,6 +112,8 @@ def plan_of(kind: str):
     """返回 (动作名, 新字节 or None)。只改编码, 不动内容。"""
     if kind in ("utf8-bom", "ascii"):
         return "keep", None
+    if kind == "bom-dup":
+        return "折叠为 1 个 BOM", "bom-dup"
     if kind == "utf8-nobom":
         return "补 BOM", "utf8-nobom"
     if kind == "gbk":
@@ -110,6 +123,14 @@ def plan_of(kind: str):
 
 def new_bytes(raw: bytes, kind: str) -> bytes:
     """只改编码: 内容字节一字不动。"""
+    if kind == "bom-dup":
+        # 折叠: 剥掉所有前导 BOM, 再按 1 个 BOM 写回
+        body = raw[3 * count_bom(raw):]
+        try:
+            body.decode("utf-8")
+        except UnicodeDecodeError:
+            return BOM + body.decode("gbk").encode("utf-8")   # 顺带修"GBK 身子 + 叠 BOM"
+        return BOM + body
     if kind == "utf8-nobom":
         return BOM + raw
     return BOM + raw.decode("gbk").encode("utf-8")
@@ -330,13 +351,14 @@ def main() -> int:
         elif act != "keep":
             todo.append((path, act, kind))
 
-    rel = lambda p: os.path.relpath(p, root)
+    rel = lambda p: _rel_safe(p, root)   # 跨盘符时退回绝对路径
     print("仓库根: %s" % root)
     print("扫描 : %s" % ", ".join(rel(r) for r in roots))
     print("共 %d 个 .c/.h" % total)
     for key, label in (("utf8-bom", "UTF-8+BOM (安全)"),
                        ("ascii", "纯 ASCII (安全)"),
                        ("utf8-nobom", "UTF-8 无 BOM (危险)"),
+                       ("bom-dup", "多个 BOM (需折叠)"),
                        ("gbk", "GBK (需转换)"),
                        ("unknown", "无法判定")):
         if counts.get(key):
