@@ -6,7 +6,8 @@ import 'page_title.dart';
 /// 标题样式走 [PageTitle]; 标题的顶部+左右边距在此一处维护, 改一处 4 页同步.
 class PageHeader extends StatelessWidget {
   final String title;
-  final VoidCallback? onTitleTap;
+  /// 标题长按回调 (需按满约定时长才触发, 防误触, 如车位页长按3秒切换模式)
+  final VoidCallback? onTitleLongPress;
 
   /// 标题右侧操作区 (状态徽章 / 切换按钮 / 搜索图标等), 按页面需要传入
   final List<Widget>? actions;
@@ -18,7 +19,7 @@ class PageHeader extends StatelessWidget {
   const PageHeader({
     super.key,
     required this.title,
-    this.onTitleTap,
+    this.onTitleLongPress,
     this.actions,
     this.addHorizontalPadding = true,
   });
@@ -33,7 +34,7 @@ class PageHeader extends StatelessWidget {
       ),
       child: Row(
         children: [
-          Expanded(child: PageTitle(title, onTap: onTitleTap)),
+          Expanded(child: PageTitle(title, onLongPress: onTitleLongPress)),
           ...?actions,
         ],
       ),

@@ -16,6 +16,10 @@ struct NodeData {
     uint32_t occupiedTime;  /* s */
     bool     led;           /* LED(报警灯)实际状态 */
     bool     ledSwitch;     /* ⭐ SetLed 服务最近一次命令目标值(0/1), LoRa ACK 后回 ActualValue */
+    bool     ledSwitchSet;  /* ⭐ 用户是否设置过报警灯使能. 仅设置过的节点在回归/重启时才兜底重发
+                             *   (与阈值"仅设置过才重发"同范式; 平台无该上报属性, 靠落盘恢复) */
+    bool     ledNeedsUpdate;/* ⭐ SetLed 待下发(MQTT 服务调用后置位, PONG/快速路径统一投递) */
+    uint8_t  ledRetryCount; /* ⭐ 下发重试次数, 超过3次放弃 (与阈值同机制) */
     int8_t   rssi;          /* ⭐ 本次接收节点数据帧的信号强度(dBm, -120~0), 来自模块DRSSI附加字节 */
     char     fwVersion[16]; /* 节点固件版本字符串(如 "v2.321"), 节点上报帧携带 */
     uint32_t lastUpdate;    /* 最后收到数据时间(ms) */

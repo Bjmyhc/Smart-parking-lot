@@ -3,6 +3,9 @@ import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 
+import '../../core/models/alert_model.dart';
+import '../../core/models/spot_model.dart';
+
 /// ⭐ S5 车牌缩略图点阵视图: 绘制 PlateThumb 属性(94×24 二值位图的 base64).
 ///
 /// 数据链路: 摄像头自适阈二值化(94×24, 1=白字 0=黑底) → 节点缓存 → LoRa 0xF2
@@ -86,4 +89,140 @@ class _PlateThumbPainter extends CustomPainter {
   @override
   bool shouldRepaint(_PlateThumbPainter old) =>
       old.bytes != bytes || old.pixelSize != pixelSize;
+}
+
+const Color _kThumbDialogPrimary = Color(0xFF0052D4);
+
+/// ⭐ "当时图像"弹窗: 居中卡片展示工单生成时刻的车牌原图(94×24 点阵).
+///
+/// 归档页行尾入口与工单详情页入口共用。 图缺失(升级前旧工单/识别未出图)时
+/// 显示"当时未记录图像"占位, 不报错; 点击遮罩或关闭按钮退出.
+Future<void> showAlertThumbDialog(BuildContext context, AlertModel alert) {
+  final String? thumb =
+      (alert.plateThumb != null && alert.plateThumb!.isNotEmpty)
+          ? alert.plateThumb
+          : null;
+  final created = alert.createdAt;
+  final String timeLabel = created != null
+      ? '${created.month.toString().padLeft(2, '0')}'
+          '-${created.day.toString().padLeft(2, '0')} '
+          '${created.hour.toString().padLeft(2, '0')}:'
+          '${created.minute.toString().padLeft(2, '0')}'
+      : '未知';
+
+  return showDialog(
+    context: context,
+    barrierDismissible: true,
+    builder: (ctx) => Dialog(
+      backgroundColor: Colors.transparent,
+      insetPadding: const EdgeInsets.symmetric(horizontal: 24),
+      child: Container(
+        constraints: const BoxConstraints(maxWidth: 400),
+        padding: const EdgeInsets.fromLTRB(20, 18, 20, 16),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(16),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.18),
+              blurRadius: 24,
+              offset: const Offset(0, 8),
+            ),
+          ],
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            /* 标题行: 图标 + 车牌号 + 置信度 chip */
+            Row(
+              children: [
+                const Icon(Icons.image_outlined,
+                    size: 18, color: _kThumbDialogPrimary),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    alert.plateNumber,
+                    style: const TextStyle(
+                      fontSize: 17,
+                      fontWeight: FontWeight.w700,
+                      color: Color(0xFF1D2129),
+                      letterSpacing: 1,
+                    ),
+                  ),
+                ),
+                if (alert.plateConfidence != null)
+                  Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                    decoration: BoxDecoration(
+                      color: _kThumbDialogPrimary.withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                    child: Text(
+                      '置信度 ${alert.plateConfidence}%',
+                      style: const TextStyle(
+                        fontSize: 11,
+                        color: _kThumbDialogPrimary,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 14),
+            /* 图: FittedBox 自适应缩放防小屏溢出; 无图给等高占位 */
+            if (thumb != null)
+              Center(
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: PlateThumbView(base64Data: thumb, pixelSize: 4),
+                ),
+              )
+            else
+              Container(
+                height: 104,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: const Color(0xFFF2F3F5),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: const Text(
+                  '当时未记录图像',
+                  style: TextStyle(fontSize: 13, color: Color(0xFF86909C)),
+                ),
+              ),
+            const SizedBox(height: 14),
+            /* 元信息: 车位 + 占用 + 检测时间 */
+            Text(
+              '${alert.spotId} · 占用 ${SpotModel.formatOccupiedDuration(alert.occupiedSec)} · $timeLabel',
+              textAlign: TextAlign.center,
+              style: const TextStyle(fontSize: 12, color: Color(0xFF86909C)),
+            ),
+            const SizedBox(height: 16),
+            /* 关闭 */
+            GestureDetector(
+              onTap: () => Navigator.of(ctx).pop(),
+              child: Container(
+                height: 40,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: _kThumbDialogPrimary.withValues(alpha: 0.08),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: const Text(
+                  '关闭',
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: _kThumbDialogPrimary,
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    ),
+  );
 }

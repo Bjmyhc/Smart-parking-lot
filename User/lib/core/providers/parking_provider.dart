@@ -52,6 +52,20 @@ class ParkingProvider extends ChangeNotifier {
    *   解决"退出App再进入后告警界面清空"问题. 内容不变则跳过写盘. */
   static const _alertsSnapshotKey = 'alerts_snapshot_v1';
   String? _lastAlertsJson; // 上次写盘内容, 用于跳过无变化写入
+  /* ⭐⭐⭐ 车位快照: 持久化【真实车位的最新状态+车牌+缩略图】,
+   *   解决"退出App再进入后几秒空白(尤其车牌/缩略图最后才出现)"问题:
+   *   冷启动先渲染上次快照, 首帧网络数据到达后立即覆盖. 内容不变则跳过写盘. */
+  static const _spotsSnapshotKey = 'spots_snapshot_v1';
+  String? _lastSpotsJson; // 车位快照上次写盘内容, 无变化跳过
+  /* ⭐ 车牌人工修正 (对照摄像头原图改OCR错误): spotId → 修正值.
+   * 本地覆盖 PlateNumber(节点事件量, 回写平台无意义), 持久化, 车走(空闲)自动失效. */
+  static const _plateOverridePrefix = 'plate_override_';
+  static const _plateBasePrefix = 'plate_base_';
+  final Map<String, String> _plateOverrides = {};
+  /* 修正时刻的平台原始识别值 = 判定基线: 后续平台原始值变了(且≠修正值) → 平台出了新识别 → 修正自动作废 */
+  final Map<String, String> _plateOverrideBases = {};
+  /* 本轮修正应用前的平台原始车牌 (修正会原地改写缓存, 必须在改写前记录, 供 setPlateOverride 取基线) */
+  final Map<String, String?> _rawPlates = {};
 
   final ApiService _apiService;
   Timer? _refreshTimer;  /* 3s API轮询定时器 */
@@ -172,6 +186,7 @@ class ParkingProvider extends ChangeNotifier {
   Future<void> _init() async {
     await _loadMode();
     await _loadHourlySnapshot();
+    await _loadSpotsSnapshot(); // ⭐ 冷启动先渲染上次车位快照, 首帧网络数据到达前不再空白
     await refresh();
     _restartRefreshTimer();
     _restartTickTimer(); // ⭐⭐⭐ 启动1秒粒度秒数跳动定时器
@@ -202,6 +217,18 @@ class ParkingProvider extends ChangeNotifier {
         final spotId = key.substring(_spotDispatchedPrefix.length);
         final ts = prefs.getInt(key);
         if (ts != null) _pendingDispatchedSpots[spotId] = DateTime.fromMillisecondsSinceEpoch(ts);
+      }
+    }
+    /* ⭐ 加载车牌人工修正 (车走清掉的键不会残留, 此处恢复存活事件的修正) + 修正基线 */
+    for (final key in prefs.getKeys()) {
+      if (key.startsWith(_plateOverridePrefix)) {
+        final spotId = key.substring(_plateOverridePrefix.length);
+        final plate = prefs.getString(key);
+        if (plate != null && plate.isNotEmpty) _plateOverrides[spotId] = plate;
+      } else if (key.startsWith(_plateBasePrefix)) {
+        final spotId = key.substring(_plateBasePrefix.length);
+        final base = prefs.getString(key);
+        if (base != null && base.isNotEmpty) _plateOverrideBases[spotId] = base;
       }
     }
     await _loadAlertsSnapshot(); // ⭐ 恢复告警列表/归档/各阶段时间戳
@@ -268,6 +295,48 @@ class ParkingProvider extends ChangeNotifier {
       await prefs.setString(_alertsSnapshotKey, raw);
     } catch (e) {
       debugPrint('>>> 告警快照保存失败: $e');
+    }
+  }
+
+  /// ⭐⭐⭐ 启动时恢复车位快照: 首帧网络数据到达前先用上次数据渲染,
+  /// 消灭"退出App再进入后几秒空白"。 首轮 refresh() 成功后被实时数据整体覆盖。
+  Future<void> _loadSpotsSnapshot() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getString(_spotsSnapshotKey);
+      if (raw == null || raw.isEmpty) return;
+      final list = json.decode(raw) as List<dynamic>;
+      final restored = <SpotModel>[];
+      for (final e in list) {
+        try {
+          final s = SpotModel.fromJson(Map<String, dynamic>.from(e as Map));
+          if (s.id.isNotEmpty && s.isReal) restored.add(s);
+        } catch (_) {
+          /* 单条损坏跳过, 不拖垮整个快照 */
+        }
+      }
+      if (restored.isEmpty) return;
+      _spots = restored;
+      _lastSpotsJson = raw;
+      notifyListeners();
+      debugPrint('>>> 车位快照已恢复: ${restored.length} 个 (等待首帧网络数据覆盖)');
+    } catch (e) {
+      debugPrint('>>> 车位快照恢复失败: $e');
+    }
+  }
+
+  /// ⭐⭐⭐ 保存车位快照 (只存真实车位; 内容不变则跳过写盘, 避免每3s无谓写盘).
+  Future<void> _persistSpotsSnapshot() async {
+    try {
+      final raw = json.encode(
+        _spots.where((s) => s.isReal).map((s) => s.toJson()).toList(),
+      );
+      if (raw == _lastSpotsJson) return;
+      _lastSpotsJson = raw;
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_spotsSnapshotKey, raw);
+    } catch (e) {
+      debugPrint('>>> 车位快照保存失败: $e');
     }
   }
 
@@ -704,6 +773,9 @@ class ParkingProvider extends ChangeNotifier {
     return list;
   }
 
+  /// 车牌是否已知: '-'(拍到没认出) / '未知车牌'(生成时占位) / 空串 都视为未知
+  static bool _plateKnown(String p) => p.isNotEmpty && p != '-' && p != '未知车牌';
+
   /// 活动告警 (排除已处理), 供概览等推送场景使用.
   /// 已处理的僵尸车不再推送, 但仍保留在 allAlerts 中供告警中心筛选查看历史.
   List<AlertModel> get alerts => allAlerts
@@ -723,16 +795,21 @@ class ParkingProvider extends ChangeNotifier {
 
     /* 情况1: 同一个事件正在处理中 → 直接复用id/createdAt, 更新状态/秒数 */
     if (active != null) {
+      final plateFinal = plateForAlert ?? active.plateNumber;
+      /* ⭐ 状态推导新增 review: 无牌 → 待审核 (人工录入车牌或确认无牌后才进流程) */
       final status = _dispatchedAlertIds.contains(active.id)
           ? 'dispatched'
           : _notifiedAlertIds.contains(active.id)
               ? 'notified'
-              : 'pending';
+              : _plateKnown(plateFinal)
+                  ? 'pending'
+                  : 'review';
       final updated = active.copyWith(
         status: status,
-        plateNumber: plateForAlert ?? active.plateNumber,
+        plateNumber: plateFinal,
         plateColor: spot.plateColor ?? active.plateColor,
         plateConfidence: spot.plateConfidence ?? active.plateConfidence,
+        plateThumb: spot.hasPlateThumb ? spot.plateThumb : null, // ⭐ 只补不清+过hasPlateThumb门控: 无图/残留旧图时不写入
         occupiedSec: realOcc,
         occupiedHours: realOcc ~/ 3600,
       );
@@ -753,10 +830,11 @@ class ParkingProvider extends ChangeNotifier {
       plateNumber: plateForAlert ?? '未知车牌',
       plateColor: spot.plateColor,
       plateConfidence: spot.plateConfidence,
+      plateThumb: spot.hasPlateThumb ? spot.plateThumb : null, // ⭐ 事件时刻快照+门控: 未知车牌/时间戳早于车牌的上一辆车残留图一律不拷
       spotId: spot.id,
       occupiedHours: realOcc ~/ 3600,
       occupiedSec: realOcc,
-      status: 'pending', /* 新事件默认未通知 */
+      status: plateForAlert != null ? 'pending' : 'review', /* 无牌 → 待审核, 有牌 → 待通知 */
       createdAt: createdAt,
     );
     _activeAlerts[spot.id] = newAlert; // 标记为当前活跃工单
@@ -767,8 +845,7 @@ class ParkingProvider extends ChangeNotifier {
     if (dispatchedAt != null) {
       _dispatchedAlertIds.add(alertId);
       _dispatchedAts[alertId] = dispatchedAt;
-      _notifiedAlertIds.remove(alertId);  // 派过单就不该再显示已通知
-      _notifiedAts.remove(alertId);
+      /* ⭐ 不再删除通知标记: 派单前必然已通知, 重启后需保留"已通知"状态 */
       newAlert = newAlert.copyWith(status: 'dispatched');
       _activeAlerts[spot.id] = newAlert;
     }
@@ -893,10 +970,11 @@ class ParkingProvider extends ChangeNotifier {
       // ⭐ 始终拉取完整(含模拟), 写完整缓存 → 切模式仅需本地过滤
       final all = await _apiService.getSpots(realOnly: false);
       _allSpotsCache = List.of(all);
+      _applyPlateOverrides(_allSpotsCache); // ⭐ 人工修正覆盖(在过滤/建工单之前应用, 全链路生效)
       _allSpotsCacheFetched = true;
       _spots = _realOnly
-          ? List.of(all.where((s) => s.isReal))
-          : List.of(all);
+          ? List.of(_allSpotsCache.where((s) => s.isReal))
+          : List.of(_allSpotsCache);
       // ⭐ 车牌已随节点数据帧上报(PlateNumber 属性), 每轮 refresh 直接带回, 无需本地贴牌缓存.
       _syncLocalState(); // 先回写本地模拟状态(含手动切换), 让自动处理看到一致的当前状态
       /* ⭐⭐⭐ 在任何自动判定之前, 先正确维护每个车位的occupiedSince本地时间戳
@@ -938,6 +1016,7 @@ class ParkingProvider extends ChangeNotifier {
     _lastRefreshAt = DateTime.now();  /* ⭐ 记录成功刷新时间 */
     if (_recordHourlySnapshot()) changed = true; // 整点快照记录也算一次数据变化
     await _persistAlerts(); // ⭐ 告警快照: 工单/归档/时间戳变化时写盘(内容不变自动跳过)
+    await _persistSpotsSnapshot(); // ⭐ 车位快照: 状态/车牌/缩略图变化时写盘(供下次冷启动秒开)
     if (prevLoading || changed) notifyListeners();
   }
 
@@ -973,8 +1052,14 @@ class ParkingProvider extends ChangeNotifier {
   void _clearPlateOnNewEvent(Map<String, SpotModel> prevById) {
     for (int i = 0; i < _spots.length; i++) {
       final s = _spots[i];
-      // 非占用: 清基线, 下辆车进场重新判定
+      // 非占用: 清基线, 下辆车进场重新判定; 人工修正同步失效(修正只对本次停车事件负责)
       if (!(s.isOccupied || s.isZombie)) {
+        _plateAwaitBaseline.remove(s.id);
+        if (_plateOverrides.containsKey(s.id)) _dropPlateOverride(s.id);
+        continue;
+      }
+      // ⭐ 有人工修正的车位: 修正优先, 解除抹牌门控(否则门控会把修正值抹成'-')
+      if (_plateOverrides.containsKey(s.id)) {
         _plateAwaitBaseline.remove(s.id);
         continue;
       }
@@ -994,6 +1079,104 @@ class ParkingProvider extends ChangeNotifier {
       }
     }
   }
+
+  /* ==================== 车牌人工修正 (对照摄像头原图改OCR错误) ==================== */
+
+  /// 把人工修正值覆盖到一批车位实例上 (copyWith 生成新实例, 原件被替换)
+  /// ⭐⭐ 新识别到达检测 (修复"人工修正永久压住远程拍照的新识别"):
+  /// 应用前先记录本轮平台原始值; 若原始值 ≠ 修正时基线 且 ≠ 修正值,
+  /// 说明平台在修正之后又出了新的识别结果 → 修正自动作废, 新识别胜出.
+  void _applyPlateOverrides(List<SpotModel> list) {
+    for (int i = 0; i < list.length; i++) {
+      final id = list[i].id;
+      final raw = list[i].plateNumber;
+      _rawPlates[id] = raw; // 改写前记录原始值 (供后续设置修正取基线)
+      final v = _plateOverrides[id];
+      if (v == null) continue;
+      final base = _plateOverrideBases[id];
+      if (base != null) {
+        if (raw != null && raw != base && raw != v) {
+          _dropPlateOverride(id);
+          _addLog(type: 'plate', title: '修正自动作废',
+              spotId: id, detail: '平台出现新识别结果 $raw, 人工修正 $v 已失效');
+          continue;
+        }
+      } else if (raw != null) {
+        if (raw == v) {
+          // 识别值与修正一致 → 基线对齐, 后续再变即可识别为"新识别"
+          _plateOverrideBases[id] = raw;
+          _persistPlateBase(id, raw);
+        } else {
+          // 旧版修正无基线且与当前识别不符 → 无法区分新旧, 按"已被新识别取代"作废
+          _dropPlateOverride(id);
+          _addLog(type: 'plate', title: '修正自动作废',
+              spotId: id, detail: '平台出现新识别结果 $raw, 人工修正 $v 已失效');
+          continue;
+        }
+      }
+      list[i] = list[i].copyWith(plateNumber: v);
+    }
+  }
+
+  /// 该车位是否有人工修正
+  bool hasPlateOverride(String spotId) => _plateOverrides.containsKey(spotId);
+
+  /// 人工修正车牌: 本地覆盖 + 持久化 + 立即生效 (不等下轮3s刷新)
+  Future<void> setPlateOverride(String spotId, String plate) async {
+    final raw = _rawPlates[spotId];
+    // 修正值 = 平台识别值 → 无修正意义, 等价于恢复识别结果 (不留修正痕迹)
+    if (raw != null && raw == plate) {
+      if (_plateOverrides.containsKey(spotId)) await clearPlateOverride(spotId);
+      return;
+    }
+    final old = _plateOverrides[spotId];
+    _plateOverrides[spotId] = plate;
+    if (_plateOverrideBases[spotId] == null && raw != null) {
+      // 无基线(首次修正/旧版残留): 记下此刻平台原始值作基线; 已有基线(重新修正)沿用原基线
+      _plateOverrideBases[spotId] = raw;
+      await _persistPlateBase(spotId, raw);
+    }
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('$_plateOverridePrefix$spotId', plate);
+    for (final list in [_spots, _allSpotsCache]) {
+      for (int i = 0; i < list.length; i++) {
+        if (list[i].id == spotId) list[i] = list[i].copyWith(plateNumber: plate);
+      }
+    }
+    await _persistSpotsSnapshot(); // 修正后的牌立即进快照, 冷启动也显示修正值
+    _addLog(
+      type: 'plate',
+      title: '修正车牌',
+      spotId: spotId,
+      detail: old == null ? '人工修正为 $plate' : '人工修正为 $plate (原修正: $old)',
+    );
+  }
+
+  /// 撤销人工修正, 恢复节点识别值: 删键后重新拉取一轮原始数据
+  Future<void> clearPlateOverride(String spotId) async {
+    if (!_plateOverrides.containsKey(spotId)) return;
+    _plateOverrides.remove(spotId);
+    _plateOverrideBases.remove(spotId);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove('$_plateOverridePrefix$spotId');
+    await prefs.remove('$_plateBasePrefix$spotId');
+    _addLog(type: 'plate', title: '恢复识别车牌', spotId: spotId, detail: '撤销人工修正, 恢复节点识别结果');
+    await refresh(); // 重新解析云端原始牌号
+  }
+
+  /// 删除修正+基线 (内存+持久化), 用于车走自动失效/新识别取代等静默场景
+  void _dropPlateOverride(String spotId) {
+    _plateOverrides.remove(spotId);
+    _plateOverrideBases.remove(spotId);
+    SharedPreferences.getInstance().then((p) {
+      p.remove('$_plateOverridePrefix$spotId');
+      p.remove('$_plateBasePrefix$spotId');
+    });
+  }
+
+  /// 持久化修正基线 (空值=删除键)
+  Future<void> _persistPlateBase(String spotId, String base) =>
+      SharedPreferences.getInstance().then((p) => p.setString('$_plateBasePrefix$spotId', base));
 
   /// 对比本轮刷新前后车位数据, 判断是否真的有内容变化 (避免无谓重建).
   bool _spotsChanged(Map<String, SpotModel> prevById) {
@@ -1164,9 +1347,9 @@ class ParkingProvider extends ChangeNotifier {
     /* ⭐⭐ 持久化派单状态: 按 spotId 存 (alertId 里的 eventTs 因 occupiedSince 反推不准, spotId 才是稳定标识) */
     final prefs = await SharedPreferences.getInstance();
     await prefs.setInt('$_spotDispatchedPrefix${spot.id}', _dispatchedAts[alertId]!.millisecondsSinceEpoch);
-    /* 派单后清除通知倒计时(不再需要) */
-    await prefs.remove('$_notifiedAtPrefix$alertId');
-    _notifiedAts.remove(alertId);
+    /* ⭐ 保留通知时间戳: 它是"已通知"的唯一持久化载体, 派单后删除会导致
+     * 重启恢复不出通知状态, 详情页显示"处理中+未通知"矛盾;
+     * 倒计时/自动派单均按 status=='notified' 门控, dispatched 状态不会误触发 */
     _syncLocalState();
     _addLog(
       type: 'dispatch',
@@ -1215,8 +1398,7 @@ class ParkingProvider extends ChangeNotifier {
       _handledAts.remove(alertId);
       /* ⭐⭐ 批量派单也要持久化, 按 spotId 存 */
       await prefs.setInt('$_spotDispatchedPrefix${s.id}', now.millisecondsSinceEpoch);
-      await prefs.remove('$_notifiedAtPrefix$alertId');
-      _notifiedAts.remove(alertId);
+      /* ⭐ 同 dispatchSpot: 保留通知时间戳, 供重启后恢复"已通知"状态 */
     }
     _syncLocalState();
     _addLog(
@@ -1245,7 +1427,16 @@ class ParkingProvider extends ChangeNotifier {
     if (active != null) {
       if (_dispatchedAlertIds.contains(active.id)) return 'dispatched';
       if (_notifiedAlertIds.contains(active.id)) return 'notified';
-      return 'pending';
+      /* ⭐ 无牌 → 待审核: 车牌优先看实时spot(人工录入后立即生效), 兜底用工单存量值 */
+      SpotModel? sp;
+      for (final s in _spots) {
+        if (s.id == spotId) {
+          sp = s;
+          break;
+        }
+      }
+      final hasPlate = (sp != null && sp.hasPlate) || _plateKnown(active.plateNumber);
+      return hasPlate ? 'pending' : 'review';
     }
     // 没有active工单 → 若该车位最近1条归档是已处理, 则显示resolved (用于处理完但车位还没清空时)
     final lastResolved = _resolvedAlerts.values.where((a) => a.spotId == spotId).toList();
@@ -1293,6 +1484,41 @@ class ParkingProvider extends ChangeNotifier {
   void clearAlertSelection() {
     _selectedAlertIds.clear();
     notifyListeners();
+  }
+
+  /// ⭐ 长按"告警管理"标题3秒触发: 彻底清空告警页
+  /// (进行中工单 + 已归档 + 各阶段时间戳/处理人 + 勾选 + 全部持久化记录).
+  /// 注意: 仍是僵尸车的车位会在下一轮 refresh 重新生成"待处理"新工单(状态机正常行为).
+  Future<void> clearAllAlerts() async {
+    _activeAlerts.clear();
+    _resolvedAlerts.clear();
+    _notifiedAlertIds.clear();
+    _dispatchedAlertIds.clear();
+    _notifiedAts.clear();
+    _dispatchedAts.clear();
+    _handledAts.clear();
+    _handlerNames.clear();
+    _pendingDispatchedSpots.clear();
+    _selectedAlertIds.clear();
+    /* 车位展示层的处理记录一并复位 (处理人/通知状态/各时间戳) */
+    for (final s in [..._spots, ..._allSpotsCache]) {
+      s.notifyStatus = 'none';
+      s.handlerName = null;
+      s.handledAt = null;
+      s.alertCreatedAt = null;
+      s.notifiedAt = null;
+      s.dispatchedAt = null;
+    }
+    /* 持久化清理: 通知时间戳 + 派单状态 + 告警快照, 防止重启后又恢复出来 */
+    final prefs = await SharedPreferences.getInstance();
+    for (final key in prefs.getKeys().toList()) {
+      if (key.startsWith(_notifiedAtPrefix) || key.startsWith(_spotDispatchedPrefix)) {
+        await prefs.remove(key);
+      }
+    }
+    await prefs.remove(_alertsSnapshotKey);
+    _lastAlertsJson = null;
+    _addLog(type: 'clear', title: '清空告警', detail: '长按标题触发, 已清空全部工单与归档记录');
   }
 
   /// 把本地模拟状态回写到当前 spots, 保证 3s 刷新后新实例仍保持 (内存态, 重启即丢).
@@ -1745,12 +1971,28 @@ class ParkingProvider extends ChangeNotifier {
     await prefs.remove('$_spotDispatchedPrefix$spotId');
   }
 
-  /// 🆕 ① 僵尸车自动通知: 僵尸车出现即通知车主(有牌带牌, 无牌按未知车牌显示).
-  ///   ⭐ 车牌已随节点数据帧上报(PlateNumber 属性), App 不再为通知前置拍照补牌.
+  /// 🆕 人工审核: 不等识别出牌, 跳过通知直接派单 (可能有牌但没拍到, 由人判断).
+  /// (工单处于 review 态时的出口之一; 另一条出口是录入车牌 → 自动进通知流程)
+  Future<void> confirmNoPlateDispatch(SpotModel spot, {String handlerName = '张师傅'}) async {
+    await dispatchSpot(spot, handlerName: handlerName);
+    _addLog(
+      type: 'dispatch',
+      title: '待审核直接派单',
+      spotId: spot.id,
+      detail: '人工审核后跳过通知, 直接派单给$handlerName',
+      success: true,
+    );
+  }
+
+  /// 🆕 ① 僵尸车自动通知: 僵尸车出现即通知车主.
+  ///   ⭐ 未拍出车牌(hasPlate=false) → 跳过不通知: 通知内容/对象都依赖车牌,
+  ///   等远程拍照/节点识别出牌后, 下一轮 refresh 该工单仍是 pending → 自动补通知.
+  ///   手动点"通知车主"不受此门控 (人工判断, 无牌也可发).
   Future<void> _autoNotifyPendingZombies() async {
     for (final spot in _spots) {
       if (!spot.isZombie) continue;
       if (spotAlertStatus(spot.id) != 'pending') continue; // 只处理"待通知"的新僵尸车
+      if (!spot.hasPlate) continue; // ⭐ 没拍出车牌 → 不自动通知, 拍到牌后自动补
       await notifyOwner(spot); // 直接通知(和手动点"通知车主"效果一致)
     }
   }

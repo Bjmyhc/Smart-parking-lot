@@ -551,10 +551,16 @@ static void handleSubServiceInvoke(JsonDocument &doc)
          * (onenet_notifyCaptureResult), 见 lora_handler 的 0xF1 分支 */
         lora_sendControlNoParam(nodes[slot].nodeId, "CAPTURE");
     }
-    else  /* isLed: 记录命令目标并直接 LoRa 下发(AT+SetLed), 等 ACK 后回 ActualValue */
+    else  /* isLed: 记录命令目标并标记待下发. 由命令队列统一投递(与两条阈值
+           * 同机制: 限3次重试, PONG 兜底补发), ACK 后回 ActualValue */
     {
-        nodes[slot].ledSwitch = (value != 0);
-        lora_sendControl(nodes[slot].nodeId, "SetLed", value);
+        nodes[slot].ledSwitch      = (value != 0);
+        nodes[slot].ledSwitchSet   = true;
+        nodes[slot].ledNeedsUpdate = true;
+        nodes[slot].ledRetryCount  = 0;
+        certsMarkDirty();   /* ⭐ 使能态变更置脏标记, 主循环异步落盘(回归重发的数据源) */
+        DBG_PRINTF("[MQTT] 节点%d 报警灯使能=%d (已标记落盘, 待在线投递)\n",
+                   nodes[slot].nodeId, value);
     }
 
     s_pendingServiceReply.active = true;

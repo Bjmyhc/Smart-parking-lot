@@ -17,6 +17,7 @@ class StatusBadge extends StatelessWidget {
   factory StatusBadge.zombie() => const StatusBadge(text: '僵尸车', color: AppColors.danger);
 
   factory StatusBadge.pending() => const StatusBadge(text: '待处理', color: AppColors.danger);
+  factory StatusBadge.review() => const StatusBadge(text: '待审核', color: Color(0xFF7E57C2));
   factory StatusBadge.notified() => const StatusBadge(text: '已通知', color: AppColors.primary);
   factory StatusBadge.dispatched() => const StatusBadge(text: '处理中', color: AppColors.warning);
   factory StatusBadge.resolved() => const StatusBadge(text: '已处理', color: AppColors.success);
@@ -35,6 +36,8 @@ class StatusBadge extends StatelessWidget {
         return StatusBadge.zombie();
       case 'pending':
         return StatusBadge.pending();
+      case 'review':
+        return StatusBadge.review();
       case 'notified':
         return StatusBadge.notified();
       case 'dispatched':

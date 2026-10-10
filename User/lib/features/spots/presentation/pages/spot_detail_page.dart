@@ -5,6 +5,7 @@ import '../../../../shared/widgets/custom_app_bar.dart';
 import '../../../../shared/widgets/status_badge.dart';
 import '../../../../shared/widgets/plate_badge.dart';
 import '../../../../shared/widgets/plate_thumb_view.dart';
+import '../../../../shared/widgets/plate_input_dialog.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_dims.dart';
 import '../../../../core/models/spot_model.dart';
@@ -23,6 +24,27 @@ class SpotDetailPage extends StatefulWidget {
 }
 
 class _SpotDetailPageState extends State<SpotDetailPage> {
+  String? _fwVersion; // 节点固件版本 (进页异步拉取一次, 设备信息行展示)
+  bool _fwLoading = false;
+  bool _propsExpanded = false; // 物模型属性区默认收起, 点底部箭头展开
+
+  @override
+  void initState() {
+    super.initState();
+    _loadFwVersion();
+  }
+
+  Future<void> _loadFwVersion() async {
+    _fwLoading = true;
+    // spot.id 即 OneNET 设备名 (Park001 风格), 与 OTA 读版本接口的 deviceName 一致
+    final v = await context.read<ParkingProvider>().getOtaNodeVersion(widget.spot.id);
+    if (!mounted) return;
+    setState(() {
+      _fwLoading = false;
+      _fwVersion = v;
+    });
+  }
+
   SpotModel _liveSpot(ParkingProvider provider) {
     for (final s in provider.spots) {
       if (s.id == widget.spot.id) return s;
@@ -303,133 +325,146 @@ class _SpotDetailPageState extends State<SpotDetailPage> {
               ),
             ),
             child: Column(
-              children: [
-                Icon(
-                  isOccupied ? Icons.directions_car : Icons.check_circle,
-                  size: 56,
-                  color: isOccupied ? AppColors.warning : AppColors.success,
-                ),
-                const SizedBox(height: 16),
-                _buildPlateBadgeArea(spot),
-                const SizedBox(height: 12),
-                Text(
-                  isOccupied ? '车辆已占用该车位' : '车位当前空闲',
-                  style: const TextStyle(
-                    fontSize: 14,
-                    color: AppColors.textSecondary,
+                children: [
+                  /* ① 结果层: 当前生效的识别结果本体 (badge+修正角标 / 未识别 / 占位) */
+                  _buildPlateBadgeArea(spot),
+                  const SizedBox(height: 12),
+                  Text(
+                    isOccupied ? '车辆已占用该车位' : '车位当前空闲',
+                    style: const TextStyle(
+                      fontSize: 14,
+                      color: AppColors.textSecondary,
+                    ),
                   ),
-                ),
-                /* ⭐ 拍照识别附加信息: 识别置信度 / 识别时间 (有牌时显示; 车牌颜色属性一期未上报, 不展示) */
-                if (spot.hasPlate) ...[
-                  const SizedBox(height: 6),
-                  SizedBox(
-                    width: double.infinity,
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        _buildCaptureInfoLine(
+                  /* ② 证据组: 识别依据 (摄像头原图 → 置信度 → 时间),
+                   *    与结果上下紧邻, 视线垂直下移即可对照 */
+                  if (spot.hasPlate) ...[
+                    if (spot.hasPlateThumb) ...[
+                      const SizedBox(height: 14),
+                      PlateThumbView(base64Data: spot.plateThumb!),
+                      const SizedBox(height: 4),
+                      const Text(
+                        '识别依据 · 摄像头原图',
+                        style: TextStyle(fontSize: 11, color: AppColors.textSecondary),
+                      ),
+                    ],
+                    const SizedBox(height: 8),
+                    SizedBox(
+                      width: double.infinity,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          _buildCaptureInfoLine(
                             Icons.verified_outlined,
                             '识别置信度',
-                            spot.plateConfidence != null
-                                ? '${spot.plateConfidence}%'
-                                : '未知'),
-                        if (spot.plateUpdatedAt != null && spot.plateUpdatedAt!.isNotEmpty)
-                          _buildCaptureInfoLine(
-                              Icons.schedule, '识别时间', _formatUpdatedAt(spot.plateUpdatedAt)),
+                            spot.plateConfidence != null ? '${spot.plateConfidence}%' : '未知',
+                            valueColor: spot.plateConfidence != null
+                                ? _confidenceColor(spot.plateConfidence!)
+                                : null,
+                          ),
+                          if (spot.plateUpdatedAt != null && spot.plateUpdatedAt!.isNotEmpty)
+                            _buildCaptureInfoLine(
+                                Icons.schedule, '识别时间', _formatUpdatedAt(spot.plateUpdatedAt)),
+                        ],
+                      ),
+                    ),
+                  ],
+                  /* ③ 动作组: 修正与拍照横排一行 (各自存在才占位; 空车位无动作) */
+                  if (isOccupied || _isCameraPark001(spot)) ...[
+                    const SizedBox(height: 16),
+                    Row(
+                      children: [
+                        if (isOccupied)
+                          Expanded(
+                            child: OutlinedButton.icon(
+                              onPressed: () => _showPlateEditDialog(spot),
+                              icon: const Icon(Icons.edit_outlined, size: 18),
+                              label: Text(
+                                spot.hasPlate
+                                    ? '修正车牌'
+                                    : (spot.plateUnrecognized ? '手动输入车牌' : '录入车牌'),
+                                style: const TextStyle(fontWeight: FontWeight.w600),
+                              ),
+                              style: _outlineActionStyle(),
+                            ),
+                          ),
+                        if (isOccupied && _isCameraPark001(spot))
+                          const SizedBox(width: 10),
+                        if (_isCameraPark001(spot))
+                          Expanded(
+                            child: OutlinedButton.icon(
+                              // 远程拍照入口: 经【节点】服务 TriggerCapture 触发, 由节点再控制摄像头(间接控制)
+                              onPressed:
+                                  (provider.capturingRemote || !spot.cameraOnline || freeBlocked)
+                                      ? null
+                                      : () => _onRemoteCapture(provider),
+                              icon: provider.capturingRemote
+                                  ? const SizedBox(
+                                      width: 16,
+                                      height: 16,
+                                      child: CircularProgressIndicator(strokeWidth: 2),
+                                    )
+                                  : (!spot.cameraOnline
+                                      ? const Icon(Icons.videocam_off_outlined, size: 18)
+                                      : (freeBlocked
+                                          ? const Icon(Icons.do_not_disturb_on_outlined, size: 18)
+                                          : const Icon(Icons.photo_camera_outlined, size: 18))),
+                              label: Text(
+                                provider.capturingRemote
+                                    ? '拍照识别中...'
+                                    : (!spot.cameraOnline
+                                        ? '摄像头离线'
+                                        : (freeBlocked ? '空闲车位不可拍照' : '远程拍照')),
+                                style: const TextStyle(fontWeight: FontWeight.w600),
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                              style: _outlineActionStyle(),
+                            ),
+                          ),
                       ],
                     ),
-                  ),
+                  ],
                 ],
-                if (_isCameraPark001(spot)) ...[
-                  const SizedBox(height: 16),
-                  // 远程拍照入口: 经【节点】服务 TriggerCapture 触发, 由节点再控制摄像头(间接控制)
-                  SizedBox(
-                    width: double.infinity,
-                    child: OutlinedButton.icon(
-                      onPressed: (provider.capturingRemote || !spot.cameraOnline || freeBlocked)
-                          ? null
-                          : () => _onRemoteCapture(provider),
-                      icon: provider.capturingRemote
-                          ? const SizedBox(
-                              width: 16,
-                              height: 16,
-                              child: CircularProgressIndicator(strokeWidth: 2),
-                            )
-                          : (!spot.cameraOnline
-                              ? const Icon(Icons.videocam_off_outlined, size: 18)
-                              : (freeBlocked
-                                  ? const Icon(Icons.do_not_disturb_on_outlined, size: 18)
-                                  : const Icon(Icons.photo_camera_outlined, size: 18))),
-                      label: Text(
-                        provider.capturingRemote
-                            ? '拍照识别中...'
-                            : (!spot.cameraOnline
-                                ? '摄像头离线'
-                                : (freeBlocked ? '空闲车位不可拍照' : '远程拍照')),
-                        style: const TextStyle(fontWeight: FontWeight.w600),
-                      ),
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: AppColors.primary,
-                        side: BorderSide(
-                          color: AppColors.primary.withValues(alpha: 0.5),
-                        ),
-                        padding: const EdgeInsets.symmetric(vertical: 12),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(AppDims.radiusMedium),
-                        ),
-                      ),
-                    ),
-                  ),
-                ],
-              ],
-            ),
+              ),
           ),
         ],
       ),
     );
   }
 
-  /// ⭐ 车牌展示区 (三态, 数据来自节点属性 PlateNumber):
-  ///  - 识别出合法车牌 → PlateBadge + 识别置信度小字(按阈值着色)
+  /// ⭐ 车牌结果层 (三态, 只呈现识别结果本体; 证据组与动作组在卡片下方独立分组):
+  ///  - 识别出合法车牌 → PlateBadge (+ 已人工修正角标)
   ///  - '-' 拍到但没认出 → 相机✕图标 + "未识别到车牌" + 靠近/换角度提示
   ///  - 从未上报(null) → 白底"暂无车牌信息"
   /// 说明: 仅车位非空闲(ParkStatus != 0)才可能有值; 车牌是"最近一次识别结果"事件量,
   /// 节点在车走时已清空并上报 '-'(空档期不会残留上一辆车的车牌).
   Widget _buildPlateBadgeArea(SpotModel spot) {
     if (spot.hasPlate) {
-      final conf = spot.plateConfidence;
+      final provider = context.read<ParkingProvider>();
       return Column(
         mainAxisSize: MainAxisSize.min,
         children: [
           PlateBadge(text: spot.plateNumber!, color: spot.plateColor),
-          if (conf != null) ...[
-            const SizedBox(height: 6),
-            Text(
-              '识别置信度 $conf%',
-              style: TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.w500,
-                color: _confidenceColor(conf),
-              ),
-            ),
-          ],
-          /* ⭐ S5 摄像头原图点阵 (PlateThumb 94×24 二值图 base64):
-           * hasPlateThumb 内含门控 —— 未识别不画; 新车牌已到而新图未到
-           * (缩略图时间早于车牌时间)视为上一张残留也不画 */
-          if (spot.hasPlateThumb) ...[
-            const SizedBox(height: 12),
-            PlateThumbView(base64Data: spot.plateThumb!),
+          /* 人工修正标记: 提示当前显示的不是节点识别原值 */
+          if (provider.hasPlateOverride(spot.id)) ...[
             const SizedBox(height: 4),
-            const Text(
-              '摄像头原图 (94×24)',
-              style: TextStyle(fontSize: 11, color: AppColors.textSecondary),
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.edit_note, size: 13, color: AppColors.primary),
+                const SizedBox(width: 3),
+                const Text(
+                  '已人工修正',
+                  style: TextStyle(fontSize: 11, color: AppColors.primary),
+                ),
+              ],
             ),
           ],
         ],
       );
     }
     if (spot.plateUnrecognized) {
-      // '-' : 拍到但没认出 → 引导靠近/换角度重拍
+      // '-' : 拍到但没认出 → 引导靠近/换角度重拍 (修正入口在动作组)
       return const Column(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -451,7 +486,7 @@ class _SpotDetailPageState extends State<SpotDetailPage> {
         ],
       );
     }
-    // 从未上报 / 空车位 → 原白底兜底
+    // 从未上报 / 空车位 → 白底兜底 (录入入口在动作组)
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
       decoration: BoxDecoration(
@@ -469,6 +504,31 @@ class _SpotDetailPageState extends State<SpotDetailPage> {
     );
   }
 
+  /// 动作组按钮统一样式: 修正车牌 与 远程拍照 同款整宽描边
+  ButtonStyle _outlineActionStyle() => OutlinedButton.styleFrom(
+        foregroundColor: AppColors.primary,
+        side: BorderSide(color: AppColors.primary.withValues(alpha: 0.5)),
+        padding: const EdgeInsets.symmetric(vertical: 12),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(AppDims.radiusMedium),
+        ),
+      );
+
+  /// ⭐ 修正车牌: 槽位+三阶段虚拟键盘弹窗 (plate_input_dialog), 校验与输入全在弹窗内完成
+  Future<void> _showPlateEditDialog(SpotModel spot) async {
+    final provider = context.read<ParkingProvider>();
+    final result = await showPlateInputDialog(
+      context,
+      spot: spot,
+      onRestore: provider.hasPlateOverride(spot.id)
+          ? () => provider.clearPlateOverride(spot.id)
+          : null,
+    );
+    if (result == null || !mounted) return;
+    await provider.setPlateOverride(spot.id, result);
+    if (mounted) setState(() {}); // 修正后立即重建 (badge/车牌马上刷新, 不等下轮3s刷新)
+  }
+
   /// 置信度阈值着色: ≥90% 绿 / ≥70% 橙 / <70% 红 (plateConfidence 为 0~100 整数)
   Color _confidenceColor(int conf) {
     if (conf >= 90) return const Color(0xFF16A34A);
@@ -477,7 +537,7 @@ class _SpotDetailPageState extends State<SpotDetailPage> {
   }
 
   /// 拍照识别信息行 (置信度 / 识别时间)
-  Widget _buildCaptureInfoLine(IconData icon, String label, String value) {
+  Widget _buildCaptureInfoLine(IconData icon, String label, String value, {Color? valueColor}) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 3),
       child: Row(
@@ -491,7 +551,11 @@ class _SpotDetailPageState extends State<SpotDetailPage> {
           const Spacer(),
           Text(
             value,
-            style: const TextStyle(fontSize: 13, color: AppColors.textPrimary, fontWeight: FontWeight.w500),
+            style: TextStyle(
+              fontSize: 13,
+              color: valueColor ?? AppColors.textPrimary,
+              fontWeight: FontWeight.w500,
+            ),
           ),
         ],
       ),
@@ -512,18 +576,64 @@ class _SpotDetailPageState extends State<SpotDetailPage> {
             ),
           ),
           const SizedBox(height: 16),
-          _buildInfoRow('设备名称', spot.id),
           _buildInfoRow('设备ID', spot.id),
+          _buildInfoRow(
+              '固件版本',
+              _fwVersion ??
+                  (_fwLoading ? '读取中…' : '未知')),
           _buildInfoRow('最后更新', _formatUpdatedAt(spot.lastUpdated)),
-          _buildInfoRow('在线状态', spot.isDisabledSpot
-              ? '已停用'
-              : spot.isOffline
-                  ? '离线'
-                  : '在线'),
+          // ⭐ 物模型属性区: 默认收起, 点底部箭头展开
+          if (_propsExpanded) ...[
+            const SizedBox(height: 10),
+            const Text(
+              '物模型属性',
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: AppColors.textSecondary,
+              ),
+            ),
+            if (_ledText(spot) != null) _buildInfoRow('报警灯状态', _ledText(spot)!),
+            _buildInfoRow('地磁感应', _geoText(spot.geoMagnetic)),
+            _buildInfoRow('超声波距离', '${spot.ultrasonic} cm'),
+          ],
+          Center(
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: () => setState(() => _propsExpanded = !_propsExpanded),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                child: Semantics(
+                  label: _propsExpanded ? '收起物模型属性' : '展开物模型属性',
+                  button: true,
+                  child: AnimatedRotation(
+                    turns: _propsExpanded ? 0.5 : 0,
+                    duration: const Duration(milliseconds: 200),
+                    child: const Icon(
+                      Icons.expand_more,
+                      size: 24,
+                      color: AppColors.textSecondary,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
         ],
       ),
     );
   }
+
+  /// 报警灯状态 (物模型 LED: true/1=触发, false/0=空闲); 未上报 → null 隐藏该行
+  String? _ledText(SpotModel spot) {
+    final v = spot.rawProperties?['LED'];
+    if (v is bool) return v ? '触发' : '空闲';
+    if (v is num) return v != 0 ? '触发' : '空闲';
+    return null;
+  }
+
+  /// 地磁: 0=未感应 1=感应到车 (采样值>1 时直接显示原值)
+  String _geoText(int v) => v == 0 ? '未感应' : (v == 1 ? '感应到车' : '$v');
 
   Widget _buildInfoRow(String label, String value) {
     return Padding(
@@ -601,7 +711,7 @@ class _SpotDetailPageState extends State<SpotDetailPage> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const Text(
-            '处理情况',
+            '车位情况',
             style: TextStyle(
               fontSize: 16,
               fontWeight: FontWeight.w600,

@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import '../../../../shared/widgets/card_container.dart';
 import '../../../../shared/widgets/page_header.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_dims.dart';
+import '../../../../core/providers/parking_provider.dart';
 import 'firmware_upgrade_page.dart';
 import 'diagnosis_page.dart';
 import 'operation_log_page.dart';
@@ -13,6 +15,8 @@ class ProfilePage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // 管理员卡片三数据实时来源: 处理工单/在线设备/待办工单
+    final provider = context.watch<ParkingProvider>();
     return Scaffold(
       backgroundColor: AppColors.background,
       body: SingleChildScrollView(
@@ -31,7 +35,7 @@ class ProfilePage extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  _buildUserCard(),
+                  _buildUserCard(provider),
                   const SizedBox(height: 12),
                   _buildToolGroup(context),
                   const SizedBox(height: 12),
@@ -59,7 +63,14 @@ class ProfilePage extends StatelessWidget {
     return PageHeader(title: '我的', actions: [bell]);
   }
 
-  Widget _buildUserCard() {
+  /// 管理员卡片: 三数据取自 ParkingProvider 实时统计 (原来为写死的假数据)
+  /// - 处理工单 = 已归档工单数; 在线设备 = isOnline 数; 在线率 = 在线/总数
+  Widget _buildUserCard(ParkingProvider provider) {
+    final alerts = provider.allAlerts;
+    final resolvedCount = alerts.where((a) => a.status == 'resolved').length;
+    final spots = provider.spots;
+    final onlineCount = spots.where((s) => s.isOnline).length;
+    final onlineRate = spots.isEmpty ? '—' : '${(onlineCount * 100 / spots.length).round()}%';
     return CardContainer(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 16),
       child: Column(
@@ -108,11 +119,11 @@ class ProfilePage extends StatelessWidget {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceAround,
             children: [
-              _buildStatColumn('128', '处理工单'),
+              _buildStatColumn('$resolvedCount', '处理工单'),
               Container(width: 1, height: 30, color: AppColors.textSecondary.withValues(alpha: 0.1)),
-              _buildStatColumn('8', '在线设备'),
+              _buildStatColumn('$onlineCount', '在线设备'),
               Container(width: 1, height: 30, color: AppColors.textSecondary.withValues(alpha: 0.1)),
-              _buildStatColumn('99%', '系统可用'),
+              _buildStatColumn(onlineRate, '在线率'),
             ],
           ),
         ],
@@ -120,6 +131,7 @@ class ProfilePage extends StatelessWidget {
     );
   }
 
+  /// 统计瓦片
   Widget _buildStatColumn(String value, String label) {
     return Expanded(
       child: Column(

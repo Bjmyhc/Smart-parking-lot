@@ -5,11 +5,13 @@ import 'package:provider/provider.dart';
 import '../../../../shared/widgets/card_container.dart';
 import '../../../../shared/widgets/status_badge.dart';
 import '../../../../shared/widgets/plate_badge.dart';
+import '../../../../shared/widgets/plate_thumb_view.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_dims.dart';
 import '../../../../core/models/alert_model.dart';
 import '../../../../core/models/spot_model.dart';
 import '../../../../core/providers/parking_provider.dart';
+import '../../../../shared/widgets/plate_input_dialog.dart';
 import '../../../spots/presentation/pages/spot_detail_page.dart';
 
 /// 🆕 独立告警详情页 (工单风格, 与车位实时详情解耦)
@@ -89,6 +91,13 @@ class _AlertDetailPageState extends State<AlertDetailPage> {
         bgStart = const Color(0xFFFFB347);
         bgEnd = const Color(0xFFFF8C00);
         icon = Icons.warning_amber_rounded;
+        break;
+      case 'review':
+        title = '待审核';
+        subtitle = '未识别到车牌, 请人工审核: 录入车牌或直接派单';
+        bgStart = const Color(0xFF7E57C2);
+        bgEnd = const Color(0xFF4527A0);
+        icon = Icons.manage_search_rounded;
         break;
       case 'notified':
         title = '已通知车主';
@@ -357,6 +366,42 @@ class _AlertDetailPageState extends State<AlertDetailPage> {
                       borderColor: Colors.white.withValues(alpha: 0.5),
                     ),
                   ),
+                  const SizedBox(height: 14),
+                  /* ⭐ "真实图像"入口: 弹窗展示工单生成时刻的摄像头原图(94×24 点阵) */
+                  Center(
+                    child: GestureDetector(
+                      onTap: () => showAlertThumbDialog(context, alert),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 16, vertical: 8),
+                        decoration: BoxDecoration(
+                          color:
+                              AppColors.primary.withValues(alpha: 0.08),
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(
+                            color: AppColors.primary
+                                .withValues(alpha: 0.3),
+                          ),
+                        ),
+                        child: const Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.image_outlined,
+                                size: 16, color: AppColors.primary),
+                            SizedBox(width: 6),
+                            Text(
+                              '查看真实图像',
+                              style: TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w600,
+                                color: AppColors.primary,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
                   const SizedBox(height: 22),
                   /* 小票信息列表 */
                   _buildReceiptRow(Icons.location_on_rounded, '车位编号', alert.spotId),
@@ -451,13 +496,17 @@ class _AlertDetailPageState extends State<AlertDetailPage> {
               subtitle: '系统检测到僵尸车，自动生成告警工单',
               time: step1At,
               done: done1,
-              highlight: status == 'pending',
+              highlight: status == 'pending' || status == 'review',
               isLast: false,
               icon: Icons.warning_amber,
             ),
             _buildStep(
               title: '通知车主',
-              subtitle: done2 ? '已发送挪车提醒短信' : '等待通知车主',
+              subtitle: done2
+                  ? '已发送挪车提醒短信'
+                  : status == 'review'
+                      ? '待审核: 录入车牌后自动通知'
+                      : '等待通知车主',
               time: step2At,
               done: done2,
               highlight: status == 'notified',
@@ -574,6 +623,49 @@ class _AlertDetailPageState extends State<AlertDetailPage> {
     Widget? secondary;
 
     switch (status) {
+      case 'review':
+        // ⭐ 待审核双出口: 有牌 → 录入(自动续流程); 确实无牌 → 直接派单
+        primary = SizedBox(
+          width: double.infinity,
+          height: 48,
+          child: ElevatedButton.icon(
+            icon: const Icon(Icons.edit_rounded, size: 20),
+            label: const Text('录入车牌', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.primary,
+              foregroundColor: Colors.white,
+              elevation: 3,
+              shadowColor: AppColors.primary.withValues(alpha: 0.4),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            ),
+            onPressed: () async {
+              if (spot == null) return;
+              final plate = await showPlateInputDialog(context, spot: spot);
+              if (plate == null || !mounted) return;
+              await context.read<ParkingProvider>().setPlateOverride(spot.id, plate);
+              if (mounted) setState(() {});
+            },
+          ),
+        );
+        secondary = SizedBox(
+          width: double.infinity,
+          height: 48,
+          child: OutlinedButton.icon(
+            icon: const Icon(Icons.assignment_turned_in_outlined, size: 20),
+            label: const Text('直接派单', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
+            style: OutlinedButton.styleFrom(
+              foregroundColor: AppColors.warning,
+              side: BorderSide(color: AppColors.warning.withValues(alpha: 0.6), width: 1.3),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            ),
+            onPressed: () async {
+              if (spot == null) return;
+              await context.read<ParkingProvider>().confirmNoPlateDispatch(spot);
+              if (mounted) setState(() {});
+            },
+          ),
+        );
+        break;
       case 'pending':
         primary = SizedBox(
           width: double.infinity,

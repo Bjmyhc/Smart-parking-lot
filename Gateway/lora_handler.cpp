@@ -221,6 +221,14 @@ static void requestThresholdResend(int slot)
         nodes[slot].sensorDistanceNeedsUpdate = true;
         nodes[slot].sensorDistanceRetryCount = 0;
     }
+    /* ⭐ 报警灯使能: 同样纳入回归兜底重发. 仅当用户设置过才重发, 未设置过不打扰.
+     * 修复: 节点 LEDAlarmEnable 断电回默认1, 而 SetLed 原先只在服务调用时
+     * 直发一次, 断电重连后无补发 → 平台/App 使能态与节点分叉 */
+    if (nodes[slot].ledSwitchSet)
+    {
+        nodes[slot].ledNeedsUpdate = true;
+        nodes[slot].ledRetryCount = 0;
+    }
 }
 
 /* PONG,APP,<第三段> 的复位原因白名单 (节点 main.c 按 RCC 复位标志生成).
@@ -381,6 +389,32 @@ static bool pushThresholdUpdate(int slot)
                                     enqCount ? ", " : "", nd.sensorDistanceValue);
             enqCount++;
             enqRetry = nd.sensorDistanceRetryCount;
+        }
+        pushed = true;
+    }
+    /* ⭐ 报警灯使能: 与两条阈值同机制 —— 标志驱动、连续入队、限3次重试、
+     * 失败回平台. PONG 兜底(requestThresholdResend)与服务调用两处置位,
+     * 本函数在 PONG 分支和快速路径每轮都会被调用, 无需另加投递点 */
+    if (nd.ledNeedsUpdate && nd.certSent && nd.ledRetryCount < 3)
+    {
+        nd.ledRetryCount++;  /* 重试次数+1 */
+        lora_sendControl(nd.nodeId, "SetLed", nd.ledSwitch ? 1 : 0);
+        if (nd.ledRetryCount >= 3)
+        {
+            /* 超过3次, 清除标志, 等待用户重新下发 */
+            nd.ledNeedsUpdate = false;
+            onenet_notifyServiceResult(slot, false, 0);   /* ⭐ 回平台失败 */
+            DBG_PRINTF("[LoRa] 节点%d 报警灯使能重试%d次失败, 放弃 (等平台重新下发)\n",
+                       nd.nodeId, nd.ledRetryCount);
+        }
+        else
+        {
+            enqItemsLen += snprintf(enqItems + enqItemsLen,
+                                    sizeof(enqItems) - (size_t)enqItemsLen,
+                                    "%s报警灯使能=%d",
+                                    enqCount ? ", " : "", nd.ledSwitch ? 1 : 0);
+            enqCount++;
+            enqRetry = nd.ledRetryCount;
         }
         pushed = true;
     }
@@ -845,13 +879,17 @@ static bool handleCompleteFrame(uint8_t header)
                 onenet_notifyServiceResult(slot, true, nodes[slot].thresholdValue);
             }
         }
-        /* ⭐ LED 控制下发成功(SetLed 服务): 收到 ACK 后向平台补回"同步服务调用"回复,
-         * ActualValue 回节点实际命令目标值(ledSwitch) */
+        /* ⭐ LED 控制下发成功(SetLed 服务): 清除待下发标志与重试计数,
+         * 向平台补回"同步服务调用"回复, ActualValue 回节点命令目标值(ledSwitch) */
         if (strstr((char *)rxBuf, "SetLed") != NULL)
         {
             int slot = findNode(nodeId);
             if (slot >= 0)
+            {
+                nodes[slot].ledNeedsUpdate = false;
+                nodes[slot].ledRetryCount  = 0;
                 onenet_notifyServiceResult(slot, true, nodes[slot].ledSwitch ? 1 : 0);
+            }
         }
         /* ⭐ 超声波距离阈值下发成功(SetSensorDistance 服务): 收到 ACK 后清除标志,
          * 重置重试计数, 并向平台补回"同步服务调用"回复(成功 Result=1) */

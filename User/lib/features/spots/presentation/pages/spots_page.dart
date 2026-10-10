@@ -29,10 +29,57 @@ class _SpotsPageState extends State<SpotsPage> with TickerProviderStateMixin {
   bool _switching = false;
   List<SpotModel>? _oldSpots;
 
+  /* ===== 搜索: 车位名称 + 车牌号 ===== */
+  bool _searching = false;      // 搜索栏开合
+  String _query = '';           // 当前关键词
+  final TextEditingController _searchCtrl = TextEditingController();
+
   @override
   void dispose() {
+    _searchCtrl.dispose();
     _squeezeController.dispose();
     super.dispose();
+  }
+
+  /// 按车位名称(编号)或车牌号过滤 (忽略大小写; '-'/'空' 视为无牌不参与匹配).
+  /// ⭐ 车牌只在卡片上可见时参与匹配 (空闲/离线/停用卡片不显示车牌,
+  ///    否则会出现"搜到了却在卡上找不到关键字"的困惑, 如 Park007 搜 2 命中隐藏旧牌)
+  List<SpotModel> _filterSpots(List<SpotModel> spots) {
+    final q = _query.trim().toLowerCase();
+    if (!_searching || q.isEmpty) return spots;
+    return spots.where((s) {
+      if (s.id.toLowerCase().contains(q)) return true;
+      if (s.isFree || s.isOffline || s.isDisabledSpot) return false;
+      final p = s.plateNumber;
+      if (p == null || p.isEmpty || p == '-') return false;
+      return p.toLowerCase().contains(q);
+    }).toList();
+  }
+
+  /// 搜索高亮: 关键词命中片段染红, 其余保持原样式.
+  /// 非搜索态/无命中时返回纯文本 span, 与普通 Text 显示一致.
+  List<InlineSpan> _hl(String text) {
+    if (!_searching || _query.trim().isEmpty || text.isEmpty) {
+      return [TextSpan(text: text)];
+    }
+    final q = _query.trim().toLowerCase();
+    final lower = text.toLowerCase();
+    final spans = <InlineSpan>[];
+    int start = 0;
+    while (true) {
+      final idx = lower.indexOf(q, start);
+      if (idx < 0) break;
+      if (idx > start) spans.add(TextSpan(text: text.substring(start, idx)));
+      spans.add(TextSpan(
+        text: text.substring(idx, idx + q.length),
+        style: const TextStyle(color: AppColors.danger),
+      ));
+      start = idx + q.length;
+    }
+    if (spans.isEmpty || start < text.length) {
+      spans.add(TextSpan(text: text.substring(start)));
+    }
+    return spans;
   }
 
   Future<void> _onToggleMode() async {
@@ -64,10 +111,10 @@ class _SpotsPageState extends State<SpotsPage> with TickerProviderStateMixin {
   @override
   Widget build(BuildContext context) {
     final provider = context.watch<ParkingProvider>();
-    final spots = provider.spots;
+    final spots = _filterSpots(provider.spots);
     return Scaffold(
       backgroundColor: AppColors.background,
-      body: provider.isLoading && spots.isEmpty
+      body: provider.isLoading && provider.spots.isEmpty
           ? const Center(child: CircularProgressIndicator())
           : RefreshIndicator(
               color: AppColors.primary,
@@ -78,6 +125,10 @@ class _SpotsPageState extends State<SpotsPage> with TickerProviderStateMixin {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     _buildHeader(context, provider),
+                    if (_searching) ...[
+                      const SizedBox(height: 12),
+                      _buildSearchBar(),
+                    ],
                     const SizedBox(height: 16),
                     Padding(
                       padding: const EdgeInsets.fromLTRB(
@@ -195,20 +246,84 @@ class _SpotsPageState extends State<SpotsPage> with TickerProviderStateMixin {
   }
 
   Widget _buildHeader(BuildContext context, ParkingProvider provider) {
-    final search = Container(
-      width: 40,
-      height: 40,
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(12),
+    // 搜索按钮: 开合搜索栏 (搜索中变 ✕ 一键退出并清空关键词)
+    final search = GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: () => setState(() {
+        _searching = !_searching;
+        if (!_searching) {
+          _query = '';
+          _searchCtrl.clear();
+        }
+      }),
+      child: Container(
+        width: 40,
+        height: 40,
+        decoration: BoxDecoration(
+          color: AppColors.surface,
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Icon(
+          _searching ? Icons.close : Icons.search,
+          color: AppColors.textSecondary,
+          size: 22,
+        ),
       ),
-      child: const Icon(Icons.search, color: AppColors.textSecondary, size: 22),
     );
-    // 隐藏式触发: 点"车位"标题切换真实/模拟, 配合交叉溶解转场
+    // 隐藏式触发: 长按"车位"标题3秒切换真实/模拟(防误触), 配合交叉溶解转场
     return PageHeader(
       title: '车位',
-      onTitleTap: _onToggleMode,
+      onTitleLongPress: _onToggleMode,
       actions: [_buildLayoutSwitcher(provider), const SizedBox(width: 10), search],
+    );
+  }
+
+  /// 搜索栏: 头部下方滑出, 自动聚焦, 输入即时过滤列表 (车位名称/车牌号双命中)
+  Widget _buildSearchBar() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: AppDims.paddingPage),
+      child: Container(
+        height: 46,
+        padding: const EdgeInsets.symmetric(horizontal: 12),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Row(
+          children: [
+            const Icon(Icons.search, size: 20, color: AppColors.textSecondary),
+            const SizedBox(width: 8),
+            Expanded(
+              child: TextField(
+                controller: _searchCtrl,
+                autofocus: true,
+                onChanged: (v) => setState(() => _query = v),
+                textInputAction: TextInputAction.search,
+                style: const TextStyle(fontSize: 14, color: AppColors.textPrimary),
+                decoration: const InputDecoration(
+                  hintText: '搜索车位名称或车牌号',
+                  hintStyle: TextStyle(fontSize: 14, color: AppColors.textSecondary),
+                  border: InputBorder.none,
+                  isDense: true,
+                  contentPadding: EdgeInsets.symmetric(vertical: 13),
+                ),
+              ),
+            ),
+            if (_query.isNotEmpty)
+              GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: () => setState(() {
+                  _query = '';
+                  _searchCtrl.clear();
+                }),
+                child: const Padding(
+                  padding: EdgeInsets.all(4),
+                  child: Icon(Icons.cancel, size: 18, color: AppColors.textSecondary),
+                ),
+              ),
+          ],
+        ),
+      ),
     );
   }
 
@@ -235,16 +350,19 @@ class _SpotsPageState extends State<SpotsPage> with TickerProviderStateMixin {
 
   Widget _buildSpotLayout(BuildContext context, ParkingProvider provider, List<SpotModel> spots) {
     if (spots.isEmpty) {
+      // 搜索无结果 → 专属空态 (区别于数据本身的"暂无车位")
+      final noResult = _searching && _query.trim().isNotEmpty;
       return Container(
         padding: const EdgeInsets.symmetric(vertical: 60),
         alignment: Alignment.center,
-        child: const Column(
+        child: Column(
           children: [
-            Icon(Icons.local_parking, size: 48, color: AppColors.textSecondary),
-            SizedBox(height: 12),
+            Icon(noResult ? Icons.search_off : Icons.local_parking,
+                size: 48, color: AppColors.textSecondary),
+            const SizedBox(height: 12),
             Text(
-              '暂无车位',
-              style: TextStyle(fontSize: 14, color: AppColors.textSecondary),
+              noResult ? '未找到与"${_query.trim()}"匹配的车位' : '暂无车位',
+              style: const TextStyle(fontSize: 14, color: AppColors.textSecondary),
             ),
           ],
         ),
@@ -318,8 +436,10 @@ class _SpotsPageState extends State<SpotsPage> with TickerProviderStateMixin {
                   children: [
                     Row(
                       children: [
-                        Text(
-                          spot.id,
+                        Text.rich(
+                          TextSpan(children: _hl(spot.id)),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
                           style: const TextStyle(
                             fontSize: 15,
                             fontWeight: FontWeight.w700,
@@ -348,8 +468,10 @@ class _SpotsPageState extends State<SpotsPage> with TickerProviderStateMixin {
                     Row(
                       children: [
                         Expanded(
-                          child: Text(
-                            _getSpotSubText(spot),
+                          child: Text.rich(
+                            TextSpan(children: _hl(_getSpotSubText(spot))),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis, // 车牌+时长长文本窄格保护
                             style: const TextStyle(
                               fontSize: 12,
                               color: AppColors.textSecondary,
@@ -439,8 +561,8 @@ class _SpotsPageState extends State<SpotsPage> with TickerProviderStateMixin {
               Row(
                 children: [
                   Expanded(
-                    child: Text(
-                      spot.id,
+                    child: Text.rich(
+                      TextSpan(children: _hl(spot.id)),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
@@ -483,8 +605,8 @@ class _SpotsPageState extends State<SpotsPage> with TickerProviderStateMixin {
               Row(
                 children: [
                   Expanded(
-                    child: Text(
-                      _getSpotSubText(spot),
+                    child: Text.rich(
+                      TextSpan(children: _hl(_getSpotSubText(spot))),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
@@ -552,7 +674,11 @@ class _SpotsPageState extends State<SpotsPage> with TickerProviderStateMixin {
     if (spot.isDisabledSpot) return '设备已停用';
     if (spot.isOffline) return '设备离线';
     if (spot.isFree) return '暂无车辆';
-    return '占用 ${SpotModel.formatOccupiedDuration(spot.actualOccupiedSec)}';
+    final dur = SpotModel.formatOccupiedDuration(spot.actualOccupiedSec);
+    // 占用/僵尸态: 车牌+时长一行展示 ("京A12345 占用 3小时"); 未识别出牌保持原样
+    final p = spot.plateNumber;
+    if (p != null && p.isNotEmpty && p != '-') return '$p 占用 $dur';
+    return '占用 $dur';
   }
 
   void _navigateToDetail(BuildContext context, SpotModel spot) {

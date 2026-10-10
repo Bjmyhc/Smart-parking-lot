@@ -45,6 +45,9 @@ class SpotModel {
   final int ultrasonic;  // 超声波距离(cm)
   final int? zombieThresholdSec; // 🆕 节点端真实僵尸判定阈值(秒), null=未知(离线/未上报)
   final int? sensorDistanceCm;  // 🆕 节点端真实超声波距离阈值(cm), null=未知(离线/未上报)
+  /* ⭐ 平台物模型原始属性全集 (含未单独建模的 LED/PlateColor 等),
+   * 详情页"物模型属性"区展示用; 快照序列化时一并带出 */
+  final Map<String, dynamic>? rawProperties;
 
   /* 本地模拟字段 (处理记录): 仅内存态, 3s 刷新后由 ParkingProvider 回写, 重启即丢 */
   String notifyStatus; // 'none'=未通知 / 'notified'=已通知
@@ -67,6 +70,7 @@ class SpotModel {
     this.ultrasonic = 0,
     this.zombieThresholdSec,
     this.sensorDistanceCm,
+    this.rawProperties,
     this.plateNumber,
     this.plateColor,
     this.plateConfidence,
@@ -183,6 +187,7 @@ class SpotModel {
       plateThumbUpdatedAt: json['plate_thumb_updated_at'] as String?,
       capturePolicy: capturePolicy,
       cameraOnline: cameraOnline,
+      rawProperties: properties, // ⭐ 物模型全集原样带上 (LED/PlateColor 等未建模属性)
       lastUpdated: json['updated_at'] as String?,
       isOnline: isOnline,
       isDisabled: isDisabled,
@@ -196,28 +201,41 @@ class SpotModel {
     return 'C';
   }
 
+  /// 序列化为 [SpotModel.fromJson] 可直接还原的结构 (冷启动车位快照用).
+  /// status 不冗余存, 由 ParkStatus/online/is_disabled 推导还原; 模拟车位不入快照(每次启动由代码重建).
   Map<String, dynamic> toJson() {
+    // 车位状态 → 节点端 ParkStatus: 0=空闲, 1=有车, 2=僵尸车 (与 fromJson 的推导互逆)
+    final int parkStatus =
+        status == 'occupied' ? 1 : (status == 'zombie' ? 2 : 0);
+    final properties = <String, dynamic>{
+      ...?rawProperties, // ⭐ 先铺物模型全集 (LED/PlateColor 等未建模属性随快照还原)
+      'ParkStatus': parkStatus,
+      'OccupiedTime': occupiedSec,       // fromJson 按 /3600 反推 occupiedHours
+      'GeoMagnetic': geoMagnetic,
+      'Ultrasonic': ultrasonic,
+      'SignalRssi': signalStrength,
+      'CapturePolicy': capturePolicy,
+      'CameraOnline': cameraOnline,
+    };
+    // 事件量按字段现值重写: 字段为 null = 当前无值(车走/抹牌门控), 不能被 raw 残留复活
+    properties.remove('PlateNumber');
+    properties.remove('PlateConfidence');
+    properties.remove('PlateThumb');
+    if (plateNumber != null) properties['PlateNumber'] = plateNumber;
+    if (plateConfidence != null) properties['PlateConfidence'] = plateConfidence;
+    if (plateThumb != null) properties['PlateThumb'] = plateThumb;
+    if (zombieThresholdSec != null) {
+      properties['ZombieThresholdSec'] = zombieThresholdSec;
+    }
+    if (sensorDistanceCm != null) properties['SensorDistanceCm'] = sensorDistanceCm;
     return {
-      'id': id,
-      'zone': zone,
-      'status': status,
-      'occupied_hours': occupiedHours,
-      'battery_level': batteryLevel,
-      'signal_strength': signalStrength,
-      'plate_number': plateNumber,
-      'plate_color': plateColor,
-      'plate_confidence': plateConfidence,
+      'name': id,                        // fromJson: name ?? deviceName
+      'online': isOnline,
+      'is_disabled': isDisabled,
+      'properties': properties,
+      'updated_at': lastUpdated,
       'plate_updated_at': plateUpdatedAt,
-      'plate_thumb': plateThumb,
       'plate_thumb_updated_at': plateThumbUpdatedAt,
-      'capture_policy': capturePolicy,
-      'camera_online': cameraOnline,
-      'last_updated': lastUpdated,
-      'is_online': isOnline,
-      'is_real': isReal,
-      'notify_status': notifyStatus,
-      'handler_name': handlerName,
-      'handled_at': handledAt?.toIso8601String(),
     };
   }
 
@@ -266,6 +284,7 @@ class SpotModel {
       ultrasonic: ultrasonic ?? this.ultrasonic,
       zombieThresholdSec: zombieThresholdSec ?? this.zombieThresholdSec,
       sensorDistanceCm: sensorDistanceCm ?? this.sensorDistanceCm,
+      rawProperties: rawProperties, // ⭐ 物模型全集随实例保留
       plateNumber: plateNumber ?? this.plateNumber,
       plateColor: plateColor ?? this.plateColor,
       plateConfidence: plateConfidence ?? this.plateConfidence,

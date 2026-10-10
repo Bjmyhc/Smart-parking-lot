@@ -64,6 +64,21 @@ void saveCertsToLittleFS(void)
                               nodes[i].sensorDistanceValue : 0;
         f.write((uint8_t *)&pc, sizeof(PersistedCert_t));
     }
+    /* ⭐ 报警灯使能: 追加在记录区之后的扩展段 (不动 PersistedCert_t 布局、
+     * 不升 CERTS_MAGIC —— 旧文件读到记录区即止, 阈值/证书不作废;
+     * 新文件的尾部扩展段旧代码同样读到记录区即停, 双向兼容) */
+    {
+        uint8_t ledSaved = 0;
+        for (uint8_t i = 0; i < nodeCount; i++)
+            if (nodes[i].certSent && nodes[i].ledSwitchSet) ledSaved++;
+        f.write(ledSaved);
+        for (uint8_t i = 0; i < nodeCount; i++)
+        {
+            if (!nodes[i].certSent || !nodes[i].ledSwitchSet) continue;
+            f.write(nodes[i].nodeId);
+            f.write((uint8_t)(nodes[i].ledSwitch ? 1 : 0));
+        }
+    }
     f.close();
     LittleFS.end();
     DBG_PRINTF("[LFS] 已保存 %d 条证书(含阈值)\n", saved);
@@ -123,6 +138,24 @@ void loadCertsFromLittleFS(void)
             nodes[slot].sensorDistanceValue = pc.sensorDistanceCm;
             DBG_PRINTF("[LFS] 节点%d 超声波距离阈值=%ucm (待PONG兜底重发)\n",
                        pc.nodeId, pc.sensorDistanceCm);
+        }
+    }
+    /* ⭐ 扩展区: 报警灯使能 (记录区之后; 旧文件无此段 available()==0,
+     * 仅缺 LED 一项, 证书/阈值照常. 只加载目标值不置下发标志,
+     * 重发统一由节点 PONG 兜底触发 —— 与阈值 S30 同口径) */
+    if (f.available() >= 1)
+    {
+        uint8_t ledCnt = (uint8_t)f.read();
+        for (uint8_t i = 0; i < ledCnt && f.available() >= 2; i++)
+        {
+            uint8_t nid = (uint8_t)f.read();
+            int8_t  lv  = (int8_t)f.read();
+            if (lv != 0 && lv != 1) continue;   /* 内容非法, 跳过 */
+            int slot = findNode(nid);
+            if (slot < 0) continue;
+            nodes[slot].ledSwitchSet = true;
+            nodes[slot].ledSwitch    = (lv != 0);
+            DBG_PRINTF("[LFS] 节点%d 报警灯使能=%d (待PONG兜底重发)\n", nid, lv);
         }
     }
     f.close();

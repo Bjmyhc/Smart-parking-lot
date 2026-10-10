@@ -21,10 +21,59 @@ class _AlertsPageState extends State<AlertsPage> {
   int _filterIndex = 0;
   bool _batchMode = false;
 
+  /* ===== 搜索: 车位名称 + 车牌号 (参照车位页实现) ===== */
+  bool _searching = false;
+  String _query = '';
+  final TextEditingController _searchCtrl = TextEditingController();
+
+  @override
+  void dispose() {
+    _searchCtrl.dispose();
+    super.dispose();
+  }
+
+  /// 关键词过滤: 车牌号或车位编号命中 (卡片上可见的字段; 忽略大小写)
+  List<AlertModel> _searchAlerts(List<AlertModel> alerts) {
+    final q = _query.trim().toLowerCase();
+    if (!_searching || q.isEmpty) return alerts;
+    return alerts.where((a) {
+      if (a.spotId.toLowerCase().contains(q)) return true;
+      final p = a.plateNumber;
+      if (p.isEmpty || p == '-') return false;
+      return p.toLowerCase().contains(q);
+    }).toList();
+  }
+
+  /// 搜索高亮: 命中片段染红, 其余保持原样式 (与车位页一致)
+  List<InlineSpan> _hl(String text) {
+    if (!_searching || _query.trim().isEmpty || text.isEmpty) {
+      return [TextSpan(text: text)];
+    }
+    final q = _query.trim().toLowerCase();
+    final lower = text.toLowerCase();
+    final spans = <InlineSpan>[];
+    int start = 0;
+    while (true) {
+      final idx = lower.indexOf(q, start);
+      if (idx < 0) break;
+      if (idx > start) spans.add(TextSpan(text: text.substring(start, idx)));
+      spans.add(TextSpan(
+        text: text.substring(idx, idx + q.length),
+        style: const TextStyle(color: AppColors.danger),
+      ));
+      start = idx + q.length;
+    }
+    if (spans.isEmpty || start < text.length) {
+      spans.add(TextSpan(text: text.substring(start)));
+    }
+    return spans;
+  }
+
   List<AlertModel> _filteredAlerts(List<AlertModel> alerts) {
+    // 标签顺序: 0全部 / 1待审核 / 2处理中 / 3已处理
     switch (_filterIndex) {
       case 1:
-        return alerts.where((a) => a.status == 'notified').toList();
+        return alerts.where((a) => a.status == 'review').toList();
       case 2:
         return alerts.where((a) => a.status == 'dispatched').toList();
       case 3:
@@ -37,20 +86,24 @@ class _AlertsPageState extends State<AlertsPage> {
   @override
   Widget build(BuildContext context) {
     final provider = context.watch<ParkingProvider>();
-    final alerts = provider.allAlerts;
+    final alerts = _searchAlerts(provider.allAlerts);
     return Scaffold(
       backgroundColor: AppColors.background,
       body: Column(
         children: [
           _buildHeader(provider),
+          if (_searching) ...[
+            const SizedBox(height: 12),
+            _buildSearchBar(),
+          ],
           const SizedBox(height: 16),
-          _buildFilterTabs(),
+          _buildFilterTabs(provider.allAlerts),
           if (_batchMode) ...[
             _buildBatchBar(context, provider, alerts),
             const SizedBox(height: 8),
           ],
           Expanded(
-            child: provider.isLoading && alerts.isEmpty
+            child: provider.isLoading && provider.allAlerts.isEmpty
                 ? const Center(child: CircularProgressIndicator())
                 : _buildBody(context, provider, alerts),
           ),
@@ -60,84 +113,185 @@ class _AlertsPageState extends State<AlertsPage> {
   }
 
   Widget _buildHeader(ParkingProvider provider) {
-    final batchBtn = GestureDetector(
-      onTap: () {
-        setState(() {
-          _batchMode = !_batchMode;
-        });
-        if (!_batchMode) {
-          provider.clearAlertSelection();
+    // ⭐ 批量选择入口(勾选图标)已停用: 该功能长期无人使用, 暂时注释休眠.
+    //   _batchMode 恒为 false → 批量操作栏永不出现; 代码原样保留, 放开注释即可恢复.
+    // final batchBtn = GestureDetector(
+    //   onTap: () {
+    //     setState(() {
+    //       _batchMode = !_batchMode;
+    //     });
+    //     if (!_batchMode) {
+    //       provider.clearAlertSelection();
+    //     }
+    //   },
+    //   child: Container(
+    //     width: 40,
+    //     height: 40,
+    //     decoration: BoxDecoration(
+    //       color: _batchMode ? AppColors.primary : AppColors.surface,
+    //       borderRadius: BorderRadius.circular(12),
+    //     ),
+    //     child: Icon(
+    //       _batchMode ? Icons.close : Icons.checklist,
+    //       color: _batchMode ? Colors.white : AppColors.textSecondary,
+    //       size: 22,
+    //     ),
+    //   ),
+    // );
+    // 搜索按钮 (原通知铃铛无功能, 参照车位页改为搜索): 开合搜索栏, 搜索中变 ✕ 一键退出
+    final search = GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: () => setState(() {
+        _searching = !_searching;
+        if (!_searching) {
+          _query = '';
+          _searchCtrl.clear();
         }
-      },
+      }),
       child: Container(
         width: 40,
         height: 40,
         decoration: BoxDecoration(
-          color: _batchMode ? AppColors.primary : AppColors.surface,
+          color: AppColors.surface,
           borderRadius: BorderRadius.circular(12),
         ),
         child: Icon(
-          _batchMode ? Icons.close : Icons.checklist,
-          color: _batchMode ? Colors.white : AppColors.textSecondary,
+          _searching ? Icons.close : Icons.search,
+          color: AppColors.textSecondary,
           size: 22,
         ),
       ),
     );
-    final bell = Container(
-      width: 40,
-      height: 40,
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: const Icon(Icons.notifications_none, color: AppColors.textSecondary, size: 22),
-    );
     return PageHeader(
       title: '告警管理',
-      actions: [batchBtn, const SizedBox(width: 10), bell],
+      // ⭐ 长按标题3秒清空告警页(与车位页长按切模式同一交互), 进度条充能防误触
+      onTitleLongPress: () => provider.clearAllAlerts(),
+      // actions: [batchBtn, const SizedBox(width: 10), search],  // 批量入口停用
+      actions: [search],
     );
   }
 
-  Widget _buildFilterTabs() {
-    final tabs = ['全部', '已通知', '处理中', '已处理'];
+  /// 搜索栏: 头部下方滑出, 自动聚焦, 输入即时过滤 (车位编号/车牌号)
+  Widget _buildSearchBar() {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: AppDims.paddingPage),
-      child: SingleChildScrollView(
-        scrollDirection: Axis.horizontal,
+      child: Container(
+        height: 46,
+        padding: const EdgeInsets.symmetric(horizontal: 12),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(12),
+        ),
         child: Row(
-          children: List.generate(tabs.length, (i) {
-            final isSelected = _filterIndex == i;
-            return Container(
-              margin: EdgeInsets.only(right: i < tabs.length - 1 ? 10 : 0),
-              child: GestureDetector(
-                onTap: () {
-                  setState(() {
-                    _filterIndex = i;
-                  });
-                },
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-                  decoration: BoxDecoration(
-                    color: isSelected ? AppColors.primary : Colors.white,
-                    borderRadius: BorderRadius.circular(AppDims.radiusLarge),
-                    border: Border.all(
-                      color: isSelected ? AppColors.primary : AppColors.textSecondary.withValues(alpha: 0.2),
-                      width: 1,
-                    ),
-                  ),
-                  child: Text(
-                    tabs[i],
-                    style: TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w600,
-                      color: isSelected ? Colors.white : AppColors.textPrimary,
-                    ),
-                  ),
+          children: [
+            const Icon(Icons.search, size: 20, color: AppColors.textSecondary),
+            const SizedBox(width: 8),
+            Expanded(
+              child: TextField(
+                controller: _searchCtrl,
+                autofocus: true,
+                onChanged: (v) => setState(() => _query = v),
+                textInputAction: TextInputAction.search,
+                style: const TextStyle(fontSize: 14, color: AppColors.textPrimary),
+                decoration: const InputDecoration(
+                  hintText: '搜索车位名称或车牌号',
+                  hintStyle: TextStyle(fontSize: 14, color: AppColors.textSecondary),
+                  border: InputBorder.none,
+                  isDense: true,
+                  contentPadding: EdgeInsets.symmetric(vertical: 13),
                 ),
               ),
-            );
-          }),
+            ),
+            if (_query.isNotEmpty)
+              GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: () => setState(() {
+                  _query = '';
+                  _searchCtrl.clear();
+                }),
+                child: const Padding(
+                  padding: EdgeInsets.all(4),
+                  child: Icon(Icons.cancel, size: 18, color: AppColors.textSecondary),
+                ),
+              ),
+          ],
         ),
+      ),
+    );
+  }
+
+  /// 状态分类标签: 4 个 (全部/待审核/处理中/已处理), 等宽均分一屏排布.
+  /// "全部"挂红色计数角标 = 待审核工单数, 有待办一眼可见; 为 0 自动隐藏.
+  Widget _buildFilterTabs(List<AlertModel> allAlerts) {
+    final tabs = ['全部', '待审核', '处理中', '已处理'];
+    final reviewCount = allAlerts.where((a) => a.status == 'review').length;
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: AppDims.paddingPage),
+      child: Row(
+        children: List.generate(tabs.length, (i) {
+          final isSelected = _filterIndex == i;
+          final showBadge = i == 0 && reviewCount > 0;
+          return Expanded(
+            child: GestureDetector(
+              onTap: () {
+                setState(() {
+                  _filterIndex = i;
+                });
+              },
+              child: Container(
+                height: 44,
+                margin: EdgeInsets.only(right: i < tabs.length - 1 ? 8 : 0),
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: isSelected ? AppColors.primary : Colors.white,
+                  borderRadius: BorderRadius.circular(AppDims.radiusLarge),
+                  border: Border.all(
+                    color: isSelected ? AppColors.primary : AppColors.textSecondary.withValues(alpha: 0.2),
+                    width: 1,
+                  ),
+                ),
+                child: Stack(
+                  clipBehavior: Clip.none,
+                  children: [
+                    Text(
+                      tabs[i],
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        color: isSelected ? Colors.white : AppColors.textPrimary,
+                      ),
+                    ),
+                    if (showBadge)
+                      Positioned(
+                        right: -14,
+                        top: -7,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 4),
+                          constraints: const BoxConstraints(minWidth: 16),
+                          height: 16,
+                          decoration: BoxDecoration(
+                            color: AppColors.danger,
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Center(
+                            child: Text(
+                              '$reviewCount',
+                              style: const TextStyle(
+                                fontSize: 10,
+                                fontWeight: FontWeight.w700,
+                                color: Colors.white,
+                                height: 1,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ),
+          );
+        }),
       ),
     );
   }
@@ -169,7 +323,7 @@ class _AlertsPageState extends State<AlertsPage> {
   }
 
   /// 顶部批量操作栏: [全选] [批量派单] [批量通知], 选中集合收在 Provider.
-  /// 全选仅选中当前标签下【可被批量操作】的告警(未通知/已通知), 处理中/已处理不参与.
+  /// 全选仅选中当前标签下【可被批量操作】的告警(未通知/已通知), 处理中/已处理/待审核不参与.
   Widget _buildBatchBar(BuildContext context, ParkingProvider provider, List<AlertModel> alerts) {
     final list = _filteredAlerts(alerts);
     final actionable = _actionableAlerts(list);
@@ -267,12 +421,10 @@ class _AlertsPageState extends State<AlertsPage> {
   }
 
   /// 当前标签下可被批量操作(通知/派单)的告警子集:
-  /// 全部=未通知+已通知, 已通知=仅已通知, 处理中/已处理=无.
+  /// 全部=未通知+已通知, 处理中/已处理/待审核=无.
   List<AlertModel> _actionableAlerts(List<AlertModel> list) {
     final Set<String> statuses;
-    if (_filterIndex == 1) {
-      statuses = {'notified'};
-    } else if (_filterIndex == 2 || _filterIndex == 3) {
+    if (_filterIndex == 1 || _filterIndex == 2 || _filterIndex == 3) {
       statuses = {};
     } else {
       statuses = {'pending', 'notified'};
@@ -323,15 +475,18 @@ class _AlertsPageState extends State<AlertsPage> {
   Widget _buildBody(BuildContext context, ParkingProvider provider, List<AlertModel> alerts) {
     final list = _filteredAlerts(alerts);
     if (list.isEmpty) {
-      return const Center(
+      // 搜索无结果 → 专属空态 (区别于状态标签/数据本身的"暂无告警")
+      final noResult = _searching && _query.trim().isNotEmpty;
+      return Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(Icons.warning_amber, size: 64, color: AppColors.textSecondary),
-            SizedBox(height: 16),
+            Icon(noResult ? Icons.search_off : Icons.warning_amber,
+                size: 64, color: AppColors.textSecondary),
+            const SizedBox(height: 16),
             Text(
-              '暂无僵尸车告警',
-              style: TextStyle(fontSize: 16, color: AppColors.textSecondary),
+              noResult ? '未找到与"${_query.trim()}"匹配的工单' : '暂无僵尸车告警',
+              style: const TextStyle(fontSize: 16, color: AppColors.textSecondary),
             ),
           ],
         ),
@@ -431,8 +586,9 @@ class _AlertsPageState extends State<AlertsPage> {
                         Row(
                           children: [
                             Expanded(
-                              child: Text(
-                                '僵尸车告警 - ${alert.plateNumber}',
+                              child: Text.rich(
+                                TextSpan(
+                                    children: _hl('僵尸车告警 - ${alert.plateNumber}')),
                                 style: const TextStyle(
                                   fontSize: 16,
                                   fontWeight: FontWeight.w700,
@@ -445,8 +601,10 @@ class _AlertsPageState extends State<AlertsPage> {
                           ],
                         ),
                         const SizedBox(height: 8),
-                        Text(
-                          '车位: ${alert.spotId} · 占用 ${SpotModel.formatOccupiedDuration(alert.occupiedSec)}',
+                        Text.rich(
+                          TextSpan(
+                              children: _hl(
+                                  '车位: ${alert.spotId} · 占用 ${SpotModel.formatOccupiedDuration(alert.occupiedSec)}')),
                           style: const TextStyle(
                             fontSize: 13,
                             color: AppColors.textSecondary,
@@ -483,12 +641,16 @@ class _AlertsPageState extends State<AlertsPage> {
   }
 
   /// 按告警状态自适应的操作按钮组:
+  /// - review:   [查看详情]  ⭐卡片看不清车牌, 审核动作(录入车牌/直接派单)在详情页处理
   /// - pending:  [查看详情] ── [通知车主]
   /// - notified: [查看详情] ── [派单]
   /// - dispatched / resolved: [查看详情]
   Widget _buildStatusActionButton(
       BuildContext context, ParkingProvider provider, AlertModel alert) {
     switch (alert.status) {
+      case 'review':
+        // 待审核: 卡片只给"查看详情"入口, 审核动作(录入车牌/直接派单)收进详情页处理
+        return _buildViewButton(context, alert);
       case 'pending':
         return Row(
           mainAxisSize: MainAxisSize.min,
@@ -514,7 +676,7 @@ class _AlertsPageState extends State<AlertsPage> {
     }
   }
 
-  /// 通知车主: 标记已通知, 卡片转入"已通知"分类.
+  /// 通知车主: 标记已通知, 工单状态变"已通知"(开始派单倒计时).
   Widget _buildNotifyButton(
       BuildContext context, ParkingProvider provider, AlertModel alert) {
     return GestureDetector(

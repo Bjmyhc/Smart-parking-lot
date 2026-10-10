@@ -172,29 +172,38 @@ class ApiService {
     }
   }
 
+  /* ⭐ 单台设备最近一次成功的属性载荷(属性 + 车牌/缩略图平台时间).
+   * 属性查询临时失败时回填, 避免整轮数据被清空(冷启动首轮超时会让车牌/状态凭空消失). */
+  final Map<String, Map<String, dynamic>> _lastGoodPropertyPayload = {};
+
   Future<List<Map<String, dynamic>>> _fetchDeviceProperties(List<Map<String, dynamic>> devices) async {
-    final result = <Map<String, dynamic>>[];
+    // ⭐ 并行查询各台设备属性: 原串行 for 循环让冷启动首帧 = 设备列表 + N×RTT 串行等待
+    await Future.wait(devices.map(_queryOneDeviceProperties));
+    return devices;
+  }
 
-    for (final device in devices) {
-      final deviceName = device['name'] ?? device['deviceName'] ?? '';
-      final productId = device['product_id'] ?? _nodeProductId;
-      final isOnline = device['online'] == true;
+  /// 单台设备属性查询: 失败自动重试1次; 最终失败不误标离线(离线以 device/list 为准),
+  /// 属性回填本会话最近一次成功值, 保证车牌/缩略图/状态不整轮蒸发.
+  Future<void> _queryOneDeviceProperties(Map<String, dynamic> device) async {
+    final deviceName = device['name'] ?? device['deviceName'] ?? '';
+    final productId = device['product_id'] ?? _nodeProductId;
 
-      if (deviceName.isEmpty) {
-        device['online'] = false;
-        result.add(device);
-        continue;
-      }
+    if (deviceName.isEmpty) {
+      device['online'] = false;
+      device['properties'] = <String, dynamic>{};
+      return;
+    }
 
-      if (!isOnline) {
-        // 必须用带类型的空 Map，否则 {} 会被推断为 Map<dynamic, dynamic>,
-        // 导致 SpotModel.fromJson 里 `as Map<String, dynamic>?` 强转失败
-        device['properties'] = <String, dynamic>{};
-        device['updated_at'] = device['last_time'] ?? '';
-        result.add(device);
-        continue;
-      }
+    if (device['online'] != true) {
+      // 必须用带类型的空 Map，否则 {} 会被推断为 Map<dynamic, dynamic>,
+      // 导致 SpotModel.fromJson 里 `as Map<String, dynamic>?` 强转失败
+      device['properties'] = <String, dynamic>{};
+      device['updated_at'] = device['last_time'] ?? '';
+      return;
+    }
 
+    Object? lastErr;
+    for (int attempt = 1; attempt <= 2; attempt++) {
       try {
         final auth = _generateAuthorization();
         final url = Uri.parse('$_baseUrl/thingmodel/query-device-property?product_id=$productId&device_name=${Uri.encodeComponent(deviceName)}');
@@ -207,61 +216,81 @@ class ApiService {
           },
         );
 
-        if (response.statusCode == 200) {
-          final data = json.decode(response.body);
-          debugPrint('>>> 属性查询 ${device['name']}: ${data['code']} ${data['msg']}');
-          debugPrint('>>> 属性响应体: ${response.body}');
-          if (data['code'] == 0) {
-            final properties = <String, dynamic>{};
-            final List<dynamic> propList = data['data'] ?? [];
-            String? plateUpdatedAt; // ⭐ 车牌属性的平台更新时间 (替代已废弃的摄像头 CaptureTime)
-            String? plateThumbUpdatedAt; // ⭐ S5 缩略图属性的平台更新时间(判新旧门控用)
-
-            for (final prop in propList) {
-              final identifier = prop['identifier'] as String? ?? '';
-              final value = prop['value'];
-              if (identifier.isNotEmpty) {
-                if (value is String) {
-                  if (value == 'true') {
-                    properties[identifier] = true;
-                  } else if (value == 'false') {
-                    properties[identifier] = false;
-                  } else {
-                    properties[identifier] = int.tryParse(value) ?? value;
-                  }
-                } else {
-                  properties[identifier] = value;
-                }
-                if (identifier == 'PlateNumber') {
-                  plateUpdatedAt = _extractPropertyTime(prop as Map);
-                }
-                if (identifier == 'PlateThumb') {
-                  plateThumbUpdatedAt = _extractPropertyTime(prop as Map);
-                }
-              }
-            }
-
-            device['properties'] = properties;
-            if (plateUpdatedAt != null) device['plate_updated_at'] = plateUpdatedAt;
-            if (plateThumbUpdatedAt != null) {
-              device['plate_thumb_updated_at'] = plateThumbUpdatedAt;
-            }
-            device['updated_at'] = DateTime.now().toIso8601String();
-            device['online'] = true;
-          } else {
-            device['online'] = false;
-          }
-        } else {
-          device['online'] = false;
+        if (response.statusCode != 200) {
+          lastErr = 'HTTP ${response.statusCode}';
+          continue;
         }
-      } catch (e) {
-        device['online'] = false;
-      }
+        final data = json.decode(response.body);
+        debugPrint('>>> 属性查询 ${device['name']}: ${data['code']} ${data['msg']}');
+        if (data['code'] != 0) {
+          lastErr = 'code=${data['code']}, msg=${data['msg']}';
+          continue;
+        }
 
-      result.add(device);
+        final properties = <String, dynamic>{};
+        final List<dynamic> propList = data['data'] ?? [];
+        String? plateUpdatedAt; // ⭐ 车牌属性的平台更新时间 (替代已废弃的摄像头 CaptureTime)
+        String? plateThumbUpdatedAt; // ⭐ S5 缩略图属性的平台更新时间(判新旧门控用)
+
+        for (final prop in propList) {
+          final identifier = prop['identifier'] as String? ?? '';
+          final value = prop['value'];
+          if (identifier.isNotEmpty) {
+            if (value is String) {
+              if (value == 'true') {
+                properties[identifier] = true;
+              } else if (value == 'false') {
+                properties[identifier] = false;
+              } else {
+                properties[identifier] = int.tryParse(value) ?? value;
+              }
+            } else {
+              properties[identifier] = value;
+            }
+            if (identifier == 'PlateNumber') {
+              plateUpdatedAt = _extractPropertyTime(prop as Map);
+            }
+            if (identifier == 'PlateThumb') {
+              plateThumbUpdatedAt = _extractPropertyTime(prop as Map);
+            }
+          }
+        }
+
+        device['properties'] = properties;
+        if (plateUpdatedAt != null) device['plate_updated_at'] = plateUpdatedAt;
+        if (plateThumbUpdatedAt != null) {
+          device['plate_thumb_updated_at'] = plateThumbUpdatedAt;
+        }
+        device['updated_at'] = DateTime.now().toIso8601String();
+        device['online'] = true;
+        _lastGoodPropertyPayload[deviceName] = {
+          'properties': properties,
+          'plate_updated_at': plateUpdatedAt,
+          'plate_thumb_updated_at': plateThumbUpdatedAt,
+        };
+        return;
+      } catch (e) {
+        lastErr = e;
+        debugPrint('>>> 属性查询失败(第$attempt次) $deviceName: $e');
+      }
     }
 
-    return result;
+    // 最终失败: 不再把设备打成离线(单次查询失败≠设备离线), 属性回填会话内最近成功值
+    final cached = _lastGoodPropertyPayload[deviceName];
+    if (cached != null) {
+      device['properties'] = Map<String, dynamic>.from(cached['properties'] as Map);
+      if (cached['plate_updated_at'] is String) {
+        device['plate_updated_at'] = cached['plate_updated_at'];
+      }
+      if (cached['plate_thumb_updated_at'] is String) {
+        device['plate_thumb_updated_at'] = cached['plate_thumb_updated_at'];
+      }
+      debugPrint('>>> 属性查询最终失败($lastErr), 已回填会话缓存: $deviceName');
+    } else {
+      device['properties'] = <String, dynamic>{};
+      debugPrint('>>> 属性查询最终失败且无缓存($lastErr): $deviceName');
+    }
+    device['updated_at'] = device['last_time'] ?? '';
   }
 
   Future<Map<String, dynamic>> getDeviceDetail(String deviceName, {String? productId}) async {
