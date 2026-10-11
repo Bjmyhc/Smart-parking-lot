@@ -32,6 +32,30 @@ PROPERTY_LABELS = {
     "SensorDistanceCm":  "超声波判定距离阈值",
     "ZombieThresholdSec": "僵尸车判定阈值",
     "SignalRssi":        "信号强度",
+    "CameraOnline":      "摄像头在线",
+    "CapturePolicy":     "拍照策略",
+    "PlateNumber":       "车牌号码",
+    "PlateConfidence":   "识别置信度",
+    "PlateColor":        "车牌颜色",
+    "PlateThumb":        "车牌图像",
+}
+
+# 拍照策略档位 -> 中文 (CapturePolicy 0~3)
+CAPTURE_POLICY_TEXT = {
+    0: "0·不自动拍",
+    1: "1·有车即拍",
+    2: "2·僵尸车拍",
+    3: "3·都拍",
+}
+
+# 车牌颜色数值 -> 中文 (PlateColor 0~5, 一期不上报)
+PLATE_COLOR_TEXT = {
+    0: "未知",
+    1: "蓝牌",
+    2: "黄牌",
+    3: "绿牌",
+    4: "白牌",
+    5: "黑牌",
 }
 
 # 车位状态数值 -> 中文
@@ -57,6 +81,28 @@ def extract_value(v):
     if isinstance(v, dict) and "value" in v:
         return v["value"]
     return v
+
+
+def render_thumb_ascii(b64_data, width=94, height=24):
+    """PlateThumb(94×24 二值位图 base64) -> ASCII 点阵字符画
+
+    位布局与产图端一致: 行优先、每行 width bit 不断行、字节内高位在前,
+    即第 i 个像素 = bytes[i>>3] 的第 (7-(i&7)) 位; 1=白字(车牌笔画), 0=黑底.
+    输出 '█'=笔画、'·'=底, 供 LLM 直接肉眼核对拍摄内容.
+    """
+    import base64 as _b64
+    raw = _b64.b64decode(b64_data)
+    if len(raw) != width * height // 8:
+        raise ValueError(f"缩略图长度异常: {len(raw)}字节, 期望{width * height // 8}")
+    rows = []
+    for y in range(height):
+        row = []
+        for x in range(width):
+            i = y * width + x
+            bit = (raw[i >> 3] >> (7 - (i & 7))) & 1
+            row.append("█" if bit else "·")
+        rows.append("".join(row))
+    return "\n".join(rows)
 
 
 class OneNetClient:
@@ -185,5 +231,25 @@ class OneNetClient:
                     value = f"{int(value)}秒"
                 except (TypeError, ValueError):
                     pass
+            elif identifier == "CapturePolicy":
+                try:
+                    value = CAPTURE_POLICY_TEXT.get(int(value), value)
+                except (TypeError, ValueError):
+                    pass
+            elif identifier == "CameraOnline":
+                value = "在线" if value in (True, 1, "true", "1") else "离线"
+            elif identifier == "PlateColor":
+                try:
+                    value = PLATE_COLOR_TEXT.get(int(value), value)
+                except (TypeError, ValueError):
+                    pass
+            elif identifier == "PlateConfidence":
+                value = f"{value}%"
+            elif identifier == "PlateNumber":
+                if value in (None, "", "-"):
+                    value = "未识别出(拍到但没认出)"
+            elif identifier == "PlateThumb":
+                # base64 原值(376字符)不吐给 AI: 只报状态, 内容用 get_plate_image 渲染
+                value = "已上报(94×24点阵)" if value else "未上报"
             lines.append(f"{label}={value}")
         return ", ".join(lines) if lines else "无属性数据"

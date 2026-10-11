@@ -11,9 +11,13 @@
   query_node_status()     查询单个节点实时状态
   query_all_nodes()       查询所有节点实时状态
   get_parking_summary()   停车场概览(空闲/有车/僵尸车/离线统计)
+  query_plate()           查询车牌识别结果(牌号/置信度/颜色/摄像头/缩略图状态)
+  get_plate_image()       车牌缩略图 ASCII 点阵(94×24字符画, 供核对拍摄内容)
+  take_photo()            远程触发拍照识别(TriggerCapture)
   set_led_enable()        同步服务调用: 远程控制某节点 LED 使能开关
   set_zombie_threshold()  同步服务调用: 设置某节点僵尸车判定阈值(秒)
   set_sensor_distance()   同步服务调用: 设置某节点超声波判定距离阈值(cm)
+  set_capture_policy()    同步服务调用: 设置拍照策略(0~3档)
 
 运行方式:
   stdio(默认):   python parking_mcp_server.py
@@ -27,7 +31,7 @@ import json
 import os
 
 from mcp.server.fastmcp import FastMCP
-from onenet_client import OneNetClient
+from onenet_client import OneNetClient, render_thumb_ascii, PLATE_COLOR_TEXT
 
 # 配置文件路径(与脚本同目录)
 CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json")
@@ -153,6 +157,73 @@ def get_parking_summary() -> str:
     return summary + "\n" + "\n".join(details)
 
 
+@mcp.tool()
+def query_plate(node_name: str) -> str:
+    """查询指定车位的最新车牌识别结果(车牌号/置信度/颜色/摄像头状态/缩略图状态), node_name 如 Park001.
+    车牌显示'-'时表示拍到了但没识别出来"""
+    cfg = load_config()
+    client = get_client(cfg, node_name)
+    try:
+        status = client.query_device_status()
+    except Exception as exc:
+        return f"查询节点 {node_name} 失败: {exc}"
+    if status != "在线":
+        # 离线时属性快照是最后一次上报的旧识别结果, 不展示避免误导
+        return f"节点 {node_name}: 状态={status} (设备离线, 不展示陈旧识别结果)"
+    try:
+        props = client.query_property()
+    except Exception as exc:
+        return f"节点 {node_name}: 在线但属性查询失败({exc})"
+
+    plate = props.get("PlateNumber")
+    plate_text = "未识别出(拍到但没认出)" if plate in (None, "", "-") else str(plate)
+    bits = []
+    conf = props.get("PlateConfidence")
+    if conf not in (None, ""):
+        bits.append(f"置信度={conf}%")
+    color = props.get("PlateColor")
+    if color not in (None, ""):
+        try:
+            bits.append(f"颜色={PLATE_COLOR_TEXT.get(int(color), color)}")
+        except (TypeError, ValueError):
+            bits.append(f"颜色={color}")
+    cam = props.get("CameraOnline")
+    if cam not in (None, ""):
+        bits.append(f"摄像头={'在线' if cam in (True, 1, 'true', '1') else '离线'}")
+    thumb = props.get("PlateThumb")
+    bits.append(f"缩略图={'已上报(可用 get_plate_image 查看)' if thumb else '未上报'}")
+    return f"节点 {node_name}: 车牌={plate_text}, " + ", ".join(bits)
+
+
+@mcp.tool()
+def get_plate_image(node_name: str) -> str:
+    """返回指定车位最近一次车牌缩略图的 ASCII 点阵字符画(94×24), 供查看/核对拍摄内容.
+    与 PlateNumber 是同一次识别的产物; 无图(未识别出牌/车已离场)时会提示未上报"""
+    cfg = load_config()
+    client = get_client(cfg, node_name)
+    try:
+        status = client.query_device_status()
+    except Exception as exc:
+        return f"查询节点 {node_name} 失败: {exc}"
+    if status != "在线":
+        return f"节点 {node_name}: 状态={status} (设备离线, 不展示陈旧图像)"
+    try:
+        props = client.query_property()
+    except Exception as exc:
+        return f"节点 {node_name}: 在线但属性查询失败({exc})"
+    thumb = props.get("PlateThumb")
+    if not thumb:
+        return f"节点 {node_name}: 车牌图像未上报(未识别出车牌或车已离场)"
+    try:
+        art = render_thumb_ascii(thumb)
+    except Exception as exc:
+        return f"节点 {node_name}: 车牌图像解码失败({exc})"
+    plate = props.get("PlateNumber")
+    plate_text = "未识别出(拍到但没认出)" if plate in (None, "", "-") else str(plate)
+    return (f"节点 {node_name}: 车牌={plate_text} · 点阵图如下"
+            f"(█=白字笔画, ·=黑底, 共94列×24行):\n{art}")
+
+
 def _invoke_node_service(node_name, identifier, params, desc):
     """同步调用节点物模型服务(call-service), 返回面向 AI 的中文结果文本
 
@@ -197,6 +268,38 @@ def set_sensor_distance(node_name: str, distance_cm: int) -> str:
     """同步服务调用: 设置指定车位的超声波判定距离阈值(cm), 范围 2~400, node_name 如 Park001"""
     return _invoke_node_service(node_name, "SetSensorDistance",
                                 {"DistanceValue": int(distance_cm)}, "设置超声波判定距离阈值")
+
+
+@mcp.tool()
+def set_capture_policy(node_name: str, policy: int) -> str:
+    """同步服务调用: 设置指定车位的拍照策略(0~3档): 0=不自动拍 1=有车即拍 2=僵尸车拍 3=都拍, node_name 如 Park001"""
+    if int(policy) not in (0, 1, 2, 3):
+        return f"拍照策略取值须为 0~3(0=不自动拍 1=有车即拍 2=僵尸车拍 3=都拍), 收到 {policy}"
+    return _invoke_node_service(node_name, "SetCapturePolicy",
+                                {"PolicyValue": int(policy)}, "设置拍照策略")
+
+
+@mcp.tool()
+def take_photo(node_name: str) -> str:
+    """同步服务调用: 远程触发指定车位节点拍照识别(TriggerCapture): 摄像头拍照 -> 端侧识别 ->
+    结果经 PlateNumber 属性异步上报. node_name 如 Park001. 识别出的车牌约2~5秒后用 query_plate 查询"""
+    cfg = load_config()
+    client = get_client(cfg, node_name)
+    try:
+        resp = client.call_service("TriggerCapture", {})
+    except Exception as exc:
+        return f"触发节点 {node_name} 拍照失败: {exc}"
+    code = resp.get("code")
+    if code != 0:
+        return f"节点 {node_name} 拍照失败: code={code}, msg={resp.get('msg')}"
+    out = resp.get("data") or {}
+    # 物模型语义: Result=1 识别出合法车牌; ActualValue=1 动作真的执行(0=节点忙/链路异常)
+    if out.get("ActualValue") != 1:
+        return (f"节点 {node_name} 拍照未执行: 节点忙或链路异常"
+                f"(ActualValue={out.get('ActualValue')})")
+    if out.get("Result") == 1:
+        return f"节点 {node_name} 拍照并识别成功, 已出牌; 约2~5秒后用 query_plate 查看车牌"
+    return f"节点 {node_name} 已执行拍照但未识别出车牌(将上报'-'); 稍后可用 query_plate 确认"
 
 
 def main():
