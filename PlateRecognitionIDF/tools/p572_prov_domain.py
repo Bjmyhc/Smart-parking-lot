@@ -4,10 +4,33 @@
 p571 已证: 提亮/模糊/低分辨率 都不足以把置信从 95% 打到 45%.
 这一轮专查 (a) 色偏(白平衡漂移) (b) 极端对比度/gamma (c) 抠图偏位.
 """
+# --- 可移植路径自举 (Tool/relocate_paths.py 注入, 勿手改) -------------------
+import os as _os
+
+_HERE_ = _os.path.dirname(_os.path.abspath(__file__))
+
+
+def _find_repo_root_(start):
+    """从 start 逐级上溯, 找到同时含 Tool/ 与 Node/ 的目录 = 仓库根。"""
+    cur = start
+    while True:
+        if _os.path.isdir(_os.path.join(cur, 'Tool')) and \
+           _os.path.isdir(_os.path.join(cur, 'Node')):
+            return cur
+        parent = _os.path.dirname(cur)
+        if parent == cur:
+            return _os.path.dirname(start)
+        cur = parent
+
+
+_REPO_ROOT_ = _find_repo_root_(_HERE_)
+_AI_ROOT_ = _os.path.dirname(_REPO_ROOT_)
+# --- 自举结束 ---------------------------------------------------------------
+
 import os, glob
 import numpy as np, cv2, torch, torch.nn as nn, torch.nn.functional as F
 
-ROOT = r"G:\All_Project\AI_Project\Smart-Paring-Iot\PlateRecognitionIDF"
+ROOT = _REPO_ROOT_ + r'\PlateRecognitionIDF'
 OUT = os.path.join(ROOT, "tools", "out", "p565")
 PROV = list("京津冀晋蒙辽吉黑沪苏浙皖闽赣鲁豫鄂湘粤桂琼渝川贵云藏陕甘青宁新")
 W, H = 32, 64

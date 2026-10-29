@@ -2,6 +2,29 @@
 """p565d: 省字分类器原型 —— 只用合成数据训练, 在 245 张真实省字上验证.
 输入 32x64 (WxH) BGR, 输出 31 个省字。
 """
+# --- 可移植路径自举 (Tool/relocate_paths.py 注入, 勿手改) -------------------
+import os as _os
+
+_HERE_ = _os.path.dirname(_os.path.abspath(__file__))
+
+
+def _find_repo_root_(start):
+    """从 start 逐级上溯, 找到同时含 Tool/ 与 Node/ 的目录 = 仓库根。"""
+    cur = start
+    while True:
+        if _os.path.isdir(_os.path.join(cur, 'Tool')) and \
+           _os.path.isdir(_os.path.join(cur, 'Node')):
+            return cur
+        parent = _os.path.dirname(cur)
+        if parent == cur:
+            return _os.path.dirname(start)
+        cur = parent
+
+
+_REPO_ROOT_ = _find_repo_root_(_HERE_)
+_AI_ROOT_ = _os.path.dirname(_REPO_ROOT_)
+# --- 自举结束 ---------------------------------------------------------------
+
 import os, sys, glob, json, random
 import numpy as np, cv2, torch, torch.nn as nn, torch.nn.functional as F
 try:
@@ -9,10 +32,10 @@ try:
 except Exception as e:
     print("PIL 不可用:", e); sys.exit(1)
 
-ROOT = r"G:\All_Project\AI_Project\Smart-Paring-Iot\PlateRecognitionIDF"
+ROOT = _REPO_ROOT_ + r'\PlateRecognitionIDF'
 OUT = os.path.join(ROOT, "tools", "out", "p565"); os.makedirs(OUT, exist_ok=True)
 REAL = os.path.join(OUT, "real_all")
-FONT = r"G:\All_Project\AI_Project\LPRNet_Pytorch\data\NotoSansCJK-Regular.ttc"
+FONT = _AI_ROOT_ + r'\LPRNet_Pytorch\data\NotoSansCJK-Regular.ttc'
 PROV = list("京津冀晋蒙辽吉黑沪苏浙皖闽赣鲁豫鄂湘粤桂琼渝川贵云藏陕甘青宁新")
 assert len(PROV) == 31, len(PROV)
 W, H, SS = 32, 64, 4

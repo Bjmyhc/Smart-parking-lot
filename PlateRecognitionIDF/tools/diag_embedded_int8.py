@@ -3,12 +3,35 @@
    (a) PC float (torch r4)
    (b) PC int8 (esp-ppq 量化图, 复刻部署配方: r4 权重 + mse 校准 + 实拍/测试集)
 板子读这条数据是 皖AMS087 (真值 沪AMS087)。"""
+# --- 可移植路径自举 (Tool/relocate_paths.py 注入, 勿手改) -------------------
+import os as _os
+
+_HERE_ = _os.path.dirname(_os.path.abspath(__file__))
+
+
+def _find_repo_root_(start):
+    """从 start 逐级上溯, 找到同时含 Tool/ 与 Node/ 的目录 = 仓库根。"""
+    cur = start
+    while True:
+        if _os.path.isdir(_os.path.join(cur, 'Tool')) and \
+           _os.path.isdir(_os.path.join(cur, 'Node')):
+            return cur
+        parent = _os.path.dirname(cur)
+        if parent == cur:
+            return _os.path.dirname(start)
+        cur = parent
+
+
+_REPO_ROOT_ = _find_repo_root_(_HERE_)
+_AI_ROOT_ = _os.path.dirname(_REPO_ROOT_)
+# --- 自举结束 ---------------------------------------------------------------
+
 import os, sys, time
 import numpy as np
 import torch
 from torch.utils.data import DataLoader
 
-ROOT = r'G:\All_Project\AI_Project\Smart-Paring-Iot\PlateRecognitionIDF'
+ROOT = _REPO_ROOT_ + r'\PlateRecognitionIDF'
 sys.path.insert(0, os.path.join(ROOT, 'tools'))
 import quant_espdl_s3 as Q
 
@@ -25,7 +48,7 @@ WEIGHTS = os.path.join(ROOT, 'tools', 'out', 'finetune', 'r4_lr1e4_nofreeze.pth'
 ONNX = os.path.join(ROOT, 'tools', 'out', 'lprnet_s3.onnx')
 BIN = os.path.join(ROOT, 'main', 'models', 'test_input.bin')
 EXPORT = os.path.join(ROOT, 'tools', 'out', 'diag_r4_mse_repro.espdl')
-CROPS = r'G:\All_Project\AI_Project\BY\u4e32\u53e3\u52a9\u624b\dist\saved\images'
+CROPS = _AI_ROOT_ + r'\BY\u4e32\u53e3\u52a9\u624b\dist\saved\images'
 
 ALGO = sys.argv[1] if len(sys.argv) > 1 else 'mse'
 

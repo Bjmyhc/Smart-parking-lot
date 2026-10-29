@@ -2,6 +2,29 @@
 """Isolate int8 quantization: quantize the ONNX the same way as the deployed model,
 then run the SAME 94x24 crops from the board through (a) float torch and (b) int8 ppq graph.
 """
+# --- 可移植路径自举 (Tool/relocate_paths.py 注入, 勿手改) -------------------
+import os as _os
+
+_HERE_ = _os.path.dirname(_os.path.abspath(__file__))
+
+
+def _find_repo_root_(start):
+    """从 start 逐级上溯, 找到同时含 Tool/ 与 Node/ 的目录 = 仓库根。"""
+    cur = start
+    while True:
+        if _os.path.isdir(_os.path.join(cur, 'Tool')) and \
+           _os.path.isdir(_os.path.join(cur, 'Node')):
+            return cur
+        parent = _os.path.dirname(cur)
+        if parent == cur:
+            return _os.path.dirname(start)
+        cur = parent
+
+
+_REPO_ROOT_ = _find_repo_root_(_HERE_)
+_AI_ROOT_ = _os.path.dirname(_REPO_ROOT_)
+# --- 自举结束 ---------------------------------------------------------------
+
 import os, sys, glob
 import numpy as np
 import torch
@@ -12,12 +35,12 @@ import quant_espdl_s3 as Q
 sys.path.insert(0, Q.DEFAULT_LPRNET_DIR)
 from data.load_data import CHARS
 
-CROP_DIR = r'G:\All_Project\AI_Project\BY串口助手\dist\saved\images'
+CROP_DIR = _AI_ROOT_ + r'\BY串口助手\dist\saved\images'
 PATS = 'IMG_20261001_1740*.jpg'
 ONNX = os.path.join(_HERE, 'out', 'lprnet_s3.onnx')
 WEIGHTS = os.path.join(_HERE, 'out', 'finetune', 'r4_lr1e4_nofreeze.pth')
 OUT = os.path.join(_HERE, 'out', 'diag_int8.espdl')
-CALIB = r'G:\All_Project\AI_Project\BY串口助手\dist\saved\images,' + os.path.join(Q.DEFAULT_LPRNET_DIR, 'data', 'test')
+CALIB = _AI_ROOT_ + r'\BY串口助手\dist\saved\images,' + os.path.join(Q.DEFAULT_LPRNET_DIR, 'data', 'test')
 
 from torch.utils.data import DataLoader
 from esp_ppq import QuantizationSettingFactory

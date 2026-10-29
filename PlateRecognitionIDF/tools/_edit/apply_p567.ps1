@@ -1,5 +1,5 @@
 $ErrorActionPreference = "Stop"
-$root = "G:\All_Project\AI_Project\Smart-Paring-Iot\PlateRecognitionIDF"
+$root = Join-Path (Split-Path -Parent (Split-Path -Parent $PSScriptRoot)) "PlateRecognitionIDF"
 $p    = "$root\main\main.cpp"
 $d    = "$root\tools\_edit"
 

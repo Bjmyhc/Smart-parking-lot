@@ -2,9 +2,32 @@
 """_apply_p5_60.py —— 把 P5.60 的四处改动写进 main.cpp。
    全部用锚点(字符串), 不认行号; 先全量校验唯一性, 再一次性写入。
 """
+# --- 可移植路径自举 (Tool/relocate_paths.py 注入, 勿手改) -------------------
+import os as _os
+
+_HERE_ = _os.path.dirname(_os.path.abspath(__file__))
+
+
+def _find_repo_root_(start):
+    """从 start 逐级上溯, 找到同时含 Tool/ 与 Node/ 的目录 = 仓库根。"""
+    cur = start
+    while True:
+        if _os.path.isdir(_os.path.join(cur, 'Tool')) and \
+           _os.path.isdir(_os.path.join(cur, 'Node')):
+            return cur
+        parent = _os.path.dirname(cur)
+        if parent == cur:
+            return _os.path.dirname(start)
+        cur = parent
+
+
+_REPO_ROOT_ = _find_repo_root_(_HERE_)
+_AI_ROOT_ = _os.path.dirname(_REPO_ROOT_)
+# --- 自举结束 ---------------------------------------------------------------
+
 import io, os, sys
 
-P = r"G:\All_Project\AI_Project\Smart-Paring-Iot\PlateRecognitionIDF\main\main.cpp"
+P = _REPO_ROOT_ + r'\PlateRecognitionIDF\main\main.cpp'
 src = io.open(P, "r", encoding="utf-8", newline="").read()
 orig_len = len(src)
 

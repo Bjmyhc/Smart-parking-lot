@@ -93,6 +93,32 @@ static uint16_t imgFragNo   = 0;              /* 当前重组中的图像序号 
 static uint8_t  imgFragGot  = 0;              /* bit0=第1包已收, bit1=第2包已收 */
 static uint8_t  imgFragNode = 0;              /* 第1包归属节点(第2包到达时 lastCmdNodeId 可能已前移) */
 
+/* ⭐ S6-fix-1: 第1包到达后的空口静默窗.
+ * 节点发完 0xF2 第1包后要等 >=300ms 才发第2包(见 bsp_lora.c ImgTx_Poll),
+ * 而网关收到第1包就会清 waitingResp 并立刻投递下一条命令/轮询 —— 发射期
+ * (~220ms) 半双工收不到第2包, 图永远拼不齐; 节点侧收到 AT+IMG 就把 bit4
+ * 清了, 也不会重发. 故收到第1包后静默 IMG_RX_QUIET_MS, 把空口让给第2包:
+ * 第2包约在第1包收完后 80~170ms 到达, 700ms 留足余量 */
+#define IMG_RX_QUIET_MS      700UL
+/* ⭐ S6-fix-1: AT+IMG 发出后的静默窗. 网关一收到节点对 AT+IMG 的 ACK 就会
+ * 立刻去轮询(section 3 之后的分支), 而节点此时才刚要发第1包 —— 发射期
+ * (~220ms) 正好盖住第1包, 图连第一包都收不到. 故命令发出后先静默:
+ * ACK(~50ms) + 应用处理 + 第1包(~220ms) + 300ms 间隔 + 第2包(~90ms)
+ * ≈ 900ms, 留到 1500ms */
+#define IMG_CMD_QUIET_MS     1500UL
+static uint32_t imgRxQuietUntil = 0;          /* 静默截止时刻(0=无静默) */
+
+/* ⭐ S6-fix-1: AT+IMG 取图看护(兜底重试).
+ * 0xF2 两包盲发, 无 ACK; 任一包丢失节点都不会重发(节点在收到 AT+IMG 时
+ * 就无条件清了 g_imgFetchPending). 故由网关看护: 发 AT+IMG 后
+ * IMG_FETCH_TIMEOUT_MS 内没收到完整图就重发, 最多 IMG_FETCH_RETRY_MAX 次,
+ * 仍失败才放弃并打日志. 收到完整图(updateNodeThumb)即撤看护 */
+#define IMG_FETCH_TIMEOUT_MS 2500UL
+#define IMG_FETCH_RETRY_MAX  2
+static uint8_t  imgFetchWatchNode  = 0;       /* 看护中的目标节点(0=无看护) */
+static uint32_t imgFetchWatchAt    = 0;       /* 本次 AT+IMG 发出时刻 */
+static uint8_t  imgFetchWatchTries = 0;       /* 已重发次数 */
+
 /* ---------- 轮询调度 ---------- */
 static uint8_t  currentNode   = LORA_POLL_FROM_NODE;   /* 当前处理节点 */
 static uint32_t cmdSentAt     = 0;                     /* 命令发出时间 */
@@ -801,6 +827,8 @@ static bool handleCompleteFrame(uint8_t header)
                 imgFragNo   = im->imgNo;
                 imgFragGot  = 0;
                 imgFragNode = nodeId;
+                /* ⭐ S6-fix-1: 从现在起静默, 等节点 300ms 后发第2包 */
+                imgRxQuietUntil = millis() + IMG_RX_QUIET_MS;
             }
             else if (imgFragNo != im->imgNo || (imgFragGot & 0x01) == 0)
             {
@@ -816,6 +844,9 @@ static bool handleCompleteFrame(uint8_t header)
             {
                 imgFragGot = 0;   /* 收齐即复位, 下一张图从第1包重新起拼 */
                 updateNodeThumb(imgFragNode, imgFragNo, imgFragBuf, LORA_IMG_BYTES);
+                /* ⭐ S6-fix-1: 取图成功, 撤看护, 不再重发 AT+IMG */
+                if (imgFragNode == imgFetchWatchNode)
+                    imgFetchWatchNode = 0;
                 gotData = true;
             }
         }
@@ -1284,10 +1315,24 @@ bool lora_tick(void)
         discoverPingAttempts = 0;
         currentNode      = LORA_POLL_FROM_NODE;
         roundStartAt     = now;          /* 新一轮节流从此刻起算 */
+        /* ⭐ S6-fix-1: 升级期间节点复位, 在途的取图/静默窗全部作废 */
+        imgRxQuietUntil   = 0;
+        imgFetchWatchNode = 0;
+        imgFragGot        = 0;
         if (savedOtaNode != 0)
             forcePingNode = savedOtaNode;   /* OTA 目标节点下次轮询先 PING 复核 */
         DBG_PRINTF("[LoRa] OTA 结束, 轮询状态复位, 从节点%d 重新轮询%s\n",
                    LORA_POLL_FROM_NODE, forcePingNode ? " (OTA目标节点强制先PING)" : "");
+    }
+
+    /* --- 1.55 ⭐ S6-fix-1: 缩略图第2包静默窗 ---
+     * 见 imgRxQuietUntil 定义处注释. 静默期内整体不发射(命令/轮询一起让路),
+     * 只管收字节; 超时判断顺延 700ms, 不影响正确性 */
+    if (imgRxQuietUntil != 0)
+    {
+        if ((int32_t)(now - imgRxQuietUntil) < 0)
+            return gotData;
+        imgRxQuietUntil = 0;
     }
 
     /* --- 1.9 ⭐ v4 车牌子系统: "有牌待取"(CamFlags.bit2) → 入队 AT+PLATE 取牌 ---
@@ -1318,11 +1363,68 @@ bool lora_tick(void)
         NodeData &nd = nodes[i];
         if (nd.imgFetchPending && nd.certSent)
         {
+            /* ⭐ S6-fix-1: 同一时刻只许一张图在传. 上一张仍在看护期(等第2包/
+             * 等重试)时本拍不入队, 交给 1.9c 重发, 免得两张图交错重组 */
+            if (imgFetchWatchNode != 0)
+                break;
             nd.imgFetchPending = false;   /* 消费: 先清, 收齐 0xF2 才算真取到 */
             lora_sendControlNoParam(nd.nodeId, "IMG");
+            /* ⭐ S6-fix-1: 挂看护, 超时由 1.9c 重发 */
+            imgFetchWatchNode  = nd.nodeId;
+            imgFetchWatchAt    = now;
+            imgFetchWatchTries = 0;
             logPhase(LOGPH_CMD);
             DBG_PRINTF("[LoRa] 节点%d 有缩略图待取, 入队 AT+IMG\n", nd.nodeId);
             break;   /* 一拍只入队一条 */
+        }
+    }
+
+    /* --- 1.9c ⭐ S6-fix-1: AT+IMG 看护超时 → 重发 ---
+     * 节点侧的 g_imgFetchPending(bit4) 在收到 AT+IMG 那一刻就无条件清了
+     * (app_tasks.c), 0xF2 又两包盲发无 ACK: 只要第1或第2包丢/被撞, 这张图
+     * 就永久丢失且再也不会重取 —— 现场表现就是 App 上"车牌有了、图没有".
+     * 故网关自己看护: 发 AT+IMG 后 IMG_FETCH_TIMEOUT_MS 内没收到完整 282B
+     * 就重发, 最多 IMG_FETCH_RETRY_MAX 次; 重发从第1包重新起拼(IMG 分支里
+     * idx==1 无条件重启重组), 半拼状态不会污染下一张 */
+    /* ⭐ P1-1: 车已离开 → 这张图没意义了, 直接撤看护, 不进重发.
+     * 车走时节点已把 g_thumbValid 清 0, 重发 AT+IMG 只会被节点忽略(无有效缩略图),
+     * 白等 2×2.5s 还打一条误导性的"取图失败"日志 */
+    if (imgFetchWatchNode != 0)
+    {
+        int ws = findNode(imgFetchWatchNode);
+        if (ws >= 0 && nodes[ws].parkStatus == 0)
+        {
+            imgFragGot = 0;
+            DBG_PRINTF("[LoRa] 节点%d 车已离开, 撤销本次取图\n", (int)imgFetchWatchNode);
+            imgFetchWatchNode = 0;
+        }
+    }
+
+    if (imgFetchWatchNode != 0 &&
+        (uint32_t)(now - imgFetchWatchAt) > IMG_FETCH_TIMEOUT_MS)
+    {
+        if (imgFetchWatchTries < IMG_FETCH_RETRY_MAX)
+        {
+            imgFetchWatchTries++;
+            imgFetchWatchAt = now;
+            /* 先作废半拼状态: 否则上一轮迟到的第2包可能在新一轮第1包之后
+             * 到达, 用同一 imgNo 直接拼成一张半新半旧的图 */
+            imgFragGot = 0;
+            lora_sendControlNoParam(imgFetchWatchNode, "IMG");
+            logPhase(LOGPH_CMD);
+            DBG_PRINTF("[LoRa] 节点%d 缩略图未收齐, 重发 AT+IMG (第%d/%d次)\n",
+                       imgFetchWatchNode, (int)imgFetchWatchTries,
+                       (int)IMG_FETCH_RETRY_MAX);
+        }
+        else
+        {
+            /* 放弃: 清掉半拼状态, 免得残留的 imgFragGot=0x01 配上后来的
+             * 第2包拼出半新半旧的图 (IMG 分支虽按 imgNo 校验, 但同一 imgNo
+             * 重发时第2包仍可能迟到) */
+            imgFragGot = 0;
+            LOG_W("[LoRa] 节点%d 缩略图取图失败(重发%d次仍未收齐), 放弃本次\n",
+                  imgFetchWatchNode, (int)IMG_FETCH_RETRY_MAX);
+            imgFetchWatchNode = 0;
         }
     }
 
@@ -1349,6 +1451,15 @@ bool lora_tick(void)
             char keyBuf[32];
             extractCmdKey(pc->cmd, keyBuf, sizeof(keyBuf));
             noteCmdSent(pc->nodeId, keyBuf);
+        }
+        /* ⭐ S6-fix-1: 取图看护从"实际发出"开始计时, 排队延迟不计入,
+         * 免得队列一堵就误判超时重发, 造成同一张图重复取/重复上报 */
+        if (imgFetchWatchNode != 0 && pc->nodeId == imgFetchWatchNode &&
+            strstr(pc->cmd, "+IMG") != NULL)
+        {
+            imgFetchWatchAt = now;
+            /* 命令发出即静默, 把空口让给节点的 ACK + 两包缩略图 (见定义处) */
+            imgRxQuietUntil = now + IMG_CMD_QUIET_MS;
         }
         return gotData;
     }

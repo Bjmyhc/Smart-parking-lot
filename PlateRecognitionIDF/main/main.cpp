@@ -915,6 +915,14 @@ static uint8_t g_thumb[IMG_W * IMG_H / 8];          // 94*24/8 = 282
 static volatile bool g_thumbValid = false;          // 1=有图可取
 static volatile uint16_t g_thumbNo = 0;             // 每出一张新图 ++, 节点透传给网关丢旧图残包
 
+// S6(L0-1): 这张图是哪一帧产的 —— 与 $PLATE 行的 frameNo 配对.
+//   为什么必须配对: g_thumbValid 一旦置 true 永不清零, 而 imgNo 只在 ROI 成功帧 ++、
+//   g_frame_no 每帧都 ++, 两者本来就不同步. 节点拿着 $PLATE 的 frameNo 来取图时,
+//   若不比对就会出现"把上一帧的图当成这一帧的"张冠李戴.
+//   (g_frame_no 的定义在下方 recognize 区, 这里先声明)
+static int g_frame_no;
+static volatile int g_thumbFrameNo = 0;             // 当前 g_thumb 属于哪一帧
+
 static void thumb_build(const int8_t *cp)
 {
     static uint16_t kw[25];        // σ=6 高斯核, 半径 12, 定点 q16 (和 = 65536)
@@ -980,6 +988,46 @@ static void thumb_build(const int8_t *cp)
     }
     g_thumbValid = true;
     g_thumbNo++;
+    g_thumbFrameNo = g_frame_no;   // S6(L0-1): 记下这张图属于哪一帧, 供 AT+THUMB=<frameNo> 配对
+}
+
+// ===================== S7: ROI 失败兜底产图 (中心"车牌比例"横条) =====================
+// 背景: 原来 roi_locate 失败就 break, 这一帧零图 —— 节点发 AT+THUMB=<帧号> 只收到 ERR,
+//   App 上"车牌=-"且没图, 恰恰是"太近/遮挡/没对着牌"这种最需要人看一眼的情况.
+// 做法: 在整帧中心取一条 3.3:1 的横条(车牌真实本体比例 3.1~3.4), 走与正常路径**完全相同**
+//   的缩放+归一化(dl::image::resize + norm_lut), 再交给 thumb_build.
+//   为什么是中心条带而不是整帧硬缩: 640x480 硬缩到 94x24 是 6.8x/20x 各向异性, 竖直方向
+//   压掉 20 倍什么都看不出; 取中心 194 行后是 6.8x/8.1x, 接近等比, 形状不会糊成一团.
+//   不保证框住车牌(车位偏一侧时会漏), 但能说清"车位中间那块有没有东西、亮不亮、挡没挡".
+// 代价: 0 字节空口 —— 还是 282B / 2 包, 格式/节点/网关/App 全都不动.
+// 注: 这条路径不填 g_crop_u8(IMG 档位3 的 JPEG 预览源), 所以预览里会留着上一帧的图; 仅调试用.
+static void thumb_build_center_strip(uint8_t *fb_buf, int fb_w, int fb_h,
+                                     dl::TensorBase *model_input, int8_t *norm_lut)
+{
+    if (fb_buf == nullptr || model_input == nullptr || norm_lut == nullptr) return;
+    if (fb_w <= 0 || fb_h <= 0) return;
+
+    int ch = (int)((float)fb_w / 3.3f + 0.5f);   // 横条高度: 按车牌比例从画面宽度推
+    if (ch > fb_h) ch = fb_h;
+    if (ch < 8) ch = 8;
+    int cy1 = (fb_h - ch) / 2;
+    if (cy1 < 0) cy1 = 0;
+    int cy2 = cy1 + ch;
+    if (cy2 > fb_h) cy2 = fb_h;
+
+    dl::image::img_t src = {fb_buf, (uint16_t)fb_w, (uint16_t)fb_h,
+                            dl::image::DL_IMAGE_PIX_TYPE_RGB565};
+    dl::image::img_t dst = {model_input->data,
+                            (uint16_t)model_input->shape[2],   // W = 94
+                            (uint16_t)model_input->shape[1],   // H = 24
+                            dl::image::DL_IMAGE_PIX_TYPE_RGB888_QINT8};
+    const uint32_t caps = DL_IMAGE_CAP_RGB565_BIG_ENDIAN | DL_IMAGE_CAP_RGB_SWAP;
+    const std::vector<int> crop_area = {0, cy1, fb_w, cy2};
+    float sx = 0, sy = 0;
+    dl::image::resize(src, dst, dl::image::DL_IMAGE_INTERPOLATE_BILINEAR, caps, norm_lut,
+                      crop_area, &sx, &sy);
+
+    thumb_build((const int8_t *)model_input->data);
 }
 
 static uint8_t *g_tx_rgb = nullptr;              // RGB888 (16 字节对齐), PSRAM
@@ -1300,7 +1348,7 @@ static void img_tx_send_prov(int zoom) {
 // P5.12: 精简日志 —— roi_locate 定位失败时把原因记在这里, 由 recognize_once 合成一行打印
 static const char *g_roi_note = "(未知原因)";
 static bool g_roi_fallback = false;   // P5.46: 本帧是不是靠"兜底档"(面积够大就收)才挑到框
-static int g_frame_no = 0;
+// S6(L0-1): g_frame_no 的定义已上移到 S5 缩略图区(g_thumbFrameNo 需要它)
 
 /** 是否是车牌颜色: 蓝/绿车牌的色相窗口 + 饱和度/亮度下限
  *  (OpenCV 8bit: H 0..179, S/V 0..255)
@@ -2596,8 +2644,12 @@ static bool recognize_once(dl::Model *model,
         const int64_t roi_ms = (esp_timer_get_time() - t_roi) / 1000;
         if (!has_roi) {
             // P5.12: 一行说清"为什么跳过"; 掩码/整帧均值/候选表那些细节按 BOOT 才打
-            ESP_LOGW(TAG, "#%d 跳过推理: %s (定位 %lld ms)", fn, g_roi_note, (long long)roi_ms);
+            // S7: 跳过推理但**不再零图** —— 用中心横条兜底产一张(格式/空口开销都不变),
+            //     这样"没认出来"在 App 上至少有一张点位图可看, 供人判断该不该重拍/挪车.
+            ESP_LOGW(TAG, "#%d 跳过推理: %s (定位 %lld ms) -> 中心横条兜底产图", fn, g_roi_note,
+                     (long long)roi_ms);
             fail_reason = g_roi_note;
+            thumb_build_center_strip(fb->buf, (int)fb->width, (int)fb->height, model_input, norm_lut);
             break;
         }
         // 宽高比对照: 训练裁剪就是"车牌四角摆正图", 真实车牌本体约 3.1~3.4
@@ -3190,8 +3242,16 @@ static void nl_extra_cmd(const char *verb, const char *arg, char *resp, size_t r
     } else if (strcmp(verb, "THUMB") == 0) {
         // S5: 节点取车牌缩略图 —— 把 $IMGD/$IMGB/$IMGE 行推给节点, 这行回复只是"受理"。
         // 注意命令名不叫 AT+IMG: AT+IMG=<0..3> 已被图片档位占用(节点口也发不了它, 见权限闸门)。
+        // S6(L0-1): 支持 AT+THUMB=<frameNo> —— 只在这一帧确实是 g_thumb 的来源时才发图.
+        //   为什么: 未识别帧也要取图后, 节点是"拿到 $PLATE 的 frameNo 立刻来取",
+        //   而 ROI 失败帧不产图、g_thumbValid 又永不清零 → 不比对就会把上一帧的图当成这一帧.
+        //   无参数 = 老行为(取当前图), 保留给手工调试.
+        const int want = (arg && *arg) ? atoi(arg) : -1;
         if (!g_thumbValid) {
             snprintf(resp, resp_sz, "ERR:还没有图 (摄像头还没识别出过车牌)");
+        } else if (want >= 0 && want != g_thumbFrameNo) {
+            snprintf(resp, resp_sz, "ERR:该帧没有图 (frameNo=%d, 当前图 frameNo=%d)",
+                     want, g_thumbFrameNo);
         } else {
             node_link_send_thumb(g_thumb, (int)sizeof(g_thumb), (int)g_thumbNo);
             snprintf(resp, resp_sz, "OK");
@@ -3233,10 +3293,12 @@ static void nl_extra_cmd(const char *verb, const char *arg, char *resp, size_t r
 extern "C" void app_main(void) {
     apply_log_levels();   // P5.76: 第一件事就定档 —— 简单模式(默认)之后 ESP_LOG 一个字都不出
     if (!g_verbose_mode) {
-        plain_out("=== LPRNet on ESP32-S3 —— 固件 P5.80 (简单日志: 只打结果块/未识别原因; 想看详细就发 AT+LOG=1 或长按 BOOT) ===");
+        plain_out("=== LPRNet on ESP32-S3 —— 固件 P5.82 (简单日志: 只打结果块/未识别原因; 想看详细就发 AT+LOG=1 或长按 BOOT) ===");
     }
-    ESP_LOGI(TAG, "=== LPRNet on ESP32-S3 —— 固件 P5.80 ===");
-    ESP_LOGI(TAG, "    构建时间: %s %s —— 开机看到 P5.80 才说明烧进去的是新固件", __DATE__, __TIME__);
+    ESP_LOGI(TAG, "=== LPRNet on ESP32-S3 —— 固件 P5.82 ===");
+    ESP_LOGI(TAG, "    构建时间: %s %s —— 开机看到 P5.82 才说明烧进去的是新固件", __DATE__, __TIME__);
+    ESP_LOGI(TAG, "    P5.82: **没定位到车牌也出图** —— roi_locate 失败时用画面中心 3.3:1 的横条兜底产一张 94x24(与正常路径同一套缩放/归一化/二值化); 空口开销不变(282B/2 包), 节点/网关/App 都不用改; 从此 AT+THUMB=<帧号> 几乎不会再回 ERR:该帧没有图");
+    ESP_LOGI(TAG, "    P5.81: **AT+THUMB 带帧号** —— S6: 未识别帧也要取图后, 节点发 AT+THUMB=<帧号> 指明要哪一帧; 帧号与当前图不符回 ERR:该帧没有图(否则会把上一帧的旧图张冠李戴); 不带参数=取当前图(手工调试); 新增 AT+THUMB? 说明");
     ESP_LOGI(TAG, "    P5.76: **日志两档** —— 简单(默认)只打一个结果块(车牌号码/颜色/置信度/帧号/位置); 详细(AT+LOG=1 或长按 BOOT)才有 ROI 行/候选表/掩码/警告");
     ESP_LOGI(TAG, "    P5.77: **同一帧不再打两遍** —— 每帧自动上行的 $PLATE 只走真节点口, 电脑口只看结果块(AT+TEST/AT+PUSH 例外, 那是人主动要看线上格式); **没拍出来也给原因** —— 被 AT+RUN 点名的那一帧没出结果时补一个\"未识别\"块(车牌号码 - + 一行原因 + 帧号), 连续模式不打");
     ESP_LOGI(TAG, "    P5.78: **AT+INFO 一眼看全** —— 第1行 +INFO 是版本/时长/统计, 第2行 +CFG 把每条带取值的命令当前值列一遍: LOG/IMG/TRIG/PAD/PLATE");
@@ -3370,7 +3432,7 @@ extern "C" void app_main(void) {
     //   P5.80: 节点口已经是 UART1 (TX=GPIO47 / RX=GPIO48, 丝印 SDA/SCL 那两个脚, 115200 8N1)。
     //   现在手上没有节点板: 那根线上发出去的内容靠电脑口的 [镜像] 行核对; 电脑要发命令先 AT+CTRL=PC 抢控制权。
     //   接节点时: 摄像头 TX(47) -> 节点 USART3 RX(PB11), 摄像头 RX(48) -> 节点 USART3 TX(PB10), 共地。
-    node_link_init("P5.80");
+    node_link_init("P5.82");
     node_link_set_extra_handler(nl_extra_cmd);
     img_mode_apply();   // P5.74: 上电生效档 = 默认档 0(关); 电脑口随时 AT+IMG=<档> 就能开图
 

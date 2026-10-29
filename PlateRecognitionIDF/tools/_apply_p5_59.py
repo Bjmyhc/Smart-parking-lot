@@ -3,8 +3,31 @@
    依据: 2026-10-01 19:03 日志 34 帧 京Q06666 影子对照 A/B/C:
      现状 整串47%/省字59%; 两端收 47%/76%; 只收左 50%/76%
    两端收 在 #642/#645 会把末尾字切掉(多认一个 6) -> 淘汰; 只收左 只输一帧(#697)。"""
+# --- 可移植路径自举 (Tool/relocate_paths.py 注入, 勿手改) -------------------
+import os as _os
+
+_HERE_ = _os.path.dirname(_os.path.abspath(__file__))
+
+
+def _find_repo_root_(start):
+    """从 start 逐级上溯, 找到同时含 Tool/ 与 Node/ 的目录 = 仓库根。"""
+    cur = start
+    while True:
+        if _os.path.isdir(_os.path.join(cur, 'Tool')) and \
+           _os.path.isdir(_os.path.join(cur, 'Node')):
+            return cur
+        parent = _os.path.dirname(cur)
+        if parent == cur:
+            return _os.path.dirname(start)
+        cur = parent
+
+
+_REPO_ROOT_ = _find_repo_root_(_HERE_)
+_AI_ROOT_ = _os.path.dirname(_REPO_ROOT_)
+# --- 自举结束 ---------------------------------------------------------------
+
 import io
-SRC = r"G:\All_Project\AI_Project\Smart-Paring-Iot\PlateRecognitionIDF\main\main.cpp"
+SRC = _REPO_ROOT_ + r'\PlateRecognitionIDF\main\main.cpp'
 PATCHES = []
 def P(old, new, tag): PATCHES.append((old, new, tag))
 

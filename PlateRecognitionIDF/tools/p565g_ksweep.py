@@ -1,11 +1,34 @@
 # -*- coding: utf-8 -*-
 """p565g: 合成预训练 + k 张/省真实微调 -> 留出真实集准确率. 回答"每省要拍几张"."""
+# --- 可移植路径自举 (Tool/relocate_paths.py 注入, 勿手改) -------------------
+import os as _os
+
+_HERE_ = _os.path.dirname(_os.path.abspath(__file__))
+
+
+def _find_repo_root_(start):
+    """从 start 逐级上溯, 找到同时含 Tool/ 与 Node/ 的目录 = 仓库根。"""
+    cur = start
+    while True:
+        if _os.path.isdir(_os.path.join(cur, 'Tool')) and \
+           _os.path.isdir(_os.path.join(cur, 'Node')):
+            return cur
+        parent = _os.path.dirname(cur)
+        if parent == cur:
+            return _os.path.dirname(start)
+        cur = parent
+
+
+_REPO_ROOT_ = _find_repo_root_(_HERE_)
+_AI_ROOT_ = _os.path.dirname(_REPO_ROOT_)
+# --- 自举结束 ---------------------------------------------------------------
+
 import os, sys, glob, random
 import numpy as np, cv2, torch, torch.nn as nn, torch.nn.functional as F
-sys.path.insert(0, r"G:\All_Project\AI_Project\Smart-Paring-Iot\PlateRecognitionIDF\tools")
+sys.path.insert(0, _REPO_ROOT_ + r'\PlateRecognitionIDF\tools')
 import importlib.util
-spec = importlib.util.spec_from_file_location("g", r"G:\All_Project\AI_Project\Smart-Paring-Iot\PlateRecognitionIDF\tools\p565f_train2.py")
-ROOT = r"G:\All_Project\AI_Project\Smart-Paring-Iot\PlateRecognitionIDF"
+spec = importlib.util.spec_from_file_location("g", _REPO_ROOT_ + r'\PlateRecognitionIDF\tools\p565f_train2.py')
+ROOT = _REPO_ROOT_ + r'\PlateRecognitionIDF'
 OUT = os.path.join(ROOT, "tools", "out", "p565")
 # 复用 p565f 的渲染/增广/模型 (它 import 时会跑训练, 所以这里手工把需要的函数抄进来: 用 exec 只取定义)
 src = open(os.path.join(ROOT, "tools", "p565f_train2.py"), encoding="utf-8").read()

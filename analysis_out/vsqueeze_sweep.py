@@ -1,13 +1,36 @@
 # -*- coding: utf-8 -*-
 """竖直方向扫描: 框"偏高"(比例 2.5 vs 真牌 3.14) => 字符被竖直压扁。
    模拟"把上下多出来的边收掉"(取中间若干行再拉伸回 24 行)对准确率的影响。"""
+# --- 可移植路径自举 (Tool/relocate_paths.py 注入, 勿手改) -------------------
+import os as _os
+
+_HERE_ = _os.path.dirname(_os.path.abspath(__file__))
+
+
+def _find_repo_root_(start):
+    """从 start 逐级上溯, 找到同时含 Tool/ 与 Node/ 的目录 = 仓库根。"""
+    cur = start
+    while True:
+        if _os.path.isdir(_os.path.join(cur, 'Tool')) and \
+           _os.path.isdir(_os.path.join(cur, 'Node')):
+            return cur
+        parent = _os.path.dirname(cur)
+        if parent == cur:
+            return _os.path.dirname(start)
+        cur = parent
+
+
+_REPO_ROOT_ = _find_repo_root_(_HERE_)
+_AI_ROOT_ = _os.path.dirname(_REPO_ROOT_)
+# --- 自举结束 ---------------------------------------------------------------
+
 import os, sys, glob
 import numpy as np, cv2, torch
-LPR = r'G:\All_Project\AI_Project\LPRNet_Pytorch'
+LPR = _AI_ROOT_ + r'\LPRNet_Pytorch'
 sys.path.insert(0, LPR); os.chdir(LPR)
 from data.load_data import CHARS
 from model.LPRNet import build_lprnet
-ROOT = r'G:\All_Project\AI_Project\BY串口助手\dist\saved\images'
+ROOT = _AI_ROOT_ + r'\BY串口助手\dist\saved\images'
 
 def dec(p_, chars):
     blank = len(chars) - 1

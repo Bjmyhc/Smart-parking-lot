@@ -1,8 +1,31 @@
 # -*- coding: utf-8 -*-
 """P5.51: 自检里加"直写 int8"(复现实时链路) + 输入缓冲完整性校验。"""
+# --- 可移植路径自举 (Tool/relocate_paths.py 注入, 勿手改) -------------------
+import os as _os
+
+_HERE_ = _os.path.dirname(_os.path.abspath(__file__))
+
+
+def _find_repo_root_(start):
+    """从 start 逐级上溯, 找到同时含 Tool/ 与 Node/ 的目录 = 仓库根。"""
+    cur = start
+    while True:
+        if _os.path.isdir(_os.path.join(cur, 'Tool')) and \
+           _os.path.isdir(_os.path.join(cur, 'Node')):
+            return cur
+        parent = _os.path.dirname(cur)
+        if parent == cur:
+            return _os.path.dirname(start)
+        cur = parent
+
+
+_REPO_ROOT_ = _find_repo_root_(_HERE_)
+_AI_ROOT_ = _os.path.dirname(_REPO_ROOT_)
+# --- 自举结束 ---------------------------------------------------------------
+
 import io, os
 
-MAIN = r'G:\All_Project\AI_Project\Smart-Paring-Iot\PlateRecognitionIDF\main\main.cpp'
+MAIN = _REPO_ROOT_ + r'\PlateRecognitionIDF\main\main.cpp'
 
 OLD = '''/** P5.50 自检探针: 让一张内嵌的 float32 裸张量走完整条"assign 量化 -> run -> CTC 解码",
  *  用来分辨到底是「板端推理链路」还是「取样/发图链路」把结果读坏的。 */

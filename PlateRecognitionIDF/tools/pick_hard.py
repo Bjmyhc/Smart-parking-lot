@@ -22,7 +22,7 @@
 
 例
 --
-  python -X utf8 pick_hard.py "G:/All_Project/AI_Project/BY串口助手/dist/saved/images/京Q-06666" 京Q06666
+  python -X utf8 pick_hard.py "..\\..\\BY串口助手\\dist\\saved\\images\\京Q-06666" 京Q06666
 
 产物
 ----
@@ -37,6 +37,28 @@
   * 连续帧 (200 ms 一张) 几乎一样, 默认按"和上一张保留帧的平均差"去重,
     否则训练/验证会被这些双胞胎帧灌水, 验证正确率虚高. --dedup-thresh 0 可关掉.
 """
+# --- 可移植路径自举 (Tool/relocate_paths.py 注入, 勿手改) -------------------
+import os as _os
+
+_HERE_ = _os.path.dirname(_os.path.abspath(__file__))
+
+
+def _find_repo_root_(start):
+    """从 start 逐级上溯, 找到同时含 Tool/ 与 Node/ 的目录 = 仓库根。"""
+    cur = start
+    while True:
+        if _os.path.isdir(_os.path.join(cur, 'Tool')) and \
+           _os.path.isdir(_os.path.join(cur, 'Node')):
+            return cur
+        parent = _os.path.dirname(cur)
+        if parent == cur:
+            return _os.path.dirname(start)
+        cur = parent
+
+
+_REPO_ROOT_ = _find_repo_root_(_HERE_)
+_AI_ROOT_ = _os.path.dirname(_REPO_ROOT_)
+# --- 自举结束 ---------------------------------------------------------------
 
 import argparse
 import glob
@@ -49,7 +71,7 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 if _HERE not in sys.path:
     sys.path.insert(0, _HERE)
 
-DEFAULT_LPRNET_DIR = r'G:\All_Project\AI_Project\LPRNet_Pytorch'
+DEFAULT_LPRNET_DIR = _AI_ROOT_ + r'\LPRNet_Pytorch'
 IMG_W, IMG_H = 94, 24
 
 

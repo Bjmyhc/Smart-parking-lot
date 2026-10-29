@@ -192,13 +192,17 @@ def query_plate(node_name: str) -> str:
         bits.append(f"摄像头={'在线' if cam in (True, 1, 'true', '1') else '离线'}")
     thumb = props.get("PlateThumb")
     bits.append(f"缩略图={'已上报(可用 get_plate_image 查看)' if thumb else '未上报'}")
+    # ⭐ S6: 未识别('-')但已上报图像 = 待人工审核 —— 图就是核对依据, 主动提示
+    if plate in (None, "", "-") and thumb:
+        bits.append("提示=模型未认出, 可发 get_plate_image 查看原图供人工核对")
     return f"节点 {node_name}: 车牌={plate_text}, " + ", ".join(bits)
 
 
 @mcp.tool()
 def get_plate_image(node_name: str) -> str:
     """返回指定车位最近一次车牌缩略图的 ASCII 点阵字符画(94×24), 供查看/核对拍摄内容.
-    与 PlateNumber 是同一次识别的产物; 无图(未识别出牌/车已离场)时会提示未上报"""
+    与 PlateNumber 是同一次识别的产物; 模型没认出车牌('-' 或空)时同样会回传图像,
+    此时点阵图就是人工核对/录入的唯一依据; 只有该帧根本没产图时才提示未上报"""
     cfg = load_config()
     client = get_client(cfg, node_name)
     try:
@@ -213,13 +217,13 @@ def get_plate_image(node_name: str) -> str:
         return f"节点 {node_name}: 在线但属性查询失败({exc})"
     thumb = props.get("PlateThumb")
     if not thumb:
-        return f"节点 {node_name}: 车牌图像未上报(未识别出车牌或车已离场)"
+        return f"节点 {node_name}: 车牌图像未上报(该帧没有产图, 或车已离场)"
     try:
         art = render_thumb_ascii(thumb)
     except Exception as exc:
         return f"节点 {node_name}: 车牌图像解码失败({exc})"
     plate = props.get("PlateNumber")
-    plate_text = "未识别出(拍到但没认出)" if plate in (None, "", "-") else str(plate)
+    plate_text = "未识别出(拍到但没认出, 请对照点阵图人工核对)" if plate in (None, "", "-") else str(plate)
     return (f"节点 {node_name}: 车牌={plate_text} · 点阵图如下"
             f"(█=白字笔画, ·=黑底, 共94列×24行):\n{art}")
 

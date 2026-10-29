@@ -1,8 +1,31 @@
 # -*- coding: utf-8 -*-
 """p565c: 汇总真实省字样本 (三个来源) -> out/p565/real_all/<省>/<n>.png, 32x64."""
+# --- 可移植路径自举 (Tool/relocate_paths.py 注入, 勿手改) -------------------
+import os as _os
+
+_HERE_ = _os.path.dirname(_os.path.abspath(__file__))
+
+
+def _find_repo_root_(start):
+    """从 start 逐级上溯, 找到同时含 Tool/ 与 Node/ 的目录 = 仓库根。"""
+    cur = start
+    while True:
+        if _os.path.isdir(_os.path.join(cur, 'Tool')) and \
+           _os.path.isdir(_os.path.join(cur, 'Node')):
+            return cur
+        parent = _os.path.dirname(cur)
+        if parent == cur:
+            return _os.path.dirname(start)
+        cur = parent
+
+
+_REPO_ROOT_ = _find_repo_root_(_HERE_)
+_AI_ROOT_ = _os.path.dirname(_REPO_ROOT_)
+# --- 自举结束 ---------------------------------------------------------------
+
 import os, sys, glob, shutil
 import numpy as np, cv2
-ROOT = r"G:\All_Project\AI_Project\Smart-Paring-Iot\PlateRecognitionIDF"
+ROOT = _REPO_ROOT_ + r'\PlateRecognitionIDF'
 sys.path.insert(0, os.path.join(ROOT, "tools"))
 import locator_replay as R
 OUT = os.path.join(ROOT, "tools", "out", "p565", "real_all")
@@ -34,7 +57,7 @@ for lab, sub in [("jing","京Q06666"), ("yue","粤T666FP")]:
         im = load(p)
         if im is not None: save(lab, frac_crop(im), n[lab]); n[lab] += 1
 # 2) Doc 样例
-d = r"G:\All_Project\AI_Project\Smart-Paring-Iot\Doc\硬件资料\车牌测试样例"
+d = _REPO_ROOT_ + r'\Doc\硬件资料\车牌测试样例'
 for lab, f in [("jing","京Q06666.png"), ("yue","粤T666FP.jpg"), ("yu","豫A8F8Q8.jpg"), ("yu","豫FSQ8I8.jpg")]:
     im = load(os.path.join(d, f))
     if im is not None: save(lab, frac_crop(im), n[lab]); n[lab] += 1
@@ -46,7 +69,7 @@ a.ratio_lo=R.RATIO_LO; a.ratio_hi=R.RATIO_HI; a.fit_min_fill=R.FIT_MIN_FILL
 a.max_area_pct=0.0; a.no_fallback=False; a.no_edge_skip=False; a.no_image=True
 a.keep_green_box=False; a.path=""; a.out_dir=None; a.csv=None; a.sweep_s=None; a.v_min=120.0
 R.V_MIN_CUR=120.0
-B = r"G:\All_Project\AI_Project\BY串口助手\dist\saved\images"
+B = _AI_ROOT_ + r'\BY串口助手\dist\saved\images'
 for folder, lab in [("京Q06666_难","jing"), ("豫FSQ818_难","yu"), ("豫A8F8Q8_难","yu")]:
     for p in sorted(glob.glob(os.path.join(B, folder, "*"))):
         im = load(p)

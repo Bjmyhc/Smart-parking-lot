@@ -1,9 +1,32 @@
 # -*- coding: utf-8 -*-
 """Does the calibration algorithm explain the board's collapse?"""
+# --- 可移植路径自举 (Tool/relocate_paths.py 注入, 勿手改) -------------------
+import os as _os
+
+_HERE_ = _os.path.dirname(_os.path.abspath(__file__))
+
+
+def _find_repo_root_(start):
+    """从 start 逐级上溯, 找到同时含 Tool/ 与 Node/ 的目录 = 仓库根。"""
+    cur = start
+    while True:
+        if _os.path.isdir(_os.path.join(cur, 'Tool')) and \
+           _os.path.isdir(_os.path.join(cur, 'Node')):
+            return cur
+        parent = _os.path.dirname(cur)
+        if parent == cur:
+            return _os.path.dirname(start)
+        cur = parent
+
+
+_REPO_ROOT_ = _find_repo_root_(_HERE_)
+_AI_ROOT_ = _os.path.dirname(_REPO_ROOT_)
+# --- 自举结束 ---------------------------------------------------------------
+
 import os, sys, glob
 import numpy as np
 import torch
-sys.path.insert(0, r'G:\All_Project\AI_Project\Smart-Paring-Iot\PlateRecognitionIDF\tools')
+sys.path.insert(0, _REPO_ROOT_ + r'\PlateRecognitionIDF\tools')
 import quant_espdl_s3 as Q
 sys.path.insert(0, Q.DEFAULT_LPRNET_DIR)
 from data.load_data import CHARS
@@ -12,7 +35,7 @@ from esp_ppq import QuantizationSettingFactory
 from esp_ppq.api import espdl_quantize_onnx
 from esp_ppq.executor import TorchExecutor
 
-CROP_DIR = r'G:\All_Project\AI_Project\BY串口助手\dist\saved\images'
+CROP_DIR = _AI_ROOT_ + r'\BY串口助手\dist\saved\images'
 ONNX = os.path.join(Q.__file__).replace('quant_espdl_s3.py', 'out') + r'\lprnet_s3.onnx'
 FIELD = CROP_DIR
 TEST = os.path.join(Q.DEFAULT_LPRNET_DIR, 'data', 'test')

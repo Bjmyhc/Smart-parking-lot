@@ -1,9 +1,32 @@
 # -*- coding: utf-8 -*-
 """拿 175 张真实 94x24 模型输入块, 独立验证"增强模型输入"到底帮忙还是帮倒忙。"""
+# --- 可移植路径自举 (Tool/relocate_paths.py 注入, 勿手改) -------------------
+import os as _os
+
+_HERE_ = _os.path.dirname(_os.path.abspath(__file__))
+
+
+def _find_repo_root_(start):
+    """从 start 逐级上溯, 找到同时含 Tool/ 与 Node/ 的目录 = 仓库根。"""
+    cur = start
+    while True:
+        if _os.path.isdir(_os.path.join(cur, 'Tool')) and \
+           _os.path.isdir(_os.path.join(cur, 'Node')):
+            return cur
+        parent = _os.path.dirname(cur)
+        if parent == cur:
+            return _os.path.dirname(start)
+        cur = parent
+
+
+_REPO_ROOT_ = _find_repo_root_(_HERE_)
+_AI_ROOT_ = _os.path.dirname(_REPO_ROOT_)
+# --- 自举结束 ---------------------------------------------------------------
+
 import os, sys, glob
 import numpy as np, cv2, torch
-ROOT = r"G:\All_Project\AI_Project\Smart-Paring-Iot\PlateRecognitionIDF"
-LPRNET = r"G:\All_Project\AI_Project\LPRNet_Pytorch"
+ROOT = _REPO_ROOT_ + r'\PlateRecognitionIDF'
+LPRNET = _AI_ROOT_ + r'\LPRNet_Pytorch'
 sys.path.insert(0, os.path.join(ROOT, "tools")); sys.path.insert(0, LPRNET)
 import locator_text_row as T
 from data.load_data import CHARS
@@ -27,7 +50,7 @@ def infer(img):
     im = (im - 127.5) * 0.0078125
     return dec(net(torch.from_numpy(im.transpose(2,0,1)[None])).numpy()[0])
 
-BASE = r"G:\All_Project\AI_Project\BY串口助手\dist\saved\images"
+BASE = _AI_ROOT_ + r'\BY串口助手\dist\saved\images'
 items = []
 for d, gt in (("京Q-06666", "京Q06666"), ("粤T-666FP", "粤T666FP"),
               ("豫A-12345", "豫A12345"), ("豫J-7Z921", "豫J7Z921")):

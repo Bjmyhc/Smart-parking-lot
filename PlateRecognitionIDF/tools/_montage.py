@@ -1,8 +1,31 @@
+# --- 可移植路径自举 (Tool/relocate_paths.py 注入, 勿手改) -------------------
+import os as _os
+
+_HERE_ = _os.path.dirname(_os.path.abspath(__file__))
+
+
+def _find_repo_root_(start):
+    """从 start 逐级上溯, 找到同时含 Tool/ 与 Node/ 的目录 = 仓库根。"""
+    cur = start
+    while True:
+        if _os.path.isdir(_os.path.join(cur, 'Tool')) and \
+           _os.path.isdir(_os.path.join(cur, 'Node')):
+            return cur
+        parent = _os.path.dirname(cur)
+        if parent == cur:
+            return _os.path.dirname(start)
+        cur = parent
+
+
+_REPO_ROOT_ = _find_repo_root_(_HERE_)
+_AI_ROOT_ = _os.path.dirname(_REPO_ROOT_)
+# --- 自举结束 ---------------------------------------------------------------
+
 # -*- coding: utf-8 -*-
 import os, glob
 from PIL import Image, ImageDraw, ImageFont
-D = r'G:\All_Project\AI_Project\BY串口助手\dist\saved\images'
-OUT = r'G:\All_Project\AI_Project\Smart-Paring-Iot\PlateRecognitionIDF\tools\out\board_crops_with_output.png'
+D = _AI_ROOT_ + r'\BY串口助手\dist\saved\images'
+OUT = _REPO_ROOT_ + r'\PlateRecognitionIDF\tools\out\board_crops_with_output.png'
 files = sorted(glob.glob(os.path.join(D, 'IMG_20261001_1740*.jpg')))
 labels = [('#96', '京Q粤'), ('#97', '京粤Q粤浙粤'), ('#98', '粤京粤'), ('#99', '京Q粤'),
           ('#100', '京粤'), ('#101', '京粤粤粤'), ('#102', '京Q粤粤'), ('#103', '浙京Q粤粤粤'),

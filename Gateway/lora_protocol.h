@@ -15,7 +15,14 @@
 /* 协议常量/结构体/CRC16 单一事实源
  * ⭐ include 约定: 尖括号 + -I 项目根 (见 Doc/通信架构重构方案.md 编译环境):
  *   - Arduino IDE: esp8266 核心 platform.local.txt 注入 build.extra_flags
- *   - arduino-cli : Tool/build_gateway.ps1 一键脚本自动注入 */
+ *   - arduino-cli : Tool/build_gateway.ps1 一键脚本自动注入
+ *
+ * ⚠ 不要改成 "../shared/lora_protocol.h": Arduino 构建会把整个 sketch 复制到
+ *   build/sketch/ 再编译(实测 arduino-cli 1.5.1), 副本里的 ".." 指向 build/,
+ *   ../shared 必然找不到。相对路径只在 in-place 编译(如 ESP-IDF)才有效。
+ * ⚠ platform.local.txt 里写的是绝对路径, 项目目录搬家后必须同步修改, 否则
+ *   IDE 编译报 'shared/lora_protocol.h: No such file' (2026-10-28 已踩过一次:
+ *   G:\All_Project\... → D:\Project\...)。 */
 #include <shared/lora_protocol.h>
 
 #ifdef __cplusplus

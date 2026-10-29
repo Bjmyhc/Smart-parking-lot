@@ -14,7 +14,7 @@ import '../../core/models/spot_model.dart';
 /// 位布局(与摄像头产图一致): 行优先、每行 94 bit 不断行、字节内高位在前,
 /// 即第 i 个像素 = bytes[i >> 3] 的第 (7 - (i & 7)) 位.
 /// base64 解码失败或长度不是 282 字节时渲染空(sized box), 绝不抛错.
-class PlateThumbView extends StatelessWidget {
+class PlateThumbView extends StatefulWidget {
   /// base64 编码的位图字符串 (PlateThumb 属性值)
   final String base64Data;
 
@@ -32,10 +32,38 @@ class PlateThumbView extends StatelessWidget {
     this.pixelSize = 3,
   });
 
-  Uint8List? get _bytes {
+  @override
+  State<PlateThumbView> createState() => _PlateThumbViewState();
+}
+
+/// ⭐ 解码结果按 base64 字符串缓存。
+///
+/// 列表/详情页每次轮询(约 5s)都会重建整棵子树: 若在 build 里 base64Decode
+/// 376 个字符, 每次重建都会新分配一个 Uint8List, 既浪费又会让 CustomPaint
+/// 认为"图变了"而逐像素重绘(94×24 里几百个白点 = 几百次 drawRect)。
+/// 缓存后只有图真的换了才重新解码、重新绘制。
+class _PlateThumbViewState extends State<PlateThumbView> {
+  Uint8List? _bytes;
+
+  @override
+  void initState() {
+    super.initState();
+    _bytes = _decode(widget.base64Data);
+  }
+
+  @override
+  void didUpdateWidget(covariant PlateThumbView oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.base64Data != widget.base64Data) {
+      _bytes = _decode(widget.base64Data);
+    }
+  }
+
+  /// 解码失败或长度不是 282 字节 → null(渲染空, 绝不抛错)
+  static Uint8List? _decode(String data) {
     try {
-      final b = base64Decode(base64Data);
-      return b.length == imgBytes ? b : null;
+      final b = base64Decode(data);
+      return b.length == PlateThumbView.imgBytes ? b : null;
     } catch (_) {
       return null;
     }
@@ -53,8 +81,14 @@ class PlateThumbView extends StatelessWidget {
         border: Border.all(color: Colors.black26),
       ),
       child: CustomPaint(
-        size: Size(imgWidth * pixelSize, imgHeight * pixelSize),
-        painter: _PlateThumbPainter(bytes: bytes, pixelSize: pixelSize),
+        size: Size(
+          PlateThumbView.imgWidth * widget.pixelSize,
+          PlateThumbView.imgHeight * widget.pixelSize,
+        ),
+        painter: _PlateThumbPainter(
+          bytes: bytes,
+          pixelSize: widget.pixelSize,
+        ),
       ),
     );
   }
@@ -88,7 +122,7 @@ class _PlateThumbPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(_PlateThumbPainter old) =>
-      old.bytes != bytes || old.pixelSize != pixelSize;
+      !identical(old.bytes, bytes) || old.pixelSize != pixelSize;
 }
 
 const Color _kThumbDialogPrimary = Color(0xFF0052D4);

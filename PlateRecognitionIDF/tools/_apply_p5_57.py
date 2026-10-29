@@ -3,9 +3,32 @@
    拆: P5.51~P5.55 的**每帧**诊断 (重放/探针 2 次多余推理 + 每帧强制发裁块图 + 输入校验和打印)
    加: 「长边收边」影子对照 —— 每帧额外裁两块 (B 两端收到蓝带 / C 只收左端) 各跑一次模型, 只打日志
 """
+# --- 可移植路径自举 (Tool/relocate_paths.py 注入, 勿手改) -------------------
+import os as _os
+
+_HERE_ = _os.path.dirname(_os.path.abspath(__file__))
+
+
+def _find_repo_root_(start):
+    """从 start 逐级上溯, 找到同时含 Tool/ 与 Node/ 的目录 = 仓库根。"""
+    cur = start
+    while True:
+        if _os.path.isdir(_os.path.join(cur, 'Tool')) and \
+           _os.path.isdir(_os.path.join(cur, 'Node')):
+            return cur
+        parent = _os.path.dirname(cur)
+        if parent == cur:
+            return _os.path.dirname(start)
+        cur = parent
+
+
+_REPO_ROOT_ = _find_repo_root_(_HERE_)
+_AI_ROOT_ = _os.path.dirname(_REPO_ROOT_)
+# --- 自举结束 ---------------------------------------------------------------
+
 import io
 
-SRC = r"G:\All_Project\AI_Project\Smart-Paring-Iot\PlateRecognitionIDF\main\main.cpp"
+SRC = _REPO_ROOT_ + r'\PlateRecognitionIDF\main\main.cpp'
 PATCHES = []
 def P(old, new, tag): PATCHES.append((old, new, tag))
 

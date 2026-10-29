@@ -8,8 +8,31 @@
 
 用法 (cwd 任意):
     python export_onnx_s3.py
-    python export_onnx_s3.py --lprnet-dir G:\\All_Project\\AI_Project\\LPRNet_Pytorch
+    python export_onnx_s3.py --lprnet-dir ..\\..\\..\\LPRNet_Pytorch
+    (--lprnet-dir 默认值 = 本仓库上一级目录下的 LPRNet_Pytorch, 仓库搬家不用改)
 """
+# --- 可移植路径自举 (Tool/relocate_paths.py 注入, 勿手改) -------------------
+import os as _os
+
+_HERE_ = _os.path.dirname(_os.path.abspath(__file__))
+
+
+def _find_repo_root_(start):
+    """从 start 逐级上溯, 找到同时含 Tool/ 与 Node/ 的目录 = 仓库根。"""
+    cur = start
+    while True:
+        if _os.path.isdir(_os.path.join(cur, 'Tool')) and \
+           _os.path.isdir(_os.path.join(cur, 'Node')):
+            return cur
+        parent = _os.path.dirname(cur)
+        if parent == cur:
+            return _os.path.dirname(start)
+        cur = parent
+
+
+_REPO_ROOT_ = _find_repo_root_(_HERE_)
+_AI_ROOT_ = _os.path.dirname(_REPO_ROOT_)
+# --- 自举结束 ---------------------------------------------------------------
 
 import argparse
 import collections
@@ -20,7 +43,7 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 if _HERE not in sys.path:
     sys.path.insert(0, _HERE)
 
-DEFAULT_LPRNET_DIR = r'G:\All_Project\AI_Project\LPRNet_Pytorch'
+DEFAULT_LPRNET_DIR = _AI_ROOT_ + r'\LPRNet_Pytorch'
 
 
 def parse_args():

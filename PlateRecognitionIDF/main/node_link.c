@@ -283,7 +283,8 @@ static void nl_help(nl_src_t src)
     nl_out_to(src, "   AT+TRIG=<0|1>       1=只听 AT+RUN(默认), 0=连续自动识别");
     nl_out_to(src, "   AT+LOG=<0|1>         日志档位: 1=详细, 0=简单(默认)");
     nl_out_to(src, "   AT+IMG=<0..3>       串口图片输出档位");
-    nl_out_to(src, "   AT+THUMB            S5: 取车牌缩略图 (282B 二值图, 按 $IMGD/$IMGB/$IMGE 行推给节点)");
+    nl_out_to(src, "   AT+THUMB[=<帧号>]   S5: 取车牌缩略图 (282B 二值图, 按 $IMGD/$IMGB/$IMGE 行推给节点)");
+    nl_out_to(src, "                       带帧号=只取那一帧的图(未识别也取, 帧号不符回 ERR); 不带=取当前图");
     nl_out_to(src, "   AT+PAD=<0..3>       取样几何档");
     nl_out_to(src, "-----");
     nl_out_to(src, "   带 \"=\" 是设置(成功回 OK, 失败回 ERR:<原因>); 不带 \"=\" 是查询(只回 +XXX:<当前值>)");
@@ -337,6 +338,12 @@ static void nl_help_cmd(nl_src_t src, const char *verb)
         nl_out_to(src, "   3 = 模型输入块 94x24");
         nl_out_to(src, "   权限: 只有电脑口能改这个档(节点口发了没用); 正常/调试模式都一样能改");
         nl_out_to(src, "   设置 AT+IMG=0..3 回 OK;  查询 AT+IMG 回 +IMG:<档位>");
+    } else if (strcmp(verb, "THUMB") == 0) {
+        nl_out_to(src, "+THUMB?:取车牌缩略图 —— 94x24 二值图 282B, 按 $IMGD/$IMGB/$IMGE 三行推给节点");
+        nl_out_to(src, "   不带参数 = 取当前那张图 (手工调试用)");
+        nl_out_to(src, "   带帧号 AT+THUMB=<帧号> = 只取那一帧的图; 帧号不符回 ERR:该帧没有图");
+        nl_out_to(src, "   为什么要帧号: 图每帧都产(未识别帧也有), 但 imgNo 只在 ROI 成功帧 ++, 不比对会张冠李戴");
+        nl_out_to(src, "   不占 AT+IMG=0..3 档位; 未识别('-')的帧同样有图, 供人工审核");
     } else if (strcmp(verb, "PAD") == 0) {
         nl_out_to(src, "+PAD?:取样几何档(长边左右留白)");
         nl_out_to(src, "   0 = 左净0% / 右净4%");

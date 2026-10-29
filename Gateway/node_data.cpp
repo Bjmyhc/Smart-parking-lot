@@ -201,6 +201,9 @@ void updateNodeFromRaw(uint8_t nodeId, const LoraNodeData_t *raw)
 
     NodeData &nd = nodes[slot];
 
+    /* ⭐ P1-1: 记下上一帧车位状态, 用于检测"车离开"边沿 (见下方 ParkStatus 非 0 → 0) */
+    const uint8_t oldPark = nd.parkStatus;
+
     /* ⭐ v2 双保险: 即便 lora_handler.cpp handleCompleteFrame 已校验过 CRC + 字段,
      * 这里再做一次截断兜底, 防止任何路径漏判导致垃圾值上报到 OneNET 平台.
      * 历史乱码 bug 根因之一: 数据帧错位解析后 ParkStatus=47/Ultrasonic=6530 等
@@ -247,6 +250,27 @@ void updateNodeFromRaw(uint8_t nodeId, const LoraNodeData_t *raw)
     /* ⭐ S5: CamFlags.bit4 "有缩略图待取" → 置旗子, 由 lora_tick 消费并入队 AT+IMG */
     if (raw->CamFlags & 0x10)
         nd.imgFetchPending = true;
+
+    /* ⭐ P1-1: 车位由"有车/僵尸"转"空闲" → 上一辆车的缩略图必须作废, 平台上的也要清掉.
+     * 节点侧在 ParkStatus→PARK_IDLE 时已清 g_thumbValid (app_plate.c), 但那是节点
+     * 本地动作: 网关不知道, 平台上的 PlateThumb 就一直停在上一辆车 —— App 的时间门控
+     * 比的是"牌时间 vs 图时间", 两者同属上一辆车时差值为 0, 判不出来; 于是车位空了,
+     * 详情页还在展示上一辆车的图(还会被当成"待人工审核"引导录入).
+     * 数据帧每轮轮询都上报(比事件帧 0xF1 可靠得多), 故用 ParkStatus 边沿兜底:
+     *   ① 本地作废 thumbValid —— 同时阻止迟到的 0xF2 残包把它填回来(见 updateNodeThumb)
+     *   ② 置 thumbNeedPost —— subPostBatch 见 "valid=0 且待上报" 会主动上报
+     *      PlateThumb="" 把平台旧图清掉
+     *   ③ 撤掉"待取图" —— 车都走了, 再去取就是空车位的图 */
+    if (oldPark != 0 && parkStatus == 0)
+    {
+        if (nd.thumbValid || nd.thumbNeedPost)
+        {
+            nd.thumbValid    = false;
+            nd.thumbNeedPost = true;   /* ⭐ 语义: valid=0 + 待上报 = 上报空串清平台 */
+            DBG_PRINTF("[节点] 节点%d 车已离开, 作废缩略图(将上报空串清平台)\n", nodeId);
+        }
+        nd.imgFetchPending = false;
+    }
     /* ⭐ S29: 收到首帧业务数据 → 允许代子设备上报属性.
      * (上报门控 hasDataFrame: 节点上线但数据帧未到时拦截, 避免全 0 垃圾快照) */
     nd.hasDataFrame = true;
@@ -348,11 +372,17 @@ void updateNodePlate(uint8_t nodeId, const LoraPlate_t *plate)
     nd.plateNeedPost     = true;    /* ⭐ 新一次识别结果 → 该车牌下次 pack/post 上报一次(之后不再重复上报) */
     if (!nd.plateValid)
     {
-        /* ⭐ S5: 未识别("-") → 本地缩略图随之作废(图是上一张有效车牌的).
-         * 不向平台上报空串(平台拒值会连累整条 pack/post), PlateThumb 旧值
-         * 留在平台, App 端按 PlateNumber=='-' 门控不绘制即可 */
-        nd.thumbValid    = false;
-        nd.thumbNeedPost = false;
+        /* ⭐ S5/S6: 未识别("-")不再作废本地缩略图 —— 这张图恰恰是"人工审核"的唯一依据:
+         *   模型没认出、人眼可能认得出, App 要拿原图对照录入。
+         * 只把"待上报"旗子压住(防上一张旧图冒充本次图), 等这一帧的 0xF2 真到了
+         * 由 updateNodeThumb 重新置位。若这一帧根本没产图(ROI 失败), 就一个都不发,
+         * 平台留着旧值, App 端靠时间门控不绘制 —— 与原注释的意图一致, 且不丢新图。
+         * ⭐ P1-1: 只有"车位仍有车"时才压旗子。车位已空(车刚走, 这帧 "-" 就是
+         * 车走时清空车牌上报的)时, thumbNeedPost 是 node_data 在 ParkStatus
+         * 非 0→0 时置的"清平台旧图"旗子, 不能被这一帧取消 —— 否则平台会一直
+         * 挂着上一辆车的图(车走后本来也没有新图可报)。 */
+        if (nd.parkStatus != 0)
+            nd.thumbNeedPost = false;
     }
 
     nd.hasDataFrame = true;
@@ -376,11 +406,31 @@ void updateNodeThumb(uint8_t nodeId, uint16_t imgNo, const uint8_t *img, uint16_
 
     NodeData &nd = nodes[slot];
 
+    /* ⭐ P1-1: 车位已空却收到图 —— 只可能是"车走之前那一张"的迟到残包
+     * (网关先发 AT+IMG, 车开走, 节点的 0xF2 还在空口上飞). 车离开时网关已把
+     * thumbValid 清 0, 这里必须拦住, 否则残包会把上一辆车的图重新装上并上报,
+     * 平台又变回"有图"状态.
+     * 不会误伤正常图: 取图链路本身就是"数据帧带 bit4 → 网关 AT+IMG → 节点 0xF2",
+     * 而那一帧数据帧同时把 parkStatus 置成了非 0, 所以真图到达时 parkStatus 必非 0 */
+    if (nd.parkStatus == 0)
+    {
+        DBG_PRINTF("[节点] 节点%d 收到缩略图但车位已空, 丢弃(迟到的残包) imgNo=%u\n",
+                   nodeId, imgNo);
+        /* 能收到 0xF2 说明链路是活的, 该记的活性照记, 只是这张图不要 */
+        updateNodeState((uint8_t)slot, NODE_EVT_DATA);
+        return;
+    }
+
     if (len > LORA_IMG_BYTES) len = LORA_IMG_BYTES;   /* 防御(重组处已按界拷贝) */
     memcpy(nd.thumb, img, len);
     nd.thumbNo       = imgNo;
     nd.thumbValid    = true;
     nd.thumbNeedPost = true;
+    /* ⭐ S6(L0-3): 牌图同批上报 —— 未识别('-')的帧也有图后, 必须让 PlateNumber 与
+     * PlateThumb 落在同一个 pack/post 里, 两者的 updated_at 才一致;
+     * 否则 App 的时间门控(图时间 < 牌时间 = 旧图)会把这张"待审核原图"判成残留图挡掉。
+     * 重复上报一次 PlateNumber 是幂等的(属性覆盖), 代价可忽略。 */
+    if (nd.plate[0] != '\0') nd.plateNeedPost = true;
 
     nd.hasDataFrame = true;
     updateNodeState((uint8_t)slot, NODE_EVT_DATA);   /* 收到响应 = 链路活性确认 */

@@ -358,22 +358,44 @@ class SpotModel {
       plateNumber != null && plateNumber!.isNotEmpty && plateNumber != '-';
   bool get plateUnrecognized => plateNumber == '-';
 
-  /* ⭐ S5 缩略图可显示判定:
-   * 1) 先过车牌三态门控(hasPlate): 未识别('-')/从未上报一律不画;
-   * 2) 时间门控: 缩略图正常与车牌同批或更晚一批上报(网关先取牌后取图),
+  /* ⭐ S5/S6 缩略图可显示判定:
+   * 1) 时间门控: 缩略图正常与车牌同批或更晚一批上报(网关先取牌后取图),
    *    plateThumbUpdatedAt 早于 plateUpdatedAt = 新车牌已到而新图未到 →
-   *    这是上一张车的残留图, 不画(等下一次全量刷新带来新图). */
+   *    这是上一张车的残留图, 不画(等下一次全量刷新带来新图).
+   * 2) ⭐ S6: 不再要求 hasPlate —— 未识别('-')的帧也有图, 那正是"人工审核"的依据.
+   * 3) ⭐ S7(2026-10-27 修): 时间门控必须带容差.
+   *    实测 OneNET 对同一条 pack/post 里的各属性**分别打毫秒时间戳, 先后不定**:
+   *    Park001 线上快照 PlateThumb.time=1793102533194 比 PlateNumber.time=1793102533195
+   *    早 1ms。用严格 `<` 比较就会把"同一批上报的牌+图"误判成"上一张残留图"而挡掉,
+   *    表现就是"明明识别出来了, 图却时有时无"。
+   *    故改为: 只有图比牌**早超过 thumbStaleTolerance** 才算残留图。
+   *    同批上报的时间戳差值只有 0~几十 ms(平台逐属性打戳), 所以容差取 2s:
+   *    既覆盖同批抖动, 又不会把"上一辆车留下的旧图"当成新图 ——
+   *    网关一轮轮询就有 2s, 真正跨车残留的图至少早 2s 以上。
+   * 4) 从未上报(plateNumber 为 null/空)且无图时, 这里天然返回 false。 */
+  static const Duration thumbStaleTolerance = Duration(seconds: 2);
+
   bool get hasPlateThumb {
-    if (!hasPlate) return false;
+    /* ⭐ P1-1: 车位空闲时, 平台上的 PlateThumb 必然是上一辆车留下的 —— 这是
+     * "同一辆车的牌和图时间戳相同"导致时间门控失效的场景(差值 0, 挡不住).
+     * 网关侧已在 ParkStatus 非 0 → 0 时作废并上报空串, 这里是不依赖平台清空
+     * 是否成功的最后一道兜底: 车位空着就绝不画图. */
+    if (isFree) return false;
     final t = plateThumb;
     if (t == null || t.isEmpty) return false;
-    final thumbTime = plateThumbUpdatedAt;
-    final plateTime = plateUpdatedAt;
-    if (thumbTime != null && plateTime != null && thumbTime.compareTo(plateTime) < 0) {
-      return false;
+    final thumbTime = DateTime.tryParse(plateThumbUpdatedAt ?? '');
+    final plateTime = DateTime.tryParse(plateUpdatedAt ?? '');
+    if (thumbTime != null &&
+        plateTime != null &&
+        plateTime.difference(thumbTime) > thumbStaleTolerance) {
+      return false;   // 图明显比牌旧 = 上一辆车的残留图
     }
     return true;
   }
+
+  /* ⭐ S6: 这张图是"待人工审核"的 —— 拍到了但模型没认出车牌, 需要人对照原图录入。
+   * UI 用它区分文案(待审核 / 识别依据), 并决定是否引导用户去修正对话框。 */
+  bool get thumbNeedsReview => !hasPlate && hasPlateThumb;
 
   /* ⭐⭐⭐ 【实时占用秒数】: 彻底解决刷新滞后问题
    * 原 occupiedSec 完全依赖节点上报的 OccupiedTime 属性, 节点仅在 LoRa 轮询时才更新 → 严重滞后

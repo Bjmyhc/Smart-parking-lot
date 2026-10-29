@@ -7,6 +7,29 @@
 
 只读 r4 权重与 out/lprnet_s3.onnx; 产物写到 tools/out/p600/, 绝不碰固件里的模型。
 """
+# --- 可移植路径自举 (Tool/relocate_paths.py 注入, 勿手改) -------------------
+import os as _os
+
+_HERE_ = _os.path.dirname(_os.path.abspath(__file__))
+
+
+def _find_repo_root_(start):
+    """从 start 逐级上溯, 找到同时含 Tool/ 与 Node/ 的目录 = 仓库根。"""
+    cur = start
+    while True:
+        if _os.path.isdir(_os.path.join(cur, 'Tool')) and \
+           _os.path.isdir(_os.path.join(cur, 'Node')):
+            return cur
+        parent = _os.path.dirname(cur)
+        if parent == cur:
+            return _os.path.dirname(start)
+        cur = parent
+
+
+_REPO_ROOT_ = _find_repo_root_(_HERE_)
+_AI_ROOT_ = _os.path.dirname(_REPO_ROOT_)
+# --- 自举结束 ---------------------------------------------------------------
+
 import os
 import sys
 import time
@@ -23,7 +46,7 @@ import quant_espdl_s3 as Q
 OUT = os.environ.get('P600_OUT') or os.path.join(_HERE, 'out', 'p600')
 ONNX = os.environ.get('P600_ONNX') or os.path.join(_HERE, 'out', 'r4_s3.onnx')
 WEIGHTS = os.path.join(_HERE, 'out', 'finetune', 'r4_lr1e4_nofreeze.pth')
-FIELD = r'G:\All_Project\AI_Project\BY串口助手\dist\saved\images'
+FIELD = _AI_ROOT_ + r'\BY串口助手\dist\saved\images'
 TEST = os.path.join(Q.DEFAULT_LPRNET_DIR, 'data', 'test')
 HOLDOUT = os.path.join(_HERE, 'out', 'holdout')
 OFFICIAL = os.path.join(Q.DEFAULT_LPRNET_DIR, 'data', 'official_val')

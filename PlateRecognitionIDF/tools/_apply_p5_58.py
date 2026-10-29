@@ -2,8 +2,31 @@
 """P5.58: 把"占屏下限"从只作用于兜底档, 改成**严格档也生效** ——
    实测 76x16 px(占屏0.4%)的横条能过严格档的比例(4.75)+填充门槛, 被当候选喂给模型。
    常量随之改名 ROI_FALLBACK_MIN_AREA_PCT -> ROI_MIN_AREA_PCT。"""
+# --- 可移植路径自举 (Tool/relocate_paths.py 注入, 勿手改) -------------------
+import os as _os
+
+_HERE_ = _os.path.dirname(_os.path.abspath(__file__))
+
+
+def _find_repo_root_(start):
+    """从 start 逐级上溯, 找到同时含 Tool/ 与 Node/ 的目录 = 仓库根。"""
+    cur = start
+    while True:
+        if _os.path.isdir(_os.path.join(cur, 'Tool')) and \
+           _os.path.isdir(_os.path.join(cur, 'Node')):
+            return cur
+        parent = _os.path.dirname(cur)
+        if parent == cur:
+            return _os.path.dirname(start)
+        cur = parent
+
+
+_REPO_ROOT_ = _find_repo_root_(_HERE_)
+_AI_ROOT_ = _os.path.dirname(_REPO_ROOT_)
+# --- 自举结束 ---------------------------------------------------------------
+
 import io
-SRC = r"G:\All_Project\AI_Project\Smart-Paring-Iot\PlateRecognitionIDF\main\main.cpp"
+SRC = _REPO_ROOT_ + r'\PlateRecognitionIDF\main\main.cpp'
 PATCHES = []
 def P(old, new, tag): PATCHES.append((old, new, tag))
 

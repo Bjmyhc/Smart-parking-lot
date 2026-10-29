@@ -1,11 +1,34 @@
 # -*- coding: utf-8 -*-
 """p565f: 改进合成渲染(粗体/正确长宽比/裁边/更真实的底色与反光), 重新训练 + 真实集验证."""
+# --- 可移植路径自举 (Tool/relocate_paths.py 注入, 勿手改) -------------------
+import os as _os
+
+_HERE_ = _os.path.dirname(_os.path.abspath(__file__))
+
+
+def _find_repo_root_(start):
+    """从 start 逐级上溯, 找到同时含 Tool/ 与 Node/ 的目录 = 仓库根。"""
+    cur = start
+    while True:
+        if _os.path.isdir(_os.path.join(cur, 'Tool')) and \
+           _os.path.isdir(_os.path.join(cur, 'Node')):
+            return cur
+        parent = _os.path.dirname(cur)
+        if parent == cur:
+            return _os.path.dirname(start)
+        cur = parent
+
+
+_REPO_ROOT_ = _find_repo_root_(_HERE_)
+_AI_ROOT_ = _os.path.dirname(_REPO_ROOT_)
+# --- 自举结束 ---------------------------------------------------------------
+
 import os, sys, glob, random, json
 import numpy as np, cv2, torch, torch.nn as nn, torch.nn.functional as F
 from PIL import Image, ImageDraw, ImageFont
-ROOT = r"G:\All_Project\AI_Project\Smart-Paring-Iot\PlateRecognitionIDF"
+ROOT = _REPO_ROOT_ + r'\PlateRecognitionIDF'
 OUT = os.path.join(ROOT, "tools", "out", "p565")
-FONT = r"G:\All_Project\AI_Project\LPRNet_Pytorch\data\NotoSansCJK-Regular.ttc"
+FONT = _AI_ROOT_ + r'\LPRNet_Pytorch\data\NotoSansCJK-Regular.ttc'
 PROV = list("京津冀晋蒙辽吉黑沪苏浙皖闽赣鲁豫鄂湘粤桂琼渝川贵云藏陕甘青宁新")
 W, H = 32, 64
 random.seed(0); np.random.seed(0); torch.manual_seed(0)

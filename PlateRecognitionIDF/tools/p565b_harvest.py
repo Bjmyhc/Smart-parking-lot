@@ -1,11 +1,34 @@
 # -*- coding: utf-8 -*-
 """p565b: 从"难"素材(320x240)抠高分辨率省字 -> 真实样本 (32x64)."""
+# --- 可移植路径自举 (Tool/relocate_paths.py 注入, 勿手改) -------------------
+import os as _os
+
+_HERE_ = _os.path.dirname(_os.path.abspath(__file__))
+
+
+def _find_repo_root_(start):
+    """从 start 逐级上溯, 找到同时含 Tool/ 与 Node/ 的目录 = 仓库根。"""
+    cur = start
+    while True:
+        if _os.path.isdir(_os.path.join(cur, 'Tool')) and \
+           _os.path.isdir(_os.path.join(cur, 'Node')):
+            return cur
+        parent = _os.path.dirname(cur)
+        if parent == cur:
+            return _os.path.dirname(start)
+        cur = parent
+
+
+_REPO_ROOT_ = _find_repo_root_(_HERE_)
+_AI_ROOT_ = _os.path.dirname(_REPO_ROOT_)
+# --- 自举结束 ---------------------------------------------------------------
+
 import os, sys, glob, json
 import numpy as np, cv2
-ROOT = r"G:\All_Project\AI_Project\Smart-Paring-Iot\PlateRecognitionIDF"
+ROOT = _REPO_ROOT_ + r'\PlateRecognitionIDF'
 sys.path.insert(0, os.path.join(ROOT, "tools"))
 import locator_replay as R
-B = r"G:\All_Project\AI_Project\BY串口助手\dist\saved\images"
+B = _AI_ROOT_ + r'\BY串口助手\dist\saved\images'
 OUT = os.path.join(ROOT, "tools", "out", "p565", "real2"); os.makedirs(OUT, exist_ok=True)
 class A: pass
 a = A()

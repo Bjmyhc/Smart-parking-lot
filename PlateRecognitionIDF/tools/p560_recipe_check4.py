@@ -1,14 +1,37 @@
 # -*- coding: utf-8 -*-
 """p560_recipe_check4.py —— 固件裁剪里已有 crop_photometric_norm(对比度+饱和度自适应拉伸)。
 本脚本把它在 PC 上按同一公式复刻, 回答: "新加的全帧饱和度增强" 与它是否重复/叠加。"""
+# --- 可移植路径自举 (Tool/relocate_paths.py 注入, 勿手改) -------------------
+import os as _os
+
+_HERE_ = _os.path.dirname(_os.path.abspath(__file__))
+
+
+def _find_repo_root_(start):
+    """从 start 逐级上溯, 找到同时含 Tool/ 与 Node/ 的目录 = 仓库根。"""
+    cur = start
+    while True:
+        if _os.path.isdir(_os.path.join(cur, 'Tool')) and \
+           _os.path.isdir(_os.path.join(cur, 'Node')):
+            return cur
+        parent = _os.path.dirname(cur)
+        if parent == cur:
+            return _os.path.dirname(start)
+        cur = parent
+
+
+_REPO_ROOT_ = _find_repo_root_(_HERE_)
+_AI_ROOT_ = _os.path.dirname(_REPO_ROOT_)
+# --- 自举结束 ---------------------------------------------------------------
+
 import os, sys, glob
 import numpy as np, cv2, torch
-ROOT = r"G:\All_Project\AI_Project\Smart-Paring-Iot\PlateRecognitionIDF"
-LPRNET = r"G:\All_Project\AI_Project\LPRNet_Pytorch"
+ROOT = _REPO_ROOT_ + r'\PlateRecognitionIDF'
+LPRNET = _AI_ROOT_ + r'\LPRNet_Pytorch'
 sys.path.insert(0, os.path.join(ROOT, "tools")); sys.path.insert(0, LPRNET)
 from data.load_data import CHARS
 from lprnet_s3_model import build_lprnet_s3
-BASE = r"G:\All_Project\AI_Project\BY串口助手\dist\saved\images"
+BASE = _AI_ROOT_ + r'\BY串口助手\dist\saved\images'
 SETS = [("京Q06666_难", "京Q06666"), ("豫FSQ818_难", "豫FSQ818"), ("豫A8F8Q8_难", "豫A8F8Q8")]
 OUT = os.path.join(ROOT, "tools", "out", "p560"); os.makedirs(OUT, exist_ok=True)
 blank = len(CHARS) - 1

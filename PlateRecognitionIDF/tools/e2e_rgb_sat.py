@@ -1,10 +1,33 @@
 # -*- coding: utf-8 -*-
 """验证"整数 RGB 版饱和度增强"能不能替代 HSV 版 —— 单片机上是逐像素 LUT/整数运算, 不用开方不用除法。
    原理: v = max(b,g,r); out_c = v + k*(c - v)  —— 保住最亮通道(值不变), 把色差拉开 = 提饱和, 色相不变。"""
+# --- 可移植路径自举 (Tool/relocate_paths.py 注入, 勿手改) -------------------
+import os as _os
+
+_HERE_ = _os.path.dirname(_os.path.abspath(__file__))
+
+
+def _find_repo_root_(start):
+    """从 start 逐级上溯, 找到同时含 Tool/ 与 Node/ 的目录 = 仓库根。"""
+    cur = start
+    while True:
+        if _os.path.isdir(_os.path.join(cur, 'Tool')) and \
+           _os.path.isdir(_os.path.join(cur, 'Node')):
+            return cur
+        parent = _os.path.dirname(cur)
+        if parent == cur:
+            return _os.path.dirname(start)
+        cur = parent
+
+
+_REPO_ROOT_ = _find_repo_root_(_HERE_)
+_AI_ROOT_ = _os.path.dirname(_REPO_ROOT_)
+# --- 自举结束 ---------------------------------------------------------------
+
 import os, sys, glob
 import numpy as np, cv2, torch
-ROOT = r"G:\All_Project\AI_Project\Smart-Paring-Iot\PlateRecognitionIDF"
-LPRNET = r"G:\All_Project\AI_Project\LPRNet_Pytorch"
+ROOT = _REPO_ROOT_ + r'\PlateRecognitionIDF'
+LPRNET = _AI_ROOT_ + r'\LPRNet_Pytorch'
 sys.path.insert(0, os.path.join(ROOT, "tools")); sys.path.insert(0, LPRNET)
 import locator_text_row as T
 from data.load_data import CHARS
@@ -23,7 +46,7 @@ torch.set_grad_enabled(False)
 net = build_lprnet_s3(lpr_max_len=8, class_num=len(CHARS), dropout_rate=0)
 net.load_state_dict(torch.load(os.path.join(ROOT, "tools", "out", "finetune", "r4_lr1e4_nofreeze.pth"), map_location="cpu"))
 net.eval()
-D = r"G:\All_Project\AI_Project\BY串口助手\dist\saved\images\京Q06666_难"
+D = _AI_ROOT_ + r'\BY串口助手\dist\saved\images\京Q06666_难'
 TRUTH = "京Q06666"
 files = sorted(glob.glob(os.path.join(D, "*.jpg")))
 

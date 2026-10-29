@@ -7,15 +7,38 @@
     新框+增强图 = 同上, 但裁剪也从增强图上取(验证"把一切都归一化"这个想法)
 真值 = 京Q06666 (那 20 张难帧)。
 """
+# --- 可移植路径自举 (Tool/relocate_paths.py 注入, 勿手改) -------------------
+import os as _os
+
+_HERE_ = _os.path.dirname(_os.path.abspath(__file__))
+
+
+def _find_repo_root_(start):
+    """从 start 逐级上溯, 找到同时含 Tool/ 与 Node/ 的目录 = 仓库根。"""
+    cur = start
+    while True:
+        if _os.path.isdir(_os.path.join(cur, 'Tool')) and \
+           _os.path.isdir(_os.path.join(cur, 'Node')):
+            return cur
+        parent = _os.path.dirname(cur)
+        if parent == cur:
+            return _os.path.dirname(start)
+        cur = parent
+
+
+_REPO_ROOT_ = _find_repo_root_(_HERE_)
+_AI_ROOT_ = _os.path.dirname(_REPO_ROOT_)
+# --- 自举结束 ---------------------------------------------------------------
+
 import os, sys, csv, glob
 import numpy as np, cv2, torch
 
-ROOT = r"G:\All_Project\AI_Project\Smart-Paring-Iot\PlateRecognitionIDF"
-LPRNET = r"G:\All_Project\AI_Project\LPRNet_Pytorch"
+ROOT = _REPO_ROOT_ + r'\PlateRecognitionIDF'
+LPRNET = _AI_ROOT_ + r'\LPRNet_Pytorch'
 sys.path.insert(0, os.path.join(ROOT, "tools")); sys.path.insert(0, LPRNET)
 import locator_text_row as T
 
-D = r"G:\All_Project\AI_Project\BY串口助手\dist\saved\images\京Q06666_难"
+D = _AI_ROOT_ + r'\BY串口助手\dist\saved\images\京Q06666_难'
 TRUTH = "京Q06666"
 CSV = os.path.join(ROOT, "tools", "out", "replay_base.csv")
 

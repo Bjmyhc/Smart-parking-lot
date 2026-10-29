@@ -1,5 +1,28 @@
 # -*- coding: utf-8 -*-
 """Test which quantization recipe reproduces the board's collapse (jingQYue)."""
+# --- 可移植路径自举 (Tool/relocate_paths.py 注入, 勿手改) -------------------
+import os as _os
+
+_HERE_ = _os.path.dirname(_os.path.abspath(__file__))
+
+
+def _find_repo_root_(start):
+    """从 start 逐级上溯, 找到同时含 Tool/ 与 Node/ 的目录 = 仓库根。"""
+    cur = start
+    while True:
+        if _os.path.isdir(_os.path.join(cur, 'Tool')) and \
+           _os.path.isdir(_os.path.join(cur, 'Node')):
+            return cur
+        parent = _os.path.dirname(cur)
+        if parent == cur:
+            return _os.path.dirname(start)
+        cur = parent
+
+
+_REPO_ROOT_ = _find_repo_root_(_HERE_)
+_AI_ROOT_ = _os.path.dirname(_REPO_ROOT_)
+# --- 自举结束 ---------------------------------------------------------------
+
 import os, sys, glob
 import numpy as np
 import torch
@@ -15,11 +38,11 @@ from esp_ppq.api import espdl_quantize_onnx
 from esp_ppq.executor import TorchExecutor
 from lprnet_s3_model import build_lprnet_s3
 
-CROP_DIR = r'G:\All_Project\AI_Project\BY串口助手\dist\saved\images'
+CROP_DIR = _AI_ROOT_ + r'\BY串口助手\dist\saved\images'
 PATS = 'IMG_20261001_1740*.jpg'
 ONNX = os.path.join(_HERE, 'out', 'lprnet_s3.onnx')
 WEIGHTS = os.path.join(_HERE, 'out', 'finetune', 'r4_lr1e4_nofreeze.pth')
-FIELD = r'G:\All_Project\AI_Project\BY串口助手\dist\saved\images'
+FIELD = _AI_ROOT_ + r'\BY串口助手\dist\saved\images'
 TEST = os.path.join(Q.DEFAULT_LPRNET_DIR, 'data', 'test')
 
 crops = sorted(glob.glob(os.path.join(CROP_DIR, PATS)))

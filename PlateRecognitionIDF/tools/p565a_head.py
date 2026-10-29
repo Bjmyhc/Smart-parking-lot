@@ -1,8 +1,31 @@
 # -*- coding: utf-8 -*-
 """p565a: 从真实车牌图里抠省字, 存成 32x64 的 patch, 并拼图确认裁切规则."""
+# --- 可移植路径自举 (Tool/relocate_paths.py 注入, 勿手改) -------------------
+import os as _os
+
+_HERE_ = _os.path.dirname(_os.path.abspath(__file__))
+
+
+def _find_repo_root_(start):
+    """从 start 逐级上溯, 找到同时含 Tool/ 与 Node/ 的目录 = 仓库根。"""
+    cur = start
+    while True:
+        if _os.path.isdir(_os.path.join(cur, 'Tool')) and \
+           _os.path.isdir(_os.path.join(cur, 'Node')):
+            return cur
+        parent = _os.path.dirname(cur)
+        if parent == cur:
+            return _os.path.dirname(start)
+        cur = parent
+
+
+_REPO_ROOT_ = _find_repo_root_(_HERE_)
+_AI_ROOT_ = _os.path.dirname(_REPO_ROOT_)
+# --- 自举结束 ---------------------------------------------------------------
+
 import os, glob
 import numpy as np, cv2
-OUT = r"G:\All_Project\AI_Project\Smart-Paring-Iot\PlateRecognitionIDF\tools\out\p565"
+OUT = _REPO_ROOT_ + r'\PlateRecognitionIDF\tools\out\p565'
 os.makedirs(os.path.join(OUT, "real"), exist_ok=True)
 def load(p): return cv2.imdecode(np.fromfile(p, np.uint8), cv2.IMREAD_COLOR)
 def head_of(plate):
@@ -11,11 +34,11 @@ def head_of(plate):
     y0 = int(round(h * 0.10));  y1 = int(round(h * 0.90))
     return plate[y0:y1, x0:x1]
 srcs = []
-c2 = r"G:\All_Project\AI_Project\Smart-Paring-Iot\PlateRecognitionIDF\tools\out\collect2"
+c2 = _REPO_ROOT_ + r'\PlateRecognitionIDF\tools\out\collect2'
 for lab, sub in [("京", "京Q06666"), ("粤", "粤T666FP")]:
     for p in sorted(glob.glob(os.path.join(c2, sub, "*.jpg")))[:12]:
         srcs.append((lab, p))
-d = r"G:\All_Project\AI_Project\Smart-Paring-Iot\Doc\硬件资料\车牌测试样例"
+d = _REPO_ROOT_ + r'\Doc\硬件资料\车牌测试样例'
 for lab, f in [("京", "京Q06666.png"), ("粤", "粤T666FP.jpg"), ("豫", "豫A8F8Q8.jpg"), ("豫", "豫FSQ8I8.jpg")]:
     srcs.append((lab, os.path.join(d, f)))
 rows = []

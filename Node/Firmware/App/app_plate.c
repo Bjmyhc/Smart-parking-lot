@@ -1,4 +1,4 @@
-﻿﻿﻿﻿/****************************************************************************
+﻿/****************************************************************************
  * 车牌子系统应用层 - app_plate.c
  *
  * 功能描述:
@@ -32,7 +32,10 @@
 /* 摄像头命令(均以 \r\n 结尾, 与 P5.80 节点口约定一致) */
 #define PLATE_CMD_RUN    "AT+RUN\r\n"
 #define PLATE_CMD_INFO   "AT+INFO\r\n"
-#define PLATE_CMD_THUMB  "AT+THUMB\r\n"   /* S5: 取缩略图, 摄像头回 $IMGD/$IMGB/$IMGE 行 */
+/* S5: 取缩略图, 摄像头回 $IMGD/$IMGB/$IMGE 行.
+ * S6(L0-2): 带帧号 —— 未识别帧也要取图后, 必须指明"要哪一帧的图",
+ *   否则摄像头 g_thumbValid 永不清零, 会把上一帧的旧图当成这一帧的发下来. */
+#define PLATE_CMD_THUMB_FMT "AT+THUMB=%lu\r\n"
 
 /* 单行接收上限: 摄像头单行上限 95B, 超 127B 必是噪声 -> 整行丢弃
  * (S5 缩略图 $IMGB 数据行 = 6 + 60*2 = 126 字符, 恰在上限内) */
@@ -43,6 +46,14 @@
 
 /* S5: $IMGD..$IMGE 全程超时(7 行 @115200 约 70ms, 放宽到 1.5s 兜底丢行) */
 #define PLATE_THUMB_TIMEOUT_MS 1500UL
+
+/* S7: 取图失败重试次数。
+ * 摄像头→节点这一跳是 5 行 hex(每行 126 字符) + CRC16, 丢/错一个字符整张图作废,
+ * 而 LoRa 那一跳已有网关侧看护重发(S6-fix), 这一跳此前是裸的(超时即永久丢图)。
+ * 只重试 1 次(最坏多占 1.5s 串口), 且必须仍带帧号: 摄像头是单槽缓冲, 重试时它
+ * 可能已经跑到下一帧, 不带帧号会把别的帧的图当成这一帧的。
+ * 有拍照请求在排队时直接放弃重试 —— 新车进场优先拍照。 */
+#define PLATE_THUMB_RETRY_MAX  1
 
 /* ==================== 全局变量定义 ==================== */
 PlateCache_t     g_plateCache;
@@ -90,7 +101,9 @@ static uint16_t s_lineLen;
 static uint8_t  s_lineDiscard;      /* 1=当前行超长, 丢弃到行尾 */
 
 /* S5 缩略图接收(摄像头 AT+THUMB 应答行) */
-static uint8_t  s_thumbReq;         /* 1=识别结果刚有效, 待发 AT+THUMB */
+static uint8_t  s_thumbReq;         /* 1=有待取的缩略图(未识别也要图), 待发 AT+THUMB=<frameNo> */
+static uint32_t s_thumbFrameNo;     /* S6: 要取的那一帧的帧号($PLATE 行里的 frameNo) */
+static uint8_t  s_thumbTries;       /* S7: 本张图已重试次数(超时重试计数, 成功/新请求清零) */
 static uint8_t  s_rxOn;             /* 1=$IMGD 已开收, 等数据行/结束行 */
 static uint16_t s_rxLen;            /* 本图期望总长(282) */
 static uint16_t s_rxPos;            /* 已收字节 */
@@ -169,15 +182,31 @@ static void Plate_TryNextCommand(void)
         return;
     }
 
-    /* ② S5 取缩略图: 刚识别出有效车牌 -> 立刻向摄像头取图
-     *    (不等探活静默: 图要趁新; 探活让路, 1.5s 内必有结局) */
+    /* ② S5 取缩略图: 拿到 $PLATE 结果就立刻向摄像头取图(未识别也取, 供人工审核)
+     *    (不等探活静默: 图要趁新; 探活让路, 1.5s 内必有结局)
+     *    S6(L0-2): 带上帧号 —— 摄像头只在这一帧确实是图的来源时才发, 否则回 ERR,
+     *    避免 ROI 失败帧(不产图)把上一帧的旧图张冠李戴.
+     *    帧号缺失(老摄像头/异常行)时退回无参命令, 保持兼容. */
     if (s_thumbReq)
     {
-        Usart3_FlushRx();
-        Usart3_SendAsync((const uint8_t *)PLATE_CMD_THUMB, sizeof(PLATE_CMD_THUMB) - 1);
-        s_sentAt = Get_Tick();
-        s_state  = PC_THUMB_SENT;
-        Usart_Printf(USART_DEBUG, "[PLATE] -> AT+THUMB 取缩略图\r\n");
+        char cmd[24];
+        int  n;
+        if (s_thumbFrameNo != 0)
+            n = snprintf(cmd, sizeof(cmd), PLATE_CMD_THUMB_FMT, (unsigned long)s_thumbFrameNo);
+        else
+            n = snprintf(cmd, sizeof(cmd), "AT+THUMB\r\n");
+        if (n > 0 && n < (int)sizeof(cmd))
+        {
+            Usart3_FlushRx();
+            Usart3_SendAsync((const uint8_t *)cmd, (uint16_t)n);
+            s_sentAt = Get_Tick();
+            s_state  = PC_THUMB_SENT;
+            if (s_thumbFrameNo != 0)
+                Usart_Printf(USART_DEBUG, "[PLATE] -> AT+THUMB=%lu 取缩略图\r\n",
+                             (unsigned long)s_thumbFrameNo);
+            else
+                Usart_Printf(USART_DEBUG, "[PLATE] -> AT+THUMB (无帧号) 取缩略图\r\n");
+        }
         return;
     }
 
@@ -218,6 +247,7 @@ static void Plate_CheckAutoTrigger(void)
             g_thumbValid     = 0;
             g_imgFetchPending = 0;
             s_thumbReq       = 0;
+            s_thumbTries     = 0;
             s_rxOn           = 0;
             Usart_Printf(USART_DEBUG, "[PLATE] 车已离开, 清空车牌缓存与缩略图\r\n");
         }
@@ -439,6 +469,7 @@ static void Plate_OnThumbLine(const char *line)
         g_thumbValid    = 1;
         g_imgFetchPending = 1;           /* 立 CamFlags bit4, 网关择机 AT+IMG 取 */
         s_thumbReq      = 0;
+        s_thumbTries    = 0;
         if (s_state == PC_THUMB_SENT)
         {
             s_state     = PC_IDLE;
@@ -478,11 +509,19 @@ static void Plate_OnLine(const char *line)
         return;
     }
 
-    /* S5: 取图窗口收到 ERR(摄像头不认识 AT+THUMB / 还没有图) —— 必须打出来,
-     * 否则被下面的"非拍照窗口静默丢弃"吞掉, 现场只看得到干巴巴的超时 */
+    /* S5: 取图窗口收到 ERR(摄像头不认识 AT+THUMB / 该帧没有图) —— 必须打出来,
+     * 否则被下面的"非拍照窗口静默丢弃"吞掉, 现场只看得到干巴巴的超时.
+     * S6(L0-2): 收到 ERR 立刻收口回 IDLE —— 帧号不符时摄像头是"明确拒绝",
+     *   没有图要等; 若继续挂着 PC_THUMB_SENT, 会白占半双工通道 1.5s,
+     *   把紧随其后的探活/下一次拍照全堵住. */
     if (s_state == PC_THUMB_SENT && strncmp(line, "ERR:", 4) == 0)
     {
         Usart_Printf(USART_DEBUG, "[PLATE] 取缩略图被拒: %s\r\n", line);
+        s_rxOn      = 0;
+        s_thumbReq  = 0;
+        s_thumbTries = 0;
+        s_state     = PC_IDLE;
+        s_idleSince = Get_Tick();
         return;
     }
 
@@ -501,8 +540,14 @@ static void Plate_OnLine(const char *line)
         s_runGotResult      = 1;
         Plate_ParseResult(line);
         g_plateFetchPending = 1;
-        /* S5: 识别出有效车牌才接着取缩略图(无效帧没图可看, 省一次图传输) */
-        s_thumbReq          = g_plateCache.valid ? 1 : 0;
+        /* S6(L0-2): 不再"识别出有效车牌才取图" —— 未识别('-')的帧恰恰最需要图:
+         *   模型没认出、人眼可能认得出, App 侧要拿原图做人工审核/录入.
+         *   代价是每次拍照都多一次取图(空中约 0.43s), 由 PLATE_THUMB_RETRY_MAX
+         *   限死的重试次数兜住, 最多多占 1.5s, 不会因图丢失而反复拖住拍照通道.
+         *   帧号一并记下: 发命令时带上去, 让摄像头校验"这一帧到底有没有图". */
+        s_thumbReq          = 1;
+        s_thumbFrameNo      = g_plateCache.frameNo;
+        s_thumbTries        = 0;
         s_captureReq        = 0;
         s_state             = PC_IDLE;
         s_idleSince         = Get_Tick();
@@ -645,13 +690,41 @@ void Plate_Task(void)
             break;
 
         case PC_THUMB_SENT:
-            /* S5: $IMGD..$IMGE 没在 1.5s 内收完(丢行/摄像头没理) -> 放弃本次取图。
-             * 不重试: 下次识别出有效车牌自然再来一轮; 残留半截传输由 s_rxOn 收口 */
+            /* S5: $IMGD..$IMGE 没在 1.5s 内收完(丢行/摄像头没理) -> 本次作废,
+             * 残留半截传输由 s_rxOn 收口。
+             * S7: 允许重试 1 次(PLATE_THUMB_RETRY_MAX), 仍带原帧号 —— 图已不在时
+             *   摄像头回 "ERR:该帧没有图", 由 Plate_OnLine 立即收口, 不会死循环。
+             *   有拍照请求在排队则直接放弃: 新车进场优先, 新图会随新的 $PLATE 再来。 */
             if ((uint32_t)(now - s_sentAt) >= PLATE_THUMB_TIMEOUT_MS)
             {
-                s_rxOn     = 0;
-                s_thumbReq = 0;
-                Usart_Printf(USART_DEBUG, "[PLATE] 取缩略图超时, 放弃本次\r\n");
+                s_rxOn = 0;
+                if (!s_thumbReq)                 /* 已收口(成功/被拒/车已走), 无事可做 */
+                {
+                    s_state     = PC_IDLE;
+                    s_idleSince = now;
+                    break;
+                }
+                if (s_captureReq)
+                {
+                    s_thumbReq   = 0;
+                    s_thumbTries = 0;
+                    Usart_Printf(USART_DEBUG,
+                                 "[PLATE] 取缩略图超时, 但有拍照请求, 放弃取图\r\n");
+                }
+                else if (s_thumbTries < PLATE_THUMB_RETRY_MAX)
+                {
+                    s_thumbTries++;              /* 保留 s_thumbReq, 下一轮 PC_IDLE 重发 */
+                    Usart_Printf(USART_DEBUG, "[PLATE] 取缩略图超时, 重试#%d/%d\r\n",
+                                 s_thumbTries, PLATE_THUMB_RETRY_MAX);
+                }
+                else
+                {
+                    s_thumbReq   = 0;
+                    s_thumbTries = 0;
+                    Usart_Printf(USART_DEBUG,
+                                 "[PLATE] 取缩略图超时, 放弃本次(已重试%d次)\r\n",
+                                 PLATE_THUMB_RETRY_MAX);
+                }
                 s_state     = PC_IDLE;
                 s_idleSince = now;
             }

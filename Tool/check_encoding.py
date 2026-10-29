@@ -1,7 +1,24 @@
 # -*- coding: utf-8 -*-
-import os
+"""检查单个源文件的编码（BOM / UTF-8 / GBK），GBK 时就地转成 UTF-8。
 
-filepath = 'g:/All_Project/Keil_Project/STM32_Project/\u6211\u7684/\u667a\u80fd\u505c\u8f66\u573a/7dab3/PlateRecognition/PlateRecognition.ino'
+用法：
+    python Tool/check_encoding.py <要检查的文件路径>
+
+不传参数时默认检查仓库内的 PlateRecognition/PlateRecognition.ino。
+"""
+import os
+import sys
+
+_HERE = os.path.dirname(os.path.abspath(__file__))
+_REPO_ROOT = os.path.dirname(_HERE)
+
+if len(sys.argv) > 1:
+    filepath = sys.argv[1]
+else:
+    filepath = os.path.join(_REPO_ROOT, 'PlateRecognition', 'PlateRecognition.ino')
+
+if not os.path.exists(filepath):
+    sys.exit('文件不存在: %s' % filepath)
 
 with open(filepath, 'rb') as f:
     raw = f.read()

@@ -1,4 +1,4 @@
-﻿﻿﻿﻿/****************************************************************************
+﻿/****************************************************************************
  * LoRa 节点通信驱动 - bsp_lora.c
  *
  * 功能描述:
@@ -344,7 +344,13 @@ void LoRa_Node_SendPlate(const LoraPlate_t *p)
 static struct {
     uint8_t        left;    /* 1=第2包待发 */
     uint16_t       imgNo;
-    const uint8_t *img2;    /* 第2包数据(指向调用方全图缓存+200, 调用方保证存活) */
+    /* ⭐ S6-fix-2: 第2包数据改为"发第1包时快照", 不再指向调用方的 g_thumbCache.
+     * 原实现存指针(全图缓存+200), 而第2包要等 >=300ms 才发; 这段窗口内若
+     * 节点又发了一次 AT+THUMB, 摄像头回 $IMGB 会把 g_thumbCache 整块改写,
+     * 第2包于是变成"新图的前 82B" —— 网关拼出来的图前 200B 是老的、后 82B
+     * 是新的, 且网关没有整图 CRC(只校验每包), 会静默收下一张错图.
+     * 快照后第2包内容在发第1包那一刻就固定, 与后续缓存改写无关 */
+    uint8_t        img2[LORA_IMG_BYTES - LORA_IMG_FRAG_MAX];   /* 第2包数据快照(82B) */
     uint32_t       at;      /* 第1包发出时刻 */
 } s_imgTx;
 
@@ -376,11 +382,15 @@ static void Img_SendFrag(uint16_t imgNo, uint8_t idx,
 
 void LoRa_Node_SendImg(uint16_t imgNo, const uint8_t *img)
 {
-    Img_SendFrag(imgNo, 1, img, LORA_IMG_FRAG_MAX);
+    /* ⭐ S6-fix-2: 先快照第2包, 再发第1包. 顺序不能反: Img_SendFrag(第1包)
+     * 内部要等串口排空 ~220ms, 期间主循环会继续跑, 缓存可能已被下一次
+     * $IMGB 改写 */
+    memcpy(s_imgTx.img2, img + LORA_IMG_FRAG_MAX,
+           LORA_IMG_BYTES - LORA_IMG_FRAG_MAX);
     s_imgTx.imgNo = imgNo;
-    s_imgTx.img2  = img + LORA_IMG_FRAG_MAX;
     s_imgTx.at    = Get_Tick();
     s_imgTx.left  = 1;
+    Img_SendFrag(imgNo, 1, img, LORA_IMG_FRAG_MAX);
 }
 
 /* 第2包择机发送: 由 LoRa_Node_Poll 每轮调(主循环节拍) */

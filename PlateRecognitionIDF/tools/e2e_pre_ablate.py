@@ -2,10 +2,33 @@
 """找"最便宜的增强": CLAHE 在 S3 上可能太贵, 试几个便宜的替代, 看识别率掉不掉。
    注意: 之前"高反差保留"(除以局部均值) 0/20 —— 因为平坦的蓝牌区域被自己除成 ~128,
          b-r 直接归零, 颜色判据就死了。所以这里只试"保住绝对颜色"的便宜做法。"""
+# --- 可移植路径自举 (Tool/relocate_paths.py 注入, 勿手改) -------------------
+import os as _os
+
+_HERE_ = _os.path.dirname(_os.path.abspath(__file__))
+
+
+def _find_repo_root_(start):
+    """从 start 逐级上溯, 找到同时含 Tool/ 与 Node/ 的目录 = 仓库根。"""
+    cur = start
+    while True:
+        if _os.path.isdir(_os.path.join(cur, 'Tool')) and \
+           _os.path.isdir(_os.path.join(cur, 'Node')):
+            return cur
+        parent = _os.path.dirname(cur)
+        if parent == cur:
+            return _os.path.dirname(start)
+        cur = parent
+
+
+_REPO_ROOT_ = _find_repo_root_(_HERE_)
+_AI_ROOT_ = _os.path.dirname(_REPO_ROOT_)
+# --- 自举结束 ---------------------------------------------------------------
+
 import os, sys, glob
 import numpy as np, cv2, torch
-ROOT = r"G:\All_Project\AI_Project\Smart-Paring-Iot\PlateRecognitionIDF"
-LPRNET = r"G:\All_Project\AI_Project\LPRNet_Pytorch"
+ROOT = _REPO_ROOT_ + r'\PlateRecognitionIDF'
+LPRNET = _AI_ROOT_ + r'\LPRNet_Pytorch'
 sys.path.insert(0, os.path.join(ROOT, "tools")); sys.path.insert(0, LPRNET)
 import locator_text_row as T
 from data.load_data import CHARS
@@ -24,7 +47,7 @@ torch.set_grad_enabled(False)
 net = build_lprnet_s3(lpr_max_len=8, class_num=len(CHARS), dropout_rate=0)
 net.load_state_dict(torch.load(os.path.join(ROOT, "tools", "out", "finetune", "r4_lr1e4_nofreeze.pth"), map_location="cpu"))
 net.eval()
-D = r"G:\All_Project\AI_Project\BY串口助手\dist\saved\images\京Q06666_难"
+D = _AI_ROOT_ + r'\BY串口助手\dist\saved\images\京Q06666_难'
 TRUTH = "京Q06666"
 files = sorted(glob.glob(os.path.join(D, "*.jpg")))
 

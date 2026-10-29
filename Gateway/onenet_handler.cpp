@@ -277,11 +277,29 @@ static void subPostBatch(void)
             props[SUB_PROP_PLATE_COLOR]["value"] = (int)nd.plateColor;
         /* ⭐ S5 缩略图: 与车牌同范式"只在新图时上报一次" —— 平台 pack/post
          * 不带该属性即不改旧值, PlateThumb.time 才等于"缩略图最后更新时间" */
-        if (nd.thumbValid && nd.thumbNeedPost)
+        /* ⭐ P1-1: thumbNeedPost 现在有两种语义 ——
+         *   thumbValid=1: 有新图, 附带一次 base64(282B → 376 字符);
+         *   thumbValid=0: 车已离开(node_data 在 ParkStatus 非 0 → 0 时置的),
+         *                 上报空串把平台上的旧图清掉, 否则车位空了 App 还在画
+         *                 上一辆车的图(App 侧另有 isFree 兜底, 双保险).
+         * 清空动作刻意不与车牌同批: 万一平台不接受空串而拒收整条报文, 不会
+         * 连累同批那张"车已离开"的车牌, 等下一批(plateNeedPost 已清)再清图 */
+        if (nd.thumbNeedPost)
         {
-            props[SUB_PROP_PLATE_THUMB]["value"] =
-                base64Encode(nd.thumb, sizeof(nd.thumb));   /* 282B → 376 字符 */
-            thumbPosted[thumbPostedCount++] = slots[k];
+            if (!nd.thumbValid)
+            {
+                if (!nd.plateNeedPost)
+                {
+                    props[SUB_PROP_PLATE_THUMB]["value"] = "";
+                    thumbPosted[thumbPostedCount++] = slots[k];
+                }
+            }
+            else
+            {
+                props[SUB_PROP_PLATE_THUMB]["value"] =
+                    base64Encode(nd.thumb, sizeof(nd.thumb));   /* 282B → 376 字符 */
+                thumbPosted[thumbPostedCount++] = slots[k];
+            }
         }
     }
 

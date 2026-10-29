@@ -336,18 +336,25 @@ class _SpotDetailPageState extends State<SpotDetailPage> {
                       color: AppColors.textSecondary,
                     ),
                   ),
-                  /* ② 证据组: 识别依据 (摄像头原图 → 置信度 → 时间),
-                   *    与结果上下紧邻, 视线垂直下移即可对照 */
-                  if (spot.hasPlate) ...[
-                    if (spot.hasPlateThumb) ...[
-                      const SizedBox(height: 14),
-                      PlateThumbView(base64Data: spot.plateThumb!),
-                      const SizedBox(height: 4),
-                      const Text(
-                        '识别依据 · 摄像头原图',
-                        style: TextStyle(fontSize: 11, color: AppColors.textSecondary),
+                  /* ② 证据组: 摄像头原图 (识别依据 / 待人工审核) → 置信度 → 时间,
+                   *    与结果上下紧邻, 视线垂直下移即可对照.
+                   *    ⭐ S6: 图不再挂在 hasPlate 里 —— 未识别('-')的帧也有图,
+                   *    那正是"人工审核"的唯一依据, 必须独立显示. */
+                  if (spot.hasPlateThumb) ...[
+                    const SizedBox(height: 14),
+                    PlateThumbView(base64Data: spot.plateThumb!),
+                    const SizedBox(height: 4),
+                    Text(
+                      spot.thumbNeedsReview ? '待人工审核 · 摄像头原图' : '识别依据 · 摄像头原图',
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: spot.thumbNeedsReview
+                            ? AppColors.warning
+                            : AppColors.textSecondary,
                       ),
-                    ],
+                    ),
+                  ],
+                  if (spot.hasPlate) ...[
                     const SizedBox(height: 8),
                     SizedBox(
                       width: double.infinity,
@@ -464,13 +471,19 @@ class _SpotDetailPageState extends State<SpotDetailPage> {
       );
     }
     if (spot.plateUnrecognized) {
-      // '-' : 拍到但没认出 → 引导靠近/换角度重拍 (修正入口在动作组)
-      return const Column(
+      // '-' : 拍到但没认出 → 有图时引导"对照原图人工录入", 没图时才建议重拍
+      // ⭐ S6: 未识别帧也会回传缩略图, 有图就不该再说"没拍到/请靠近重拍"
+      final hasThumb = spot.hasPlateThumb;
+      return Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(Icons.no_photography_outlined, size: 42, color: AppColors.textSecondary),
-          SizedBox(height: 8),
-          Text(
+          Icon(
+            hasThumb ? Icons.manage_search_outlined : Icons.no_photography_outlined,
+            size: 42,
+            color: AppColors.textSecondary,
+          ),
+          const SizedBox(height: 8),
+          const Text(
             '未识别到车牌',
             style: TextStyle(
               fontSize: 14,
@@ -478,10 +491,10 @@ class _SpotDetailPageState extends State<SpotDetailPage> {
               color: AppColors.textSecondary,
             ),
           ),
-          SizedBox(height: 4),
+          const SizedBox(height: 4),
           Text(
-            '请靠近或更换角度后重试',
-            style: TextStyle(fontSize: 12, color: AppColors.textSecondary),
+            hasThumb ? '模型未认出，可对照下方原图人工录入' : '请靠近或更换角度后重试',
+            style: const TextStyle(fontSize: 12, color: AppColors.textSecondary),
           ),
         ],
       );
